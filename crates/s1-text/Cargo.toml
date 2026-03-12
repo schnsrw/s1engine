@@ -8,7 +8,12 @@ license.workspace = true
 
 [dependencies]
 s1-model = { workspace = true }
-# harfbuzz-rs, freetype-rs, fontdb, unicode-bidi, unicode-linebreak — added in Phase 3
+thiserror = { workspace = true }
+rustybuzz = "0.20"
+ttf-parser = "0.25"
+fontdb = "0.23"
+unicode-bidi = "0.3"
+unicode-linebreak = "0.1"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

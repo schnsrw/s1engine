@@ -10,7 +10,8 @@ license.workspace = true
 s1-model = { workspace = true }
 s1-format-docx = { workspace = true }
 s1-format-odt = { workspace = true }
-# cfb — added in Phase 3
+thiserror = { workspace = true }
+cfb = "0.10"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

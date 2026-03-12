@@ -9,7 +9,12 @@ license.workspace = true
 [dependencies]
 s1-model = { workspace = true }
 s1-layout = { workspace = true }
-# pdf-writer, subsetter, image — added in Phase 3
+s1-text = { workspace = true }
+thiserror = { workspace = true }
+pdf-writer = "0.14"
+subsetter = "0.2"
+miniz_oxide = "0.8"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+fontdb = "0.23"

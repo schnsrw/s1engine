@@ -8,7 +8,9 @@ license.workspace = true
 
 [dependencies]
 s1-model = { workspace = true }
-# s1-text — added in Phase 3
+s1-text = { workspace = true }
+thiserror = { workspace = true }
+fontdb = "0.23"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

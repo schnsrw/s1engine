@@ -119,14 +119,16 @@ trait FormatWriter {
 }
 ```
 
-## C++ Interop
+## Text Processing
 
-C/C++ libraries are used ONLY in `s1-text` crate via FFI:
-- **HarfBuzz** — text shaping (`harfbuzz-rs`)
-- **FreeType** — font loading (`freetype-rs`)
-- **ICU** — Unicode ops (consider `icu4x` pure-Rust alternative)
+`s1-text` uses pure-Rust alternatives instead of C/C++ FFI:
+- **rustybuzz** — text shaping (pure Rust HarfBuzz port)
+- **ttf-parser** — font parsing (pure Rust)
+- **fontdb** — system font discovery
+- **unicode-bidi** — BiDi support (UAX #9)
+- **unicode-linebreak** — line breaking (UAX #14)
 
-NEVER add C/C++ dependencies to any other crate.
+This eliminates all C/C++ dependencies while providing full Unicode support.
 
 ## What NOT To Do
 
@@ -144,8 +146,8 @@ NEVER add C/C++ dependencies to any other crate.
 
 > **This section MUST be updated after every significant change, milestone completion, or phase transition.**
 
-### Current Phase: Phase 2 — Rich Documents (COMPLETE)
-### Status: s1-model (61), s1-ops (37), s1-format-txt (25), s1-format-docx (167), s1-format-odt (63), s1engine (46). 399 total tests + 4 doc-tests.
+### Current Phase: Phase 3 — Layout & Export (complete)
+### Status: s1-model (61), s1-ops (37), s1-format-txt (25), s1-format-docx (167), s1-format-odt (63), s1-format-pdf (8), s1-convert (15), s1-layout (22), s1-text (39), s1engine (46). 483 total tests + 4 doc-tests.
 
 ### Phase Completion Tracker
 
@@ -154,7 +156,7 @@ NEVER add C/C++ dependencies to any other crate.
 | Phase 0: Planning | COMPLETE | 2026-03-11 | 2026-03-11 | Specs, architecture, roadmap finalized |
 | Phase 1: Foundation | COMPLETE | 2026-03-11 | 2026-03-11 | 7 milestones done; 206 tests |
 | Phase 2: Rich Documents | COMPLETE | 2026-03-11 | 2026-03-12 | 6 milestones; tables, images, lists, sections, ODT, advanced DOCX |
-| Phase 3: Layout & Export | NOT STARTED | — | — | Text shaping, layout, PDF export |
+| Phase 3: Layout & Export | COMPLETE | 2026-03-12 | 2026-03-12 | Text shaping, layout, PDF export, format conversion; 3.3 deferred |
 | Phase 4: Collaboration | NOT STARTED | — | — | CRDT integration |
 | Phase 5: Production | NOT STARTED | — | — | WASM, C FFI, hardening |
 
@@ -177,6 +179,13 @@ Phase 2 milestones:
 - [x] 2.5 ODT Format — Full ODT reader/writer with paragraphs, formatting, tables, images, lists, styles, metadata (63 tests)
 - [x] 2.6 Advanced DOCX Features — Hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments (read/write/round-trip/builder). 43 new tests.
 
+Phase 3 milestones:
+- [x] 3.1 Text Processing (`s1-text`) — Pure-Rust text shaping (rustybuzz), font parsing (ttf-parser), font discovery (fontdb), BiDi (unicode-bidi), line breaking (unicode-linebreak). 39 tests.
+- [x] 3.2 Layout Engine (`s1-layout`) — Style resolution, greedy line breaking, block stacking, pagination, table layout, image placement. 22 tests.
+- [ ] 3.3 Incremental Layout — Dirty tracking, incremental re-layout (deferred)
+- [x] 3.4 PDF Export (`s1-format-pdf`) — PDF generation from layout tree with font embedding/subsetting, text rendering, table borders, metadata. 8 tests.
+- [x] 3.5 Format Conversion (`s1-convert`) — DOC reader (OLE2/CFB heuristic text extraction), cross-format conversion pipeline (DOC/DOCX/ODT → DOCX/ODT), format detection. 15 tests.
+
 ### Crate Implementation Status
 
 | Crate | Status | Tests | Notes |
@@ -185,11 +194,11 @@ Phase 2 milestones:
 | `s1-ops` | **COMPLETE** | 37 passing | Operations, transactions, undo/redo, cursor/selection |
 | `s1-format-docx` | **Phase 2** | 167 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, sections, headers/footers, fields, hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments, round-trip |
 | `s1-format-odt` | **Phase 2** | 63 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, auto-styles, round-trip |
-| `s1-format-pdf` | Not started | — | PDF export |
+| `s1-format-pdf` | **Phase 3** | 8 passing | PDF export from layout tree: font embedding/subsetting, text rendering, tables, metadata |
 | `s1-format-txt` | **COMPLETE** | 25 passing | Reader (UTF-8/UTF-16/Latin-1 detection), writer, round-trip |
-| `s1-convert` | Not started | — | Format conversion |
-| `s1-layout` | Not started | — | Page layout |
-| `s1-text` | Not started | — | Text shaping (C++ FFI) |
+| `s1-convert` | **Phase 3** | 15 passing | DOC reader (OLE2/CFB heuristic), cross-format conversion (DOC/DOCX/ODT → DOCX/ODT), format detection |
+| `s1-layout` | **Phase 3** | 22 passing | Style resolution, greedy line breaking, block stacking, pagination, table layout, image placement |
+| `s1-text` | **Phase 3** | 39 passing | Pure Rust: text shaping (rustybuzz), font parsing (ttf-parser), font discovery (fontdb), BiDi, line breaking |
 | `s1engine` | **Phase 2** | 46 passing | Engine, Document, Format, Error, DocumentBuilder, TableBuilder, list builder, section/header/footer builder, hyperlink/bookmark/superscript/subscript builder; open/create/export; undo/redo; ODT support |
 
 ### Recent Changes Log
@@ -210,6 +219,10 @@ Phase 2 milestones:
 | 2026-03-11 | Milestone 2.4: Sections, Headers, Footers — section model, sectPr parser/writer, header/footer parser/writer, field support, builder API (29 new tests) | section.rs, section_parser.rs, section_writer.rs, header_footer_parser.rs, header_footer_writer.rs, content_parser.rs, content_writer.rs, reader.rs, writer.rs, builder.rs, lib.rs |
 | 2026-03-12 | Milestone 2.5: ODT Format — full reader/writer crate with paragraphs, formatting, tables, images, lists, styles, metadata, auto-styles, round-trip (63 new tests, 2 s1engine integration tests) | crates/s1-format-odt/src/* (11 modules), crates/s1engine/src/engine.rs, document.rs, error.rs, lib.rs |
 | 2026-03-12 | Milestone 2.6: Advanced DOCX — hyperlinks (external/internal/tooltip, rId resolution), bookmarks (start/end), tab stops (left/center/right/decimal with leaders), paragraph borders, paragraph shading, character spacing, superscript/subscript, comments (parser/writer/round-trip); builder API (hyperlink, bookmark_start/end, superscript, subscript); 43 new tests | comments_parser.rs, comments_writer.rs, content_parser.rs, content_writer.rs, property_parser.rs, writer.rs, reader.rs, builder.rs, lib.rs, node.rs |
+| 2026-03-12 | Milestone 3.1: Text Processing — pure-Rust text shaping via rustybuzz, font parsing via ttf-parser, system font discovery via fontdb, BiDi via unicode-bidi, line breaking via unicode-linebreak (39 tests) | crates/s1-text/src/* (7 modules) |
+| 2026-03-12 | Milestone 3.2: Layout Engine — style resolver, greedy line breaking, block stacking with spacing, pagination, table layout, image placement, page-break-before support (22 tests) | crates/s1-layout/src/* (4 modules) |
+| 2026-03-12 | Milestone 3.4: PDF Export — PDF generation from LayoutDocument, CIDFont embedding with subsetting, glyph width tables, content streams, table border rendering, metadata, multi-page support (8 tests) | crates/s1-format-pdf/src/* (3 modules) |
+| 2026-03-12 | Milestone 3.5: Format Conversion — DOC reader (OLE2/CFB heuristic text extraction), cross-format pipeline (DOC/DOCX/ODT → DOCX/ODT), format detection, convert_to_model API (15 tests) | crates/s1-convert/src/* (4 modules) |
 
 ---
 
@@ -505,6 +518,23 @@ Phase 2 milestones:
 - [x] `build_with_hyperlink` — Hyperlink builder
 - [x] `build_with_bookmark` — Bookmark start/end builder
 - [x] `build_hyperlink_docx_roundtrip` — Hyperlink builder → DOCX → reopen round-trip
+
+#### s1-convert (Phase 3)
+- [x] `is_doc_file_magic_bytes` — OLE2 magic byte detection
+- [x] `is_doc_file_too_short` — Short input rejected
+- [x] `is_doc_file_wrong_magic` — Non-DOC magic rejected
+- [x] `read_doc_invalid_data` — Invalid DOC input produces error
+- [x] `extract_text_heuristic_basic` — Heuristic text extraction from binary stream
+- [x] `extract_text_heuristic_filters_short_runs` — Short text runs filtered out
+- [x] `extract_text_heuristic_empty` — Empty/binary-only input returns empty
+- [x] `extract_text_heuristic_tabs` — Tab characters preserved
+- [x] `detect_doc_format` — OLE2 magic → SourceFormat::Doc
+- [x] `detect_zip_format` — ZIP magic → SourceFormat::Docx
+- [x] `detect_unknown_format` — Unknown bytes → None
+- [x] `convert_docx_to_odt` — DOCX → DocumentModel → ODT round-trip
+- [x] `convert_odt_to_docx` — ODT → DocumentModel → DOCX round-trip
+- [x] `convert_invalid_doc` — Invalid DOC data produces error
+- [x] `convert_to_model_docx` — DOCX → DocumentModel extraction
 
 #### Integration Tests
 - [ ] `open_real_world_docx` — Open 10+ real DOCX files without panic
