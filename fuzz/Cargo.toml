@@ -1,0 +1,56 @@
+[package]
+name = "s1engine-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+s1-format-docx = { path = "../crates/s1-format-docx" }
+s1-format-odt = { path = "../crates/s1-format-odt" }
+s1-format-txt = { path = "../crates/s1-format-txt" }
+s1-convert = { path = "../crates/s1-convert" }
+s1engine = { path = "../crates/s1engine", features = ["docx", "odt", "txt"] }
+
+# Prevent this from interfering with workspace
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_docx_reader"
+path = "fuzz_targets/fuzz_docx_reader.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_odt_reader"
+path = "fuzz_targets/fuzz_odt_reader.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_txt_reader"
+path = "fuzz_targets/fuzz_txt_reader.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_doc_reader"
+path = "fuzz_targets/fuzz_doc_reader.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_engine_open"
+path = "fuzz_targets/fuzz_engine_open.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_format_roundtrip"
+path = "fuzz_targets/fuzz_format_roundtrip.rs"
+test = false
+doc = false

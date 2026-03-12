@@ -70,6 +70,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Text insert/delete uses character offsets (not byte offsets) for Unicode safety
 - Tree moves reject cycles (moving a node under its own descendant)
 
+### Performance Baselines
+
+Measured via criterion on a single core (representative, not a guarantee):
+
+| Operation | Time |
+|---|---|
+| Create empty document | ~113 ns |
+| Builder (small, 4 elements) | ~2.6 us |
+| Builder (50 sections) | ~67 us |
+| Builder (20-row table) | ~38 us |
+| Open DOCX (small) | ~34 us |
+| Open DOCX (50 sections) | ~146 us |
+| Open ODT (small) | ~31 us |
+| Export DOCX (small) | ~79 us |
+| Export DOCX (50 sections) | ~142 us |
+| Export ODT (small) | ~54 us |
+| Export TXT (50 sections) | ~12 us |
+| DOCX round-trip (small) | ~124 us |
+| Undo/redo 10 operations | ~7.2 us |
+
 ## [0.1.0] - Unreleased
 
 Initial development release. Not yet published to crates.io.

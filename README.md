@@ -59,7 +59,7 @@ println!("Paragraphs: {}", doc.paragraph_count());
 ### Create a Document
 
 ```rust
-use s1engine::DocumentBuilder;
+use s1engine::{DocumentBuilder, Format};
 
 let doc = DocumentBuilder::new()
     .title("My Report")
@@ -133,21 +133,84 @@ s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
 | `ffi/wasm` | WASM bindings (wasm-bindgen) | 12 |
 | `ffi/c` | C FFI bindings (opaque handles) | 10 |
 
-## Format Support
+## Format Support Matrix
+
+Detailed per-feature support across all document formats. Classification key:
+
+- **Full** -- read + write with round-trip fidelity
+- **Read** -- read only (data imported but not written back in this format)
+- **Write** -- write/export only
+- **Partial** -- some aspects work (see notes)
+- **Lossy** -- data survives but loses fidelity
+- **--** -- not supported
+
+### General
+
+| Capability | DOCX | ODT | PDF | TXT | DOC (legacy) |
+|---|---|---|---|---|---|
+| Read | Yes | Yes | -- | Yes | Text only |
+| Write | Yes | Yes | Export only | Yes | -- |
+| Round-trip | Yes | Yes | -- | Yes | -- |
+
+### Block-Level Content
 
 | Feature | DOCX | ODT | PDF | TXT | DOC |
 |---|---|---|---|---|---|
-| Read | Full | Full | -- | Full | Text only |
-| Write | Full | Full | Export | Full | -- |
-| Round-trip | Yes | Yes | -- | Yes | -- |
-| Tables | Yes | Yes | Yes | Tab-separated | -- |
-| Images | Yes | Yes | Yes | -- | -- |
-| Lists | Yes | Yes | -- | -- | -- |
-| Styles | Yes | Yes | -- | -- | -- |
-| Headers/Footers | Yes | -- | Yes | -- | -- |
-| Hyperlinks | Yes | -- | Yes | -- | -- |
-| Comments | Yes | -- | -- | -- | -- |
-| Metadata | Yes | Yes | Yes | -- | -- |
+| Paragraphs (text) | Full | Full | Write | Lossy | Partial |
+| Paragraph alignment | Full | Full | Write | -- | -- |
+| Paragraph spacing | Full | Full | Write | -- | -- |
+| Paragraph indent | Full | Full | Write | -- | -- |
+| Headings / styles | Full | Full | Write | -- | -- |
+| Tables (basic) | Full | Full | Write | Lossy (tab-separated) | -- |
+| Tables (merged cells) | Full | Full | Write | -- | -- |
+| Tables (nested) | Full | -- | Write | -- | -- |
+| Lists (bullet) | Full | Full | -- | -- | -- |
+| Lists (numbered) | Full | Full | -- | -- | -- |
+| Lists (multilevel) | Full | Full | -- | -- | -- |
+| Page breaks | Full | Full | Write | -- | -- |
+| Sections (page size, margins) | Full | -- | Write | -- | -- |
+| Sections (orientation) | Full | -- | Write | -- | -- |
+| Headers / footers | Full | -- | Write | -- | -- |
+
+### Inline / Character-Level Content
+
+| Feature | DOCX | ODT | PDF | TXT | DOC |
+|---|---|---|---|---|---|
+| Bold / italic | Full | Full | Write | -- | -- |
+| Underline | Full | Full | Write | -- | -- |
+| Font family | Full | Full | Write | -- | -- |
+| Font size | Full | Full | Write | -- | -- |
+| Font color | Full | Full | Write | -- | -- |
+| Strikethrough | Full | Full | -- | -- | -- |
+| Highlight color | Full | Full | -- | -- | -- |
+| Superscript / subscript | Full | -- | -- | -- | -- |
+| Character spacing | Full | -- | -- | -- | -- |
+| Line breaks | Full | Full | Write | -- | -- |
+| Tab characters | Full | Full | Write | Lossy | Partial |
+| Images (inline) | Full | Full | Write | -- | -- |
+| Images (floating/anchored) | Read | -- | -- | -- | -- |
+| Hyperlinks (external) | Full | Partial (text only, URL lost) | Write | -- | -- |
+| Hyperlinks (internal anchor) | Full | -- | -- | -- | -- |
+| Bookmarks | Full | -- | Write | -- | -- |
+
+### Document-Level Features
+
+| Feature | DOCX | ODT | PDF | TXT | DOC |
+|---|---|---|---|---|---|
+| Metadata (title, author) | Full | Full | Write | -- | -- |
+| Comments | Full | -- | -- | -- | -- |
+| Tab stops (custom positions) | Full | -- | -- | -- | -- |
+| Paragraph borders | Full | -- | -- | -- | -- |
+| Paragraph shading | Full | -- | -- | -- | -- |
+| Style inheritance | Full | Full | -- | -- | -- |
+
+### Notes
+
+- **DOCX**: Most complete format support. Floating images are read into the model but written back as inline.
+- **ODT**: Hyperlink elements (`text:a`) are parsed but the URL is not preserved -- only the visible text survives. No support for bookmarks, comments, headers/footers, or sections.
+- **PDF**: Export-only path: DocumentModel passes through the layout engine (`s1-layout`) before PDF generation. Supports font embedding with subsetting, table borders, image embedding, hyperlink annotations, and document outline (bookmarks).
+- **TXT**: Inherently lossy -- all formatting, styles, and structure are stripped. Tables render as tab-separated columns. Encoding detection supports UTF-8, UTF-16 LE/BE (BOM), and Latin-1 fallback.
+- **DOC**: Legacy binary format read via heuristic text extraction (`s1-convert`). Only paragraph text and tabs are extracted. No formatting, tables, images, or other structures.
 
 ## Documentation
 

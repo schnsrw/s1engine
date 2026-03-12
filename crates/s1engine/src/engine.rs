@@ -52,6 +52,11 @@ impl Engine {
                 let result = s1_format_txt::read(data)?;
                 result.document
             }
+            #[cfg(feature = "convert")]
+            Format::Doc => {
+                s1_convert::doc_reader::read_doc(data)
+                    .map_err(|e| Error::Format(e.to_string()))?
+            }
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(Error::UnsupportedFormat(format!(

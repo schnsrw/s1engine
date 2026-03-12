@@ -354,6 +354,7 @@ fn parse_format(s: &str) -> Option<s1engine::Format> {
         "odt" => Some(s1engine::Format::Odt),
         "pdf" => Some(s1engine::Format::Pdf),
         "txt" | "text" => Some(s1engine::Format::Txt),
+        "doc" => Some(s1engine::Format::Doc),
         _ => None,
     }
 }

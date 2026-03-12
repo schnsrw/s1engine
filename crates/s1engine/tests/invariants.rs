@@ -6,7 +6,8 @@
 //! - cross-format text preservation
 //! - builder output consistency
 
-use s1engine::{DocumentBuilder, Engine, Format, Operation};
+use pretty_assertions::assert_eq;
+use s1engine::{DocumentBuilder, Engine, Format, NodeType, Operation};
 
 // ─── Undo/Redo Invariants ───────────────────────────────────────────
 
@@ -342,4 +343,238 @@ fn unicode_text_survives_docx_roundtrip() {
     let reopened = engine.open(&docx).unwrap();
 
     assert_eq!(original, reopened.to_plain_text(), "Unicode text must survive DOCX roundtrip");
+}
+
+// --- Public Contract Semantics -----------------------------------------
+
+/// `paragraph_ids()` must only return top-level body paragraphs, not
+/// paragraphs nested inside table cells.
+#[test]
+fn paragraph_ids_excludes_table_paragraphs() {
+    let doc = DocumentBuilder::new()
+        .paragraph(|p| p.text("Top-level paragraph"))
+        .table(|t| {
+            t.row(|r| r.cell("Cell A1").cell("Cell B1"))
+                .row(|r| r.cell("Cell A2").cell("Cell B2"))
+        })
+        .build();
+
+    // The body has two direct children: one Paragraph and one Table.
+    // The Table contains 4 cells, each holding a paragraph, but those
+    // must NOT appear in paragraph_ids().
+    let para_ids = doc.paragraph_ids();
+    assert_eq!(
+        para_ids.len(),
+        1,
+        "paragraph_ids() must return only the 1 top-level paragraph, not the 4 inside table cells"
+    );
+
+    // Verify that the single returned paragraph is indeed the top-level one.
+    let para = doc.node(para_ids[0]).unwrap();
+    assert_eq!(para.node_type, NodeType::Paragraph);
+}
+
+/// `paragraph_ids()` must only return body paragraphs, not paragraphs
+/// that live inside header or footer nodes.
+#[test]
+fn paragraph_ids_excludes_header_footer_paragraphs() {
+    let doc = DocumentBuilder::new()
+        .paragraph(|p| p.text("Body paragraph 1"))
+        .paragraph(|p| p.text("Body paragraph 2"))
+        .section_with_header_footer("Header text", "Footer text")
+        .build();
+
+    // The header and footer each contain a paragraph, but those
+    // paragraphs are children of the Header/Footer nodes (under root),
+    // not children of the Body node.
+    let para_ids = doc.paragraph_ids();
+    assert_eq!(
+        para_ids.len(),
+        2,
+        "paragraph_ids() must return only the 2 body paragraphs, not header/footer paragraphs"
+    );
+}
+
+/// Text must be preserved across a full DOCX -> ODT -> TXT conversion chain.
+#[test]
+fn cross_format_docx_odt_txt_text_preservation() {
+    let original_text = "Hello from the document builder";
+
+    let doc = DocumentBuilder::new()
+        .paragraph(|p| p.text(original_text))
+        .build();
+
+    let engine = Engine::new();
+
+    // Step 1: export to DOCX, reopen
+    let docx_bytes = doc.export(Format::Docx).unwrap();
+    let from_docx = engine.open(&docx_bytes).unwrap();
+    assert_eq!(
+        from_docx.to_plain_text(),
+        original_text,
+        "Text must survive DOCX export/reopen"
+    );
+
+    // Step 2: export to ODT, reopen
+    let odt_bytes = from_docx.export(Format::Odt).unwrap();
+    let from_odt = engine.open(&odt_bytes).unwrap();
+    assert_eq!(
+        from_odt.to_plain_text(),
+        original_text,
+        "Text must survive ODT export/reopen after DOCX"
+    );
+
+    // Step 3: export to TXT
+    let txt_bytes = from_odt.export(Format::Txt).unwrap();
+    let from_txt = engine.open_as(&txt_bytes, Format::Txt).unwrap();
+    assert_eq!(
+        from_txt.to_plain_text().trim(),
+        original_text,
+        "Text must survive TXT export/reopen after ODT"
+    );
+}
+
+/// Every `Format` variant must report a correct MIME type and extension.
+#[test]
+fn export_format_mime_types() {
+    let cases: Vec<(Format, &str, &str)> = vec![
+        (
+            Format::Docx,
+            "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        (
+            Format::Odt,
+            "odt",
+            "application/vnd.oasis.opendocument.text",
+        ),
+        (Format::Pdf, "pdf", "application/pdf"),
+        (Format::Txt, "txt", "text/plain"),
+        (Format::Doc, "doc", "application/msword"),
+    ];
+
+    for (fmt, expected_ext, expected_mime) in cases {
+        assert_eq!(
+            fmt.extension(),
+            expected_ext,
+            "{:?} extension mismatch",
+            fmt
+        );
+        assert_eq!(
+            fmt.mime_type(),
+            expected_mime,
+            "{:?} MIME type mismatch",
+            fmt
+        );
+    }
+}
+
+/// `paragraph_count()` must match the number of top-level paragraphs
+/// added via the builder, excluding table cell paragraphs.
+#[test]
+fn ffi_parity_paragraph_count() {
+    // 3 top-level paragraphs + 1 table with 2x2 cells (4 inner paragraphs)
+    let doc = DocumentBuilder::new()
+        .text("Para 1")
+        .text("Para 2")
+        .table(|t| {
+            t.row(|r| r.cell("A").cell("B"))
+                .row(|r| r.cell("C").cell("D"))
+        })
+        .text("Para 3")
+        .build();
+
+    assert_eq!(
+        doc.paragraph_count(),
+        3,
+        "paragraph_count() must equal the number of top-level paragraphs (3), not include table cell paragraphs"
+    );
+    assert_eq!(
+        doc.paragraph_ids().len(),
+        doc.paragraph_count(),
+        "paragraph_ids().len() and paragraph_count() must agree"
+    );
+}
+
+/// Metadata (title, author) set via the builder must survive a DOCX
+/// and ODT round-trip.
+#[test]
+fn builder_metadata_survives_all_formats() {
+    let doc = DocumentBuilder::new()
+        .title("My Title")
+        .author("Jane Doe")
+        .text("Content")
+        .build();
+
+    // DOCX round-trip
+    let docx_bytes = doc.export(Format::Docx).unwrap();
+    let engine = Engine::new();
+    let from_docx = engine.open(&docx_bytes).unwrap();
+    assert_eq!(
+        from_docx.metadata().title.as_deref(),
+        Some("My Title"),
+        "Title must survive DOCX round-trip"
+    );
+    assert_eq!(
+        from_docx.metadata().creator.as_deref(),
+        Some("Jane Doe"),
+        "Author must survive DOCX round-trip"
+    );
+
+    // ODT round-trip
+    let odt_bytes = doc.export(Format::Odt).unwrap();
+    let from_odt = engine.open_as(&odt_bytes, Format::Odt).unwrap();
+    assert_eq!(
+        from_odt.metadata().title.as_deref(),
+        Some("My Title"),
+        "Title must survive ODT round-trip"
+    );
+    assert_eq!(
+        from_odt.metadata().creator.as_deref(),
+        Some("Jane Doe"),
+        "Author must survive ODT round-trip"
+    );
+}
+
+/// An empty document (created via `Engine::create()`) must export
+/// successfully to every writable format.
+#[test]
+fn empty_document_exports_all_formats() {
+    let engine = Engine::new();
+    let doc = engine.create();
+
+    let docx_result = doc.export(Format::Docx);
+    assert!(
+        docx_result.is_ok(),
+        "Empty doc DOCX export failed: {:?}",
+        docx_result.err()
+    );
+
+    let odt_result = doc.export(Format::Odt);
+    assert!(
+        odt_result.is_ok(),
+        "Empty doc ODT export failed: {:?}",
+        odt_result.err()
+    );
+
+    let txt_result = doc.export(Format::Txt);
+    assert!(
+        txt_result.is_ok(),
+        "Empty doc TXT export failed: {:?}",
+        txt_result.err()
+    );
+}
+
+/// Attempting to open plain text bytes as DOCX must return an error,
+/// not panic.
+#[test]
+fn open_as_wrong_format_returns_error() {
+    let engine = Engine::new();
+    let txt_data = b"This is plain text, not a ZIP/DOCX file.";
+
+    let result = engine.open_as(txt_data, Format::Docx);
+    assert!(
+        result.is_err(),
+        "Opening plain text as DOCX must return an error, not succeed or panic"
+    );
 }

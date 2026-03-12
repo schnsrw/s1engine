@@ -236,6 +236,7 @@ fn parse_format(format: &str) -> Result<s1engine::Format, JsError> {
         "odt" => Ok(s1engine::Format::Odt),
         "pdf" => Ok(s1engine::Format::Pdf),
         "txt" | "text" => Ok(s1engine::Format::Txt),
+        "doc" => Ok(s1engine::Format::Doc),
         _ => Err(JsError::new(&format!("Unsupported format: {format}"))),
     }
 }

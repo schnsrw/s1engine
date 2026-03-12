@@ -17,6 +17,8 @@ pub enum Format {
     Pdf,
     /// Plain text (`.txt`)
     Txt,
+    /// Legacy Microsoft Word binary (`.doc`) -- read only, requires `doc-legacy` feature
+    Doc,
 }
 
 impl Format {
@@ -30,6 +32,7 @@ impl Format {
             "odt" => Ok(Self::Odt),
             "pdf" => Ok(Self::Pdf),
             "txt" | "text" => Ok(Self::Txt),
+            "doc" => Ok(Self::Doc),
             _ => Err(Error::UnsupportedFormat(format!(
                 "Unknown file extension: .{ext}"
             ))),
@@ -64,6 +67,10 @@ impl Format {
             }
         } else if data.len() >= 4 && &data[0..4] == b"%PDF" {
             Self::Pdf
+        } else if data.len() >= 8
+            && data[0..8] == [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
+        {
+            Self::Doc
         } else {
             Self::Txt
         }
@@ -76,6 +83,7 @@ impl Format {
             Self::Odt => "odt",
             Self::Pdf => "pdf",
             Self::Txt => "txt",
+            Self::Doc => "doc",
         }
     }
 
@@ -86,6 +94,7 @@ impl Format {
             Self::Odt => "application/vnd.oasis.opendocument.text",
             Self::Pdf => "application/pdf",
             Self::Txt => "text/plain",
+            Self::Doc => "application/msword",
         }
     }
 }
@@ -165,5 +174,21 @@ mod tests {
     fn format_mime_type() {
         assert!(Format::Docx.mime_type().contains("wordprocessingml"));
         assert_eq!(Format::Txt.mime_type(), "text/plain");
+        assert_eq!(Format::Doc.mime_type(), "application/msword");
+    }
+
+    #[test]
+    fn detect_from_bytes_doc() {
+        let ole2 = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+        assert_eq!(Format::detect(&ole2), Format::Doc);
+    }
+
+    #[test]
+    fn detect_doc_extension() {
+        assert_eq!(
+            Format::from_extension(OsStr::new("doc")).unwrap(),
+            Format::Doc
+        );
+        assert_eq!(Format::Doc.extension(), "doc");
     }
 }

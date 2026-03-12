@@ -188,7 +188,7 @@ fn bench_roundtrip_docx(c: &mut Criterion) {
 }
 
 fn bench_undo_redo(c: &mut Criterion) {
-    use s1_ops::{Operation, Transaction};
+    use s1_ops::Operation;
 
     c.bench_function("undo_redo_10_ops", |b| {
         b.iter(|| {
