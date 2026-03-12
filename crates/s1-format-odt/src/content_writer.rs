@@ -111,7 +111,9 @@ fn write_body(
                     let target_level = info.level;
 
                     // Close list levels that are deeper than target
-                    while list_stack.last().copied().unwrap_or(255) > target_level {
+                    while !list_stack.is_empty()
+                        && list_stack.last().copied().unwrap_or(0) > target_level
+                    {
                         xml.push_str("</text:list-item></text:list>");
                         list_stack.pop();
                     }

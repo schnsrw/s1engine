@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>s1engine Demo</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --text-muted: #888;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --success: #22c55e;
+    --error: #ef4444;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  header h1 span { color: var(--accent); }
+
+  header .badge {
+    font-size: 0.7rem;
+    background: var(--accent);
+    color: white;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    font-weight: 500;
+  }
+
+  .status-bar {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0.5rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 2rem;
+  }
+
+  .status-bar .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+  }
+
+  .dot.green { background: var(--success); }
+  .dot.yellow { background: #eab308; }
+
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: calc(100vh - 5.5rem);
+  }
+
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 1.5rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .sidebar h2 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .action-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  button {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.6rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  button:hover {
+    border-color: var(--accent);
+    background: #1a1a2e;
+  }
+
+  button:active { transform: scale(0.98); }
+
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  button.primary:hover { background: var(--accent-hover); }
+
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(59, 130, 246, 0.05);
+  }
+
+  .drop-zone input { display: none; }
+
+  .content-area {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    padding: 0 1rem;
+  }
+
+  .tab {
+    padding: 0.6rem 1rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  #text-output {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    color: var(--text);
+    min-height: 200px;
+  }
+
+  #text-output:empty::before {
+    content: 'Document text will appear here...';
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  #rich-output h1, #rich-output h2, #rich-output h3,
+  #rich-output h4, #rich-output h5, #rich-output h6 {
+    margin: 0.8em 0 0.4em;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  #rich-output h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  #rich-output h2 { font-size: 1.4rem; }
+  #rich-output h3 { font-size: 1.15rem; }
+  #rich-output p { margin: 0.5em 0; }
+  #rich-output table { border-collapse: collapse; margin: 1em 0; }
+  #rich-output td, #rich-output th { border: 1px solid var(--border); padding: 6px 10px; }
+  #rich-output img { max-width: 100%; border-radius: 4px; margin: 8px 0; }
+  #rich-output a { color: #58a6ff; }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }
+
+  .meta-grid .label {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .meta-grid .value {
+    color: var(--text);
+  }
+
+  .export-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .log {
+    font-family: monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  .log .entry { margin-bottom: 0.25rem; }
+  .log .time { color: #555; }
+  .log .ok { color: var(--success); }
+  .log .err { color: var(--error); }
+
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+  }
+
+  .empty-state h3 {
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+
+  .empty-state p { font-size: 0.85rem; }
+
+  select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; }
+    .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>s1</span>engine</h1>
+  <span class="badge">v1.0.0</span>
+</header>
+
+<div class="status-bar">
+  <span id="wasm-status"><span class="dot yellow"></span>Loading WASM...</span>
+  <span id="doc-status"><span class="dot yellow"></span>No document</span>
+  <span id="size-info"></span>
+</div>
+
+<main>
+  <aside class="sidebar">
+    <div>
+      <h2>Open Document</h2>
+      <div class="drop-zone" id="drop-zone">
+        <p>Drop a file here or click to browse</p>
+        <p style="margin-top:0.3rem;font-size:0.75rem">DOCX, ODT, TXT, Markdown</p>
+        <input type="file" id="file-input" accept=".docx,.odt,.txt,.md,.markdown,.text">
+      </div>
+    </div>
+
+    <div>
+      <h2>Create Document</h2>
+      <div class="action-group">
+        <button onclick="createSampleReport()">Sample Report</button>
+        <button onclick="createSampleLetter()">Sample Letter</button>
+        <button onclick="createSampleTable()">Table Demo</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Export</h2>
+      <div class="export-buttons">
+        <button onclick="exportAs('docx')">DOCX</button>
+        <button onclick="exportAs('odt')">ODT</button>
+        <button onclick="exportAs('txt')">TXT</button>
+        <button onclick="exportAs('md')">MD</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Convert</h2>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <select id="convert-format">
+          <option value="docx">DOCX</option>
+          <option value="odt">ODT</option>
+          <option value="txt">TXT</option>
+          <option value="md">Markdown</option>
+        </select>
+        <button onclick="convertAndReopen()" class="primary" style="flex:1">Convert & Reopen</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Self-Test</h2>
+      <div class="action-group">
+        <button onclick="runSelfTest()" class="primary">Run Format Tests</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+
+  <div class="content-area">
+    <div class="tabs">
+      <button class="tab active" data-tab="rich">Document</button>
+      <button class="tab" data-tab="text">Plain Text</button>
+      <button class="tab" data-tab="meta">Metadata</button>
+    </div>
+    <div class="tab-content">
+      <div id="tab-rich" class="tab-panel active">
+        <div id="empty-state" class="empty-state">
+          <h3>No document loaded</h3>
+          <p>Open a file or create a sample document to get started.</p>
+        </div>
+        <div id="rich-output" style="line-height:1.6;font-family:Georgia,serif"></div>
+      </div>
+      <div id="tab-text" class="tab-panel">
+        <div id="text-output"></div>
+      </div>
+      <div id="tab-meta" class="tab-panel">
+        <div class="meta-grid" id="meta-grid"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import init, {
+  WasmEngine,
+  WasmDocumentBuilder,
+  detect_format,
+} from './pkg/s1engine_wasm.js';
+
+let engine = null;
+let currentDoc = null;
+
+function log(msg, type = '') {
+  const el = document.getElementById('log');
+  const time = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : '';
+  el.innerHTML = `<div class="entry"><span class="time">${time}</span> <span class="${cls}">${msg}</span></div>` + el.innerHTML;
+}
+
+function updateDocStatus(name, paragraphs) {
+  document.getElementById('doc-status').innerHTML =
+    `<span class="dot green"></span>${name} (${paragraphs} paragraphs)`;
+}
+
+function clearDoc() {
+  document.getElementById('doc-status').innerHTML =
+    '<span class="dot yellow"></span>No document';
+  document.getElementById('text-output').textContent = '';
+  document.getElementById('rich-output').innerHTML = '';
+  document.getElementById('meta-grid').innerHTML = '';
+  document.getElementById('empty-state').style.display = 'block';
+  document.getElementById('size-info').textContent = '';
+  currentDoc = null;
+}
+
+function showDoc(doc, name) {
+  currentDoc = doc;
+  const text = doc.to_plain_text();
+  const count = doc.paragraph_count();
+  const title = doc.metadata_title();
+  const author = doc.metadata_author();
+
+  // Rich HTML view
+  try {
+    const html = doc.to_html();
+    document.getElementById('rich-output').innerHTML = html;
+  } catch (e) {
+    document.getElementById('rich-output').textContent = text;
+    console.error('to_html failed:', e);
+  }
+
+  // Plain text view
+  document.getElementById('text-output').textContent = text;
+  document.getElementById('empty-state').style.display = 'none';
+  updateDocStatus(name, count);
+
+  const metaHtml = [
+    ['Title', title || '(none)'],
+    ['Author', author || '(none)'],
+    ['Paragraphs', count],
+    ['Characters', text.length],
+    ['Words', text.trim() ? text.trim().split(/\s+/).length : 0],
+  ].map(([l, v]) => `<span class="label">${l}</span><span class="value">${v}</span>`).join('');
+  document.getElementById('meta-grid').innerHTML = metaHtml;
+}
+
+async function initialize() {
+  try {
+    await init();
+    engine = new WasmEngine();
+    document.getElementById('wasm-status').innerHTML =
+      '<span class="dot green"></span>WASM ready';
+    log('s1engine WASM initialized', 'ok');
+  } catch (e) {
+    document.getElementById('wasm-status').innerHTML =
+      '<span class="dot" style="background:var(--error)"></span>WASM failed';
+    log('Failed to load WASM: ' + e.message, 'err');
+  }
+}
+
+function getFormatFromName(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = { docx: 'docx', odt: 'odt', txt: 'txt', text: 'txt', md: 'md', markdown: 'md', doc: 'doc' };
+  return map[ext] || null;
+}
+
+function handleFile(file) {
+  if (!engine) { log('Engine not ready', 'err'); return; }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const fmt = getFormatFromName(file.name);
+      document.getElementById('size-info').textContent =
+        `${(data.length / 1024).toFixed(1)} KB`;
+      const t0 = performance.now();
+      let doc;
+      if (fmt) {
+        doc = engine.open_as(data, fmt);
+      } else {
+        doc = engine.open(data);
+      }
+      const ms = (performance.now() - t0).toFixed(1);
+      showDoc(doc, file.name);
+      log(`Opened ${file.name} (${fmt || 'auto'}) in ${ms}ms`, 'ok');
+    } catch (err) {
+      console.error('s1engine open failed:', err);
+      log('Open failed: ' + (err.message || String(err)), 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Drop zone
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// Expose to global scope for onclick handlers
+window.createSampleReport = function() {
+  if (!engine) return;
+  try {
+    const t0 = performance.now();
+    const doc = new WasmDocumentBuilder()
+      .title('Q4 Engineering Report')
+      .author('Engineering Team')
+      .heading(1, 'Q4 Engineering Report')
+      .text('This report summarizes the engineering achievements during Q4 2026.')
+      .heading(2, 'Key Metrics')
+      .text('Total commits: 1,247. Pull requests merged: 342. Test coverage: 94.2%.')
+      .text('Zero critical incidents. Average deploy time reduced by 38%.')
+      .heading(2, 'Notable Achievements')
+      .text('1. Migrated authentication service to the new identity platform.')
+      .text('2. Shipped real-time collaboration features ahead of schedule.')
+      .text('3. Reduced P99 API latency from 450ms to 120ms.')
+      .text('4. Completed SOC 2 Type II compliance audit.')
+      .heading(2, 'Looking Ahead')
+      .text('Q1 2027 will focus on scalability improvements and the mobile SDK launch.')
+      .build();
+    const ms = (performance.now() - t0).toFixed(1);
+    showDoc(doc, 'Sample Report');
+    log(`Created sample report in ${ms}ms`, 'ok');
+  } catch (e) { log('Create failed: ' + e.message, 'err'); }
+};
+
+window.createSampleLetter = function() {
+  if (!engine) return;
+  try {
+    const doc = new WasmDocumentBuilder()
+      .title('Business Letter')
+      .author('Jane Smith')
+      .heading(1, 'Acme Corporation')
+      .text('123 Innovation Drive')
+      .text('San Francisco, CA 94102')
+      .text('')
+      .text('March 13, 2026')
+      .text('')
+      .text('Dear Valued Partner,')
+      .text('')
+      .text('We are pleased to announce the release of s1engine v1.0.0, our document engine SDK built entirely in Rust. This milestone represents months of development delivering a production-ready library for document processing.')
+      .text('')
+      .text('The SDK supports reading, writing, and converting between DOCX, ODT, PDF, TXT, and Markdown formats. It includes CRDT-based collaborative editing primitives and runs in the browser via WebAssembly.')
+      .text('')
+      .text('We look forward to your feedback.')
+      .text('')
+      .text('Best regards,')
+      .text('Jane Smith')
+      .text('VP of Engineering')
+      .build();
+    showDoc(doc, 'Sample Letter');
+    log('Created sample letter', 'ok');
+  } catch (e) { log('Create failed: ' + e.message, 'err'); }
+};
+
+window.createSampleTable = function() {
+  if (!engine) return;
+  try {
+    const doc = new WasmDocumentBuilder()
+      .title('Format Support Matrix')
+      .author('s1engine')
+      .heading(1, 'Format Support Matrix')
+      .text('s1engine supports multiple document formats with varying levels of feature coverage:')
+      .text('')
+      .heading(2, 'Read/Write Support')
+      .text('DOCX: Full read/write with round-trip fidelity')
+      .text('ODT: Full read/write with round-trip fidelity')
+      .text('PDF: Export only (text, tables, images, hyperlinks, bookmarks)')
+      .text('TXT: Full read/write with encoding detection')
+      .text('Markdown: Full read/write (CommonMark + GFM)')
+      .text('')
+      .heading(2, 'Feature Highlights')
+      .text('- Bold, italic, underline, strikethrough formatting')
+      .text('- Tables with merged cells and nested tables')
+      .text('- Inline images (JPEG, PNG)')
+      .text('- Hyperlinks and bookmarks')
+      .text('- Headers, footers, and page numbering')
+      .text('- Comments and annotations')
+      .text('- CRDT-based collaborative editing')
+      .build();
+    showDoc(doc, 'Table Demo');
+    log('Created table demo', 'ok');
+  } catch (e) { log('Create failed: ' + e.message, 'err'); }
+};
+
+window.exportAs = function(format) {
+  if (!currentDoc) { log('No document to export', 'err'); return; }
+  try {
+    const t0 = performance.now();
+    const bytes = currentDoc.export(format);
+    const ms = (performance.now() - t0).toFixed(1);
+    const blob = new Blob([bytes], { type: getMime(format) });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `document.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    log(`Exported ${format.toUpperCase()} (${(bytes.length / 1024).toFixed(1)} KB) in ${ms}ms`, 'ok');
+  } catch (e) { log('Export failed: ' + e.message, 'err'); }
+};
+
+window.convertAndReopen = function() {
+  if (!currentDoc) { log('No document to convert', 'err'); return; }
+  const format = document.getElementById('convert-format').value;
+  try {
+    const t0 = performance.now();
+    const bytes = currentDoc.export(format);
+    const doc = engine.open_as(bytes, format);
+    const ms = (performance.now() - t0).toFixed(1);
+    showDoc(doc, `converted.${format}`);
+    log(`Converted to ${format.toUpperCase()} and reopened in ${ms}ms`, 'ok');
+  } catch (e) { log('Convert failed: ' + e.message, 'err'); }
+};
+
+window.runSelfTest = function() {
+  if (!engine) { log('Engine not ready', 'err'); return; }
+  let passed = 0;
+  let failed = 0;
+
+  function test(name, fn) {
+    try {
+      fn();
+      log(`PASS: ${name}`, 'ok');
+      passed++;
+    } catch (err) {
+      console.error(`FAIL: ${name}`, err);
+      log(`FAIL: ${name} - ${err.message || String(err)}`, 'err');
+      failed++;
+    }
+  }
+
+  // Test 1: Create document
+  test('Create document', () => {
+    const doc = engine.create();
+    if (!doc.is_valid()) throw new Error('Document not valid');
+  });
+
+  // Test 2: Builder
+  test('Builder creates document', () => {
+    const doc = new WasmDocumentBuilder()
+      .title('Test').author('Tester')
+      .heading(1, 'Hello').text('World')
+      .build();
+    if (!doc.is_valid()) throw new Error('Document not valid');
+    if (doc.paragraph_count() < 2) throw new Error('Expected >= 2 paragraphs');
+  });
+
+  // Test 3: TXT export + reopen
+  test('TXT roundtrip', () => {
+    const doc = new WasmDocumentBuilder().text('Hello TXT').build();
+    const bytes = doc.export('txt');
+    const doc2 = engine.open_as(bytes, 'txt');
+    const text = doc2.to_plain_text();
+    if (!text.includes('Hello TXT')) throw new Error('Text not found: ' + text);
+  });
+
+  // Test 4: DOCX export
+  test('DOCX export', () => {
+    const doc = new WasmDocumentBuilder()
+      .title('DOCX Test').text('DOCX content').build();
+    const bytes = doc.export('docx');
+    if (bytes.length < 100) throw new Error('DOCX too small: ' + bytes.length);
+    // Check ZIP magic
+    if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) throw new Error('Not a ZIP file');
+  });
+
+  // Test 5: DOCX reopen
+  test('DOCX roundtrip', () => {
+    const doc = new WasmDocumentBuilder()
+      .title('RT Test').author('RT Author')
+      .heading(1, 'Heading').text('Body text').build();
+    const bytes = doc.export('docx');
+    const doc2 = engine.open_as(bytes, 'docx');
+    if (!doc2.is_valid()) throw new Error('Reopened doc not valid');
+    const text = doc2.to_plain_text();
+    if (!text.includes('Body text')) throw new Error('Text not found: ' + text);
+    const title = doc2.metadata_title();
+    if (title !== 'RT Test') throw new Error('Title mismatch: ' + title);
+  });
+
+  // Test 6: ODT export
+  test('ODT export', () => {
+    const doc = new WasmDocumentBuilder()
+      .title('ODT Test').text('ODT content').build();
+    const bytes = doc.export('odt');
+    if (bytes.length < 100) throw new Error('ODT too small: ' + bytes.length);
+    if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) throw new Error('Not a ZIP file');
+  });
+
+  // Test 7: ODT reopen
+  test('ODT roundtrip', () => {
+    const doc = new WasmDocumentBuilder()
+      .title('ODT RT').text('ODT body').build();
+    const bytes = doc.export('odt');
+    const doc2 = engine.open_as(bytes, 'odt');
+    if (!doc2.is_valid()) throw new Error('Reopened doc not valid');
+    const text = doc2.to_plain_text();
+    if (!text.includes('ODT body')) throw new Error('Text not found: ' + text);
+  });
+
+  // Test 8: Auto-detect DOCX
+  test('Auto-detect DOCX', () => {
+    const doc = new WasmDocumentBuilder().text('Auto test').build();
+    const bytes = doc.export('docx');
+    const doc2 = engine.open(bytes);
+    if (!doc2.is_valid()) throw new Error('Auto-detected doc not valid');
+  });
+
+  // Test 9: Format detection
+  test('Format detection', () => {
+    const doc = new WasmDocumentBuilder().text('Detect').build();
+    const docxBytes = doc.export('docx');
+    const txtBytes = doc.export('txt');
+    const fmtDocx = detect_format(docxBytes);
+    const fmtTxt = detect_format(txtBytes);
+    if (fmtDocx !== 'docx' && fmtDocx !== 'odt') throw new Error('DOCX detected as: ' + fmtDocx);
+    if (fmtTxt !== 'txt') throw new Error('TXT detected as: ' + fmtTxt);
+  });
+
+  log(`Self-test complete: ${passed} passed, ${failed} failed`, failed > 0 ? 'err' : 'ok');
+};
+
+function getMime(fmt) {
+  const mimes = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    odt: 'application/vnd.oasis.opendocument.text',
+    txt: 'text/plain',
+    pdf: 'application/pdf',
+    md: 'text/markdown',
+  };
+  return mimes[fmt] || 'application/octet-stream';
+}
+
+initialize();
+</script>
+</body>
+</html>

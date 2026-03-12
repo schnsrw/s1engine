@@ -148,7 +148,7 @@ This eliminates all C/C++ dependencies while providing full Unicode support.
 > **This section MUST be updated after every significant change, milestone completion, or phase transition.**
 
 ### Current Phase: 1.0.0 release
-### Status: s1-model (72), s1-ops (48), s1-format-txt (41), s1-format-docx (172), s1-format-odt (110), s1-format-md (32), s1-format-pdf (21), s1-convert (15), s1-layout (38), s1-text (39), s1engine (52+44 integration), s1-crdt (172), s1engine-wasm (12), s1engine-c (10), proptests (4). 882 total tests.
+### Status: s1-model (72), s1-ops (48), s1-format-txt (41), s1-format-docx (175), s1-format-odt (110), s1-format-md (32), s1-format-pdf (21), s1-convert (15), s1-layout (38), s1-text (39), s1engine (52+44 integration), s1-crdt (172), s1engine-wasm (12), s1engine-c (10), proptests (4). 885 total tests.
 
 ### Phase Completion Tracker
 
@@ -205,7 +205,7 @@ Phase 5 milestones:
 |---|---|---|---|
 | `s1-model` | **COMPLETE** | 72 passing | Core types, zero deps, all modules + numbering defs + sections + proptest tree invariants + Unicode text safety + cycle detection + is_descendant |
 | `s1-ops` | **COMPLETE** | 48 passing | Operations, transactions, undo/redo, cursor/selection + proptest inversion roundtrip + subtree undo + mixed attribute undo + Unicode text roundtrip |
-| `s1-format-docx` | **COMPLETE** | 172 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, sections, headers/footers, fields, hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments, TOC (SDT), round-trip. ZIP bomb protection. |
+| `s1-format-docx` | **COMPLETE** | 175 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, sections, headers/footers, fields (fldSimple + fldChar complex), hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments, TOC (SDT), mc:AlternateContent image support, round-trip. ZIP bomb protection. |
 | `s1-format-odt` | **COMPLETE** | 110 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, auto-styles, TOC, superscript/subscript, character spacing, paragraph shading, keep-lines-together, hyperlinks, bookmarks, tab stops, paragraph borders, comments (annotations), headers/footers (with page number/count fields), sections (page size, margins, orientation), round-trip. ZIP bomb protection. |
 | `s1-format-md` | **COMPLETE** | 32 passing | Reader (pulldown-cmark): headings, bold/italic/strikethrough, code, links, lists, GFM tables, thematic breaks. Writer: Markdown generation from DocumentModel. |
 | `s1-format-pdf` | **COMPLETE** | 21 passing | PDF export: font embedding/subsetting, text rendering, tables, metadata, images (JPEG/PNG), hyperlinks, bookmarks. Image dimension caps. |
@@ -263,6 +263,9 @@ Phase 5 milestones:
 | 2026-03-12 | Fidelity F.6: ODT Comments — parse/write office:annotation with dc:creator, dc:date, text:p body. CommentStart/CommentEnd inline, CommentBody on root. annotation-end parsing. 7 new tests. | crates/s1-format-odt/src/content_parser.rs, content_writer.rs |
 | 2026-03-13 | Fidelity F.7: ODT Headers/Footers/Sections — parse style:page-layout (page-layout-properties), parse style:master-page (header/footer with text + page-number/page-count fields), parse header-first/footer-first (ODF 1.3). Build SectionProperties + Header/Footer nodes from master page. Write page-layout + master-page with header/footer content to styles.xml. Round-trip page layout, headers, footers, first-page headers, footer with page number fields. 12 new tests. | crates/s1-format-odt/src/style_parser.rs, style_writer.rs, reader.rs, writer.rs |
 | 2026-03-13 | Release 1.0.0: R.1 `#[non_exhaustive]` on 25 public enums + wildcard match arms. R.2 thiserror migration for all error types (except s1-model). R.3 API surface audit: added missing re-exports (Borders, BorderSide, BorderStyle, TabStop, TabAlignment, TabLeader, MediaId, MediaStore, TableWidth, VerticalAlignment). R.4 CI/CD GitHub Actions (7 jobs). R.5 crates.io metadata. R.6 large-document benchmarks. R.7 version bump to 1.0.0. | ~40 files across workspace |
+| 2026-03-13 | Bug Fix: Complex field (fldChar) parsing — added FieldState machine to track fldChar begin/instrText/separate/end across runs within a paragraph. Creates Field nodes (PageNumber/PageCount/etc.) for complex field format. Fixes page number loss in footers. 1 new test (single-run), 1 new test (cross-run). | crates/s1-format-docx/src/content_parser.rs |
+| 2026-03-13 | Bug Fix: mc:AlternateContent image parsing — added `parse_alternate_content()` to descend into `<mc:Choice>` and extract `<w:drawing>` elements. Fixes image loss in DOCX files produced by Google Docs and other editors that wrap drawings in AlternateContent. 1 new test. | crates/s1-format-docx/src/content_parser.rs |
+| 2026-03-13 | WASM: Header/footer rendering in to_html() — renders first header and footer from sections with border styling. Build tooling: Makefile (build/test/wasm/demo targets), scripts/build-wasm.sh, scripts/test.sh. | ffi/wasm/src/lib.rs, Makefile, scripts/*.sh |
 
 ---
 

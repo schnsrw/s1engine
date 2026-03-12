@@ -121,10 +121,10 @@ s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
 
 | Crate | Description | Tests |
 |---|---|---|
-| `s1engine` | Facade -- high-level public API | 46 |
+| `s1engine` | Facade -- high-level public API | 96 |
 | `s1-model` | Core document model (tree, nodes, attributes, styles) | 72 |
 | `s1-ops` | Operations, transactions, undo/redo | 48 |
-| `s1-format-docx` | DOCX reader/writer | 172 |
+| `s1-format-docx` | DOCX reader/writer | 175 |
 | `s1-format-odt` | ODT reader/writer | 110 |
 | `s1-format-md` | Markdown reader/writer | 32 |
 | `s1-format-pdf` | PDF exporter | 21 |
@@ -213,7 +213,7 @@ Detailed per-feature support across all document formats. Classification key:
 
 ### Notes
 
-- **DOCX**: Most complete format support. Floating images are read into the model but written back as inline.
+- **DOCX**: Most complete format support. Handles `mc:AlternateContent`-wrapped drawings (common in Google Docs exports) and `fldChar` complex field format (used for page numbers in footers). Floating images are read into the model but written back as inline.
 - **ODT**: Superscript/subscript, character spacing, paragraph shading, hyperlinks (with URL), bookmarks (start/end/collapsed), tab stops, paragraph borders, comments (annotations with author/date), headers/footers (with page number/count fields), and sections (page size, margins, orientation). Page layout round-trips via `styles.xml` master pages.
 - **MD**: Markdown via pulldown-cmark. Supports CommonMark + GFM tables. Round-trip is partial -- Markdown-specific features (headings, bold, italic, strikethrough, links, lists, tables, code) round-trip well, but document-level features (metadata, page layout, images) are not representable in Markdown.
 - **PDF**: Export-only path: DocumentModel passes through the layout engine (`s1-layout`) before PDF generation. Supports font embedding with subsetting, table borders, image embedding, hyperlink annotations, and document outline (bookmarks).
@@ -231,10 +231,10 @@ Detailed per-feature support across all document formats. Classification key:
 ## Building
 
 ```bash
-# Build
-cargo build
+# Build all crates
+cargo build --workspace
 
-# Test
+# Test all crates
 cargo test --workspace
 
 # Lint
@@ -245,6 +245,63 @@ cargo fmt --check
 ```
 
 No system libraries required. All dependencies are pure Rust.
+
+### Makefile
+
+Common tasks are available via `make`:
+
+```bash
+make build          # Build all crates (debug)
+make build-release  # Build all crates (release)
+make test           # Run all tests
+make test-docx      # Run s1-format-docx tests only
+make clippy         # Run clippy linter
+make fmt            # Format code
+make check          # Run all checks (fmt + clippy + tests)
+make wasm           # Build WASM bindings (debug, fast)
+make wasm-release   # Build WASM bindings (release, optimized)
+make demo           # Build WASM and start demo server at localhost:8080
+make demo-only      # Start demo server without rebuilding WASM
+make clean          # Clean build artifacts
+```
+
+### Scripts
+
+```bash
+# Run all tests + clippy + formatting check
+./scripts/test.sh
+
+# Run tests for a single crate
+./scripts/test.sh s1-format-docx
+
+# Build WASM bindings (release)
+./scripts/build-wasm.sh
+
+# Build WASM bindings (debug, faster)
+./scripts/build-wasm.sh --dev
+```
+
+### WASM Demo
+
+A browser-based document viewer/converter demo is included. It lets you open DOCX/ODT/TXT/MD files and export to other formats.
+
+```bash
+# Build WASM and start the demo server
+make demo
+
+# Or build and serve separately
+./scripts/build-wasm.sh
+make demo-only
+```
+
+Then open `http://localhost:8080` in your browser. The demo supports:
+
+- Opening documents (DOCX, ODT, TXT, Markdown) with drag-and-drop or file picker
+- HTML preview with formatting, tables, images, headers/footers
+- Export to DOCX, ODT, TXT, and Markdown
+- Format auto-detection from file contents
+
+**Note:** PDF export is not available in the WASM build (it requires the `pdf` feature which pulls in the layout engine and text shaping stack).
 
 ## Roadmap
 

@@ -856,6 +856,17 @@ pub fn write_table_pub(
     write_table(doc, table_id, xml, image_rels, &mut dummy_hyp_rels);
 }
 
+/// Public wrapper for write_table that also collects hyperlink relationships.
+pub fn write_table_with_hyperlinks_pub(
+    doc: &DocumentModel,
+    table_id: NodeId,
+    xml: &mut String,
+    image_rels: &mut Vec<ImageRelEntry>,
+    hyperlink_rels: &mut Vec<HyperlinkRelEntry>,
+) {
+    write_table(doc, table_id, xml, image_rels, hyperlink_rels);
+}
+
 /// Write a `<w:r>` element.
 fn write_run(doc: &DocumentModel, run_id: NodeId, xml: &mut String) {
     let run = match doc.node(run_id) {

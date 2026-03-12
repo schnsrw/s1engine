@@ -135,21 +135,19 @@ pub fn write(doc: &DocumentModel) -> Result<Vec<u8>, DocxError> {
         zip.write_all(part.xml.as_bytes())?;
     }
 
-    // word/media/* (image files from body)
-    for rel in &image_rels {
-        if let Some(item) = doc.media().get(rel.media_id) {
+    // word/media/* (image files from body + headers/footers, deduplicated)
+    {
+        let mut written_media_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for rel in image_rels.iter().chain(hf_image_rels.iter()) {
             let path = format!("word/{}", rel.target);
-            zip.start_file(&path, options)?;
-            zip.write_all(&item.data)?;
-        }
-    }
-
-    // word/media/* (image files from headers/footers)
-    for rel in &hf_image_rels {
-        if let Some(item) = doc.media().get(rel.media_id) {
-            let path = format!("word/{}", rel.target);
-            zip.start_file(&path, options)?;
-            zip.write_all(&item.data)?;
+            if written_media_paths.contains(&path) {
+                continue; // same image already written (e.g., shared between body and header)
+            }
+            if let Some(item) = doc.media().get(rel.media_id) {
+                zip.start_file(&path, options)?;
+                zip.write_all(&item.data)?;
+                written_media_paths.insert(path);
+            }
         }
     }
 
@@ -216,6 +214,7 @@ fn write_document_xml_with_sections(
     // For now, we regenerate the full document XML with sections injected.
     let mut new_xml = String::new();
     let mut body_image_rels: Vec<ImageRelEntry> = Vec::new();
+    let mut body_hyperlink_rels: Vec<HyperlinkRelEntry> = Vec::new();
 
     new_xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     new_xml.push('\n');
@@ -243,16 +242,18 @@ fn write_document_xml_with_sections(
                             child_id,
                             &mut new_xml,
                             &mut body_image_rels,
+                            &mut body_hyperlink_rels,
                             sect_idx,
                             hf_parts,
                         );
                     }
                     NodeType::Table => {
-                        crate::content_writer::write_table_pub(
+                        crate::content_writer::write_table_with_hyperlinks_pub(
                             doc,
                             child_id,
                             &mut new_xml,
                             &mut body_image_rels,
+                            &mut body_hyperlink_rels,
                         );
                     }
                     _ => {}
@@ -293,21 +294,24 @@ fn write_document_xml_with_sections(
     }
 
     new_xml.push_str("</w:document>");
-    // Note: hyperlinks in section-mode are not yet collected from paragraph_with_section;
-    // they'll work via the normal write_document_xml path for sectionless documents.
-    (new_xml, body_image_rels, Vec::new())
+    (new_xml, body_image_rels, body_hyperlink_rels)
 }
 
 /// Write a paragraph, optionally followed by an inline sectPr in its pPr.
+///
+/// This mirrors the logic of `content_writer::write_paragraph()` for hyperlink
+/// grouping, bookmarks, and comments so that section-mode documents preserve
+/// all inline features.
 fn write_paragraph_with_section(
     doc: &DocumentModel,
     para_id: s1_model::NodeId,
     xml: &mut String,
     image_rels: &mut Vec<ImageRelEntry>,
+    hyperlink_rels: &mut Vec<HyperlinkRelEntry>,
     sect_idx: Option<i64>,
     hf_parts: &[HfPartEntry],
 ) {
-    use s1_model::{NodeId, NodeType};
+    use s1_model::{AttributeKey, AttributeValue, NodeId, NodeType};
 
     let para = match doc.node(para_id) {
         Some(n) => n,
@@ -343,22 +347,73 @@ fn write_paragraph_with_section(
         xml.push_str("</w:pPr>");
     }
 
-    // Inline children
+    // Inline children — group consecutive runs with the same HyperlinkUrl into
+    // `<w:hyperlink>` elements, and handle bookmarks + comments.
     let children: Vec<NodeId> = para.children.clone();
-    for child_id in children {
+    let mut i = 0;
+    while i < children.len() {
+        let child_id = children[i];
         let child = match doc.node(child_id) {
             Some(n) => n,
-            None => continue,
+            None => {
+                i += 1;
+                continue;
+            }
         };
+
         match child.node_type {
-            NodeType::Run => crate::content_writer::write_run_pub(doc, child_id, xml),
+            NodeType::Run => {
+                // Check if this run is a hyperlink
+                if let Some(url) = child.attributes.get_string(&AttributeKey::HyperlinkUrl) {
+                    let url = url.to_string();
+                    // Find all consecutive runs with the same URL
+                    let hyp_start = i;
+                    while i < children.len() {
+                        if let Some(n) = doc.node(children[i]) {
+                            if n.node_type == NodeType::Run
+                                && n.attributes.get_string(&AttributeKey::HyperlinkUrl)
+                                    == Some(&url)
+                            {
+                                i += 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+
+                    // Write hyperlink wrapper
+                    if let Some(anchor) = url.strip_prefix('#') {
+                        // Internal anchor
+                        xml.push_str(&format!(
+                            r#"<w:hyperlink w:anchor="{}">"#,
+                            crate::xml_writer::escape_xml(anchor)
+                        ));
+                    } else {
+                        // External link — create relationship
+                        let rid = format!("rHyp{}", hyperlink_rels.len() + 1);
+                        hyperlink_rels.push(HyperlinkRelEntry {
+                            rid: rid.clone(),
+                            target: url.clone(),
+                        });
+                        xml.push_str(&format!(r#"<w:hyperlink r:id="{rid}">"#));
+                    }
+                    for &run_id in &children[hyp_start..i] {
+                        crate::content_writer::write_run_pub(doc, run_id, xml);
+                    }
+                    xml.push_str("</w:hyperlink>");
+                } else {
+                    crate::content_writer::write_run_pub(doc, child_id, xml);
+                    i += 1;
+                }
+            }
             NodeType::Image => {
-                crate::content_writer::write_image_pub(doc, child_id, xml, image_rels)
+                crate::content_writer::write_image_pub(doc, child_id, xml, image_rels);
+                i += 1;
             }
             NodeType::Field => {
                 // Write field
-                if let Some(s1_model::AttributeValue::FieldType(ft)) =
-                    child.attributes.get(&s1_model::AttributeKey::FieldType)
+                if let Some(AttributeValue::FieldType(ft)) =
+                    child.attributes.get(&AttributeKey::FieldType)
                 {
                     let instr = crate::header_footer_writer::field_type_to_instruction(*ft);
                     let placeholder = match ft {
@@ -372,12 +427,63 @@ fn write_paragraph_with_section(
                         placeholder,
                     ));
                 }
+                i += 1;
             }
-            NodeType::LineBreak => xml.push_str("<w:r><w:br/></w:r>"),
-            NodeType::PageBreak => xml.push_str(r#"<w:r><w:br w:type="page"/></w:r>"#),
-            NodeType::ColumnBreak => xml.push_str(r#"<w:r><w:br w:type="column"/></w:r>"#),
-            NodeType::Tab => xml.push_str("<w:r><w:tab/></w:r>"),
-            _ => {}
+            NodeType::LineBreak => {
+                xml.push_str("<w:r><w:br/></w:r>");
+                i += 1;
+            }
+            NodeType::PageBreak => {
+                xml.push_str(r#"<w:r><w:br w:type="page"/></w:r>"#);
+                i += 1;
+            }
+            NodeType::ColumnBreak => {
+                xml.push_str(r#"<w:r><w:br w:type="column"/></w:r>"#);
+                i += 1;
+            }
+            NodeType::Tab => {
+                xml.push_str("<w:r><w:tab/></w:r>");
+                i += 1;
+            }
+            NodeType::BookmarkStart => {
+                if let Some(bk_name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
+                    xml.push_str(&format!(
+                        r#"<w:bookmarkStart w:id="{i}" w:name="{}"/>"#,
+                        crate::xml_writer::escape_xml(bk_name)
+                    ));
+                }
+                i += 1;
+            }
+            NodeType::BookmarkEnd => {
+                xml.push_str(&format!(r#"<w:bookmarkEnd w:id="{i}"/>"#));
+                i += 1;
+            }
+            NodeType::CommentStart => {
+                if let Some(cid) = child.attributes.get_string(&AttributeKey::CommentId) {
+                    xml.push_str(&format!(
+                        r#"<w:commentRangeStart w:id="{}"/>"#,
+                        crate::xml_writer::escape_xml(cid)
+                    ));
+                }
+                i += 1;
+            }
+            NodeType::CommentEnd => {
+                if let Some(cid) = child.attributes.get_string(&AttributeKey::CommentId) {
+                    xml.push_str(&format!(
+                        r#"<w:commentRangeEnd w:id="{}"/>"#,
+                        crate::xml_writer::escape_xml(cid)
+                    ));
+                    // Add commentReference run
+                    xml.push_str(&format!(
+                        r#"<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="{}"/></w:r>"#,
+                        crate::xml_writer::escape_xml(cid)
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
         }
     }
 

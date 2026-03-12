@@ -192,6 +192,7 @@ fn parse_paragraph(
 
     let mut child_index = 0;
     let mut inline_section: Option<RawSectionProperties> = None;
+    let mut field_state = FieldState::None;
 
     loop {
         match reader.read_event() {
@@ -208,7 +209,7 @@ fn parse_paragraph(
                         inline_section = sect;
                     }
                     b"r" => {
-                        parse_run(reader, doc, para_id, &mut child_index, ctx)?;
+                        parse_run(reader, doc, para_id, &mut child_index, ctx, &mut field_state)?;
                     }
                     // Simple fields (e.g., page number)
                     b"fldSimple" => {
@@ -216,7 +217,7 @@ fn parse_paragraph(
                     }
                     // Hyperlinks contain runs with a URL target
                     b"hyperlink" => {
-                        parse_hyperlink_runs(&e, reader, doc, para_id, &mut child_index, ctx)?;
+                        parse_hyperlink_runs(&e, reader, doc, para_id, &mut child_index, ctx, &mut field_state)?;
                     }
                     // Bookmark start/end
                     b"bookmarkStart" => {
@@ -662,6 +663,20 @@ enum RunContent {
     Break(NodeType),
     Tab,
     Image(ImageInfo),
+    Field(FieldType, String),
+}
+
+/// State machine for tracking complex field parsing (fldChar begin/separate/end)
+/// across one or more runs within a paragraph.
+enum FieldState {
+    /// Not inside a complex field.
+    None,
+    /// Saw fldChar begin, waiting for instrText.
+    Begin,
+    /// Saw instrText with the field instruction code.
+    HasInstr(String),
+    /// Saw fldChar separate — display value follows (skip it).
+    Separate(String),
 }
 
 /// Extracted image info from a `<w:drawing>` element.
@@ -680,6 +695,7 @@ fn parse_run(
     para_id: NodeId,
     child_index: &mut usize,
     ctx: &ParseContext,
+    field_state: &mut FieldState,
 ) -> Result<(), DocxError> {
     let mut run_attrs = AttributeMap::new();
     let mut content: Vec<RunContent> = Vec::new();
@@ -695,13 +711,28 @@ fn parse_run(
                     b"t" => {
                         let text = read_text_content(reader)?;
                         if !text.is_empty() {
-                            content.push(RunContent::Text(text));
+                            // When in the "separate" phase of a complex field,
+                            // the <w:t> holds the display value — skip it.
+                            if !matches!(field_state, FieldState::Separate(_)) {
+                                content.push(RunContent::Text(text));
+                            }
                         }
                     }
                     b"drawing" => {
                         if let Some(info) = parse_drawing(reader, ctx)? {
                             content.push(RunContent::Image(info));
                         }
+                    }
+                    // instrText holds the field instruction (e.g., " PAGE ")
+                    b"instrText" => {
+                        let instr = read_instr_text_content(reader)?;
+                        if !instr.is_empty() {
+                            *field_state = FieldState::HasInstr(instr);
+                        }
+                    }
+                    // mc:AlternateContent wraps drawing in some DOCX files
+                    b"AlternateContent" => {
+                        parse_alternate_content(reader, &mut content, ctx)?;
                     }
                     _ => {
                         skip_element(reader)?;
@@ -725,6 +756,35 @@ fn parse_run(
                     }
                     b"t" => {
                         // Self-closing <w:t/> — empty text, skip
+                    }
+                    b"fldChar" => {
+                        let fld_type = get_attr(&e, b"fldCharType");
+                        match fld_type.as_deref() {
+                            Some("begin") => {
+                                *field_state = FieldState::Begin;
+                            }
+                            Some("separate") => {
+                                // Move instruction text into Separate state
+                                let instr = match std::mem::replace(field_state, FieldState::None) {
+                                    FieldState::HasInstr(s) => s,
+                                    _ => String::new(),
+                                };
+                                *field_state = FieldState::Separate(instr);
+                            }
+                            Some("end") => {
+                                // Extract instruction and create Field content
+                                let instr = match std::mem::replace(field_state, FieldState::None) {
+                                    FieldState::Separate(s) => s,
+                                    FieldState::HasInstr(s) => s,
+                                    _ => String::new(),
+                                };
+                                if !instr.is_empty() {
+                                    let ft = parse_field_instruction(&instr);
+                                    content.push(RunContent::Field(ft, instr.trim().to_string()));
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     _ => {}
                 }
@@ -763,11 +823,83 @@ fn parse_run(
                 flush_texts_to_run(&mut texts, &run_attrs, doc, para_id, child_index)?;
                 insert_image_node(doc, para_id, child_index, &info, ctx)?;
             }
+            RunContent::Field(field_type, instr) => {
+                flush_texts_to_run(&mut texts, &run_attrs, doc, para_id, child_index)?;
+                let field_id = doc.next_id();
+                let mut field_node = Node::new(field_id, NodeType::Field);
+                field_node.attributes.set(
+                    AttributeKey::FieldType,
+                    AttributeValue::FieldType(field_type),
+                );
+                field_node.attributes.set(
+                    AttributeKey::FieldCode,
+                    AttributeValue::String(instr),
+                );
+                doc.insert_node(para_id, *child_index, field_node)
+                    .map_err(|e| DocxError::InvalidStructure(format!("{e}")))?;
+                *child_index += 1;
+            }
         }
     }
 
     // Flush remaining text
     flush_texts_to_run(&mut texts, &run_attrs, doc, para_id, child_index)?;
+
+    Ok(())
+}
+
+/// Read text inside `<w:instrText>...</w:instrText>`.
+fn read_instr_text_content(reader: &mut Reader<&[u8]>) -> Result<String, DocxError> {
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Text(e)) => {
+                text.push_str(&e.unescape().map_err(|e| DocxError::Xml(format!("{e}")))?);
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == b"instrText" => break,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+
+    Ok(text)
+}
+
+/// Parse `<mc:AlternateContent>` — descend into `<mc:Choice>` to find
+/// `<w:drawing>` elements. This is how some DOCX producers wrap inline images.
+fn parse_alternate_content(
+    reader: &mut Reader<&[u8]>,
+    content: &mut Vec<RunContent>,
+    ctx: &ParseContext,
+) -> Result<(), DocxError> {
+    let mut depth = 1u32;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                depth += 1;
+                let name = e.local_name().as_ref().to_vec();
+                if name == b"drawing" {
+                    if let Some(info) = parse_drawing(reader, ctx)? {
+                        content.push(RunContent::Image(info));
+                    }
+                    depth -= 1; // parse_drawing consumed the </drawing> end tag
+                }
+            }
+            Ok(Event::Empty(_)) => {}
+            Ok(Event::End(_)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
 
     Ok(())
 }
@@ -1043,6 +1175,7 @@ fn parse_hyperlink_runs(
     para_id: NodeId,
     child_index: &mut usize,
     ctx: &ParseContext,
+    field_state: &mut FieldState,
 ) -> Result<(), DocxError> {
     // Resolve the r:id to a URL via relationships
     let url = get_attr(hyperlink_elem, b"id").and_then(|rid| ctx.rels.get(&rid).cloned());
@@ -1065,7 +1198,7 @@ fn parse_hyperlink_runs(
                 let name = e.local_name().as_ref().to_vec();
                 match name.as_slice() {
                     b"r" => {
-                        parse_run(reader, doc, para_id, child_index, ctx)?;
+                        parse_run(reader, doc, para_id, child_index, ctx, field_state)?;
                     }
                     _ => {
                         skip_element(reader)?;
@@ -2342,5 +2475,112 @@ mod tests {
         let first = doc.node(body.children[0]).unwrap();
         assert_eq!(first.node_type, NodeType::Paragraph);
         assert_eq!(doc.to_plain_text(), "Normal text");
+    }
+
+    // ─── Complex field (fldChar) parsing tests ──────────────────────────
+
+    #[test]
+    fn parse_complex_field_single_run() {
+        // All fldChar elements in a single run (as in the Chat Reaction DOCX footer)
+        let xml = wrap_doc(
+            r#"<w:p><w:r>
+                <w:fldChar w:fldCharType="begin" />
+                <w:instrText xml:space="preserve">PAGE</w:instrText>
+                <w:fldChar w:fldCharType="separate" />
+                <w:fldChar w:fldCharType="end" />
+            </w:r></w:p>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+
+        // Should have a Field node as child of the paragraph
+        let field = doc.node(para.children[0]).unwrap();
+        assert_eq!(field.node_type, NodeType::Field);
+        assert_eq!(
+            field.attributes.get(&AttributeKey::FieldType),
+            Some(&AttributeValue::FieldType(FieldType::PageNumber))
+        );
+    }
+
+    #[test]
+    fn parse_complex_field_across_runs() {
+        // fldChar elements spanning multiple runs
+        let xml = wrap_doc(
+            r#"<w:p>
+                <w:r><w:fldChar w:fldCharType="begin" /></w:r>
+                <w:r><w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r>
+                <w:r><w:fldChar w:fldCharType="separate" /></w:r>
+                <w:r><w:t>5</w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="end" /></w:r>
+            </w:p>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+
+        // Should have a Field node; the display value "5" should be skipped
+        let field = doc.node(para.children[0]).unwrap();
+        assert_eq!(field.node_type, NodeType::Field);
+        assert_eq!(
+            field.attributes.get(&AttributeKey::FieldType),
+            Some(&AttributeValue::FieldType(FieldType::PageCount))
+        );
+        // No text "5" should leak through
+        assert_eq!(doc.to_plain_text(), "");
+    }
+
+    // ─── mc:AlternateContent image parsing test ─────────────────────────
+
+    #[test]
+    fn parse_image_in_alternate_content() {
+        // Drawing wrapped in mc:AlternateContent (common in Google Docs DOCX exports)
+        let xml = wrap_doc(
+            r#"<w:p><w:r>
+                <mc:AlternateContent>
+                    <mc:Choice Requires="wpg">
+                        <w:drawing><wp:inline>
+                            <wp:extent cx="914400" cy="457200"/>
+                            <wp:docPr id="1" name="Picture 1"/>
+                            <a:graphic><a:graphicData><pic:pic><pic:blipFill>
+                                <a:blip r:embed="rId5"/>
+                            </pic:blipFill></pic:pic></a:graphicData></a:graphic>
+                        </wp:inline></w:drawing>
+                    </mc:Choice>
+                    <mc:Fallback/>
+                </mc:AlternateContent>
+            </w:r></w:p>"#,
+        );
+        let mut rels = HashMap::new();
+        rels.insert("rId5".to_string(), "media/image1.png".to_string());
+
+        let mut media = HashMap::new();
+        media.insert("media/image1.png".to_string(), vec![0x89, 0x50, 0x4E, 0x47]);
+
+        let mut doc = DocumentModel::new();
+        parse_document_xml(
+            &xml,
+            &mut doc,
+            &rels,
+            &media,
+            &s1_model::NumberingDefinitions::default(),
+        )
+        .unwrap();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+
+        // Should have an Image node inside the paragraph
+        let image = doc.node(para.children[0]).unwrap();
+        assert_eq!(image.node_type, NodeType::Image);
+        assert!(image.attributes.get(&AttributeKey::ImageMediaId).is_some());
+        assert_eq!(doc.media().len(), 1);
     }
 }
