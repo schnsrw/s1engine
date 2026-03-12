@@ -391,6 +391,7 @@ fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
                 let val = (*pct * 50.0) as i64;
                 tpr.push_str(&format!(r#"<w:tblW w:w="{val}" w:type="pct"/>"#));
             }
+            _ => {}
         }
     }
 
@@ -401,6 +402,7 @@ fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
             Alignment::Center => "center",
             Alignment::Right => "right",
             Alignment::Justify => "left",
+            _ => "left",
         };
         tpr.push_str(&format!(r#"<w:jc w:val="{val}"/>"#));
     }
@@ -514,6 +516,7 @@ fn write_cell_properties(attrs: &s1_model::AttributeMap) -> String {
                 let val = (*pct * 50.0) as i64;
                 tcp.push_str(&format!(r#"<w:tcW w:w="{val}" w:type="pct"/>"#));
             }
+            _ => {}
         }
     }
 
@@ -539,6 +542,7 @@ fn write_cell_properties(attrs: &s1_model::AttributeMap) -> String {
             VerticalAlignment::Top => "top",
             VerticalAlignment::Center => "center",
             VerticalAlignment::Bottom => "bottom",
+            _ => "top",
         };
         tcp.push_str(&format!(r#"<w:vAlign w:val="{val}"/>"#));
     }
@@ -586,6 +590,7 @@ fn write_border_side(name: &str, side: &BorderSide, xml: &mut String) {
         BorderStyle::Dashed => "dashed",
         BorderStyle::Dotted => "dotted",
         BorderStyle::Thick => "thick",
+        _ => "none",
     };
     let sz = (side.width * 8.0) as i64; // points to eighths of a point
     let color = side.color.to_hex();
@@ -698,6 +703,7 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
             Alignment::Center => "center",
             Alignment::Right => "right",
             Alignment::Justify => "both",
+            _ => "left",
         };
         ppr.push_str(&format!(r#"<w:jc w:val="{val}"/>"#));
     }
@@ -738,6 +744,7 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
                     let val = points_to_twips(*pts);
                     spacing_attrs.push_str(&format!(r#" w:line="{val}" w:lineRule="atLeast""#));
                 }
+                _ => {}
             }
         }
         ppr.push_str(&format!("<w:spacing{spacing_attrs}/>"));
@@ -784,12 +791,14 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
                     TabAlignment::Center => "center",
                     TabAlignment::Right => "right",
                     TabAlignment::Decimal => "decimal",
+                    _ => "left",
                 };
                 let leader = match ts.leader {
                     TabLeader::None => None,
                     TabLeader::Dot => Some("dot"),
                     TabLeader::Dash => Some("hyphen"),
                     TabLeader::Underscore => Some("underscore"),
+                    _ => None,
                 };
                 if let Some(ldr) = leader {
                     ppr.push_str(&format!(
@@ -941,6 +950,7 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
             UnderlineStyle::Dotted => "dotted",
             UnderlineStyle::Dashed => "dash",
             UnderlineStyle::Wave => "wave",
+            _ => "none",
         };
         rpr.push_str(&format!(r#"<w:u w:val="{val}"/>"#));
     }
@@ -1809,10 +1819,8 @@ mod tests {
         // Create TOC node with max level 2
         let toc_id = doc.next_id();
         let mut toc = Node::new(toc_id, NodeType::TableOfContents);
-        toc.attributes.set(
-            AttributeKey::TocMaxLevel,
-            AttributeValue::Int(2),
-        );
+        toc.attributes
+            .set(AttributeKey::TocMaxLevel, AttributeValue::Int(2));
         doc.insert_node(body_id, 0, toc).unwrap();
 
         // Add a cached entry paragraph

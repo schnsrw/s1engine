@@ -147,7 +147,7 @@ This eliminates all C/C++ dependencies while providing full Unicode support.
 
 > **This section MUST be updated after every significant change, milestone completion, or phase transition.**
 
-### Current Phase: All phases complete (pre-release)
+### Current Phase: 1.0.0 release
 ### Status: s1-model (72), s1-ops (48), s1-format-txt (41), s1-format-docx (172), s1-format-odt (110), s1-format-md (32), s1-format-pdf (21), s1-convert (15), s1-layout (38), s1-text (39), s1engine (52+44 integration), s1-crdt (172), s1engine-wasm (12), s1engine-c (10), proptests (4). 882 total tests.
 
 ### Phase Completion Tracker
@@ -262,6 +262,7 @@ Phase 5 milestones:
 | 2026-03-12 | Fidelity F.5: TXT Fidelity — heading # markers, bullet - markers, numbered N. markers, nested list indent, thematic break --- (PageBreakBefore), marker detection in reader. 14 new tests. | crates/s1-format-txt/src/writer.rs, reader.rs |
 | 2026-03-12 | Fidelity F.6: ODT Comments — parse/write office:annotation with dc:creator, dc:date, text:p body. CommentStart/CommentEnd inline, CommentBody on root. annotation-end parsing. 7 new tests. | crates/s1-format-odt/src/content_parser.rs, content_writer.rs |
 | 2026-03-13 | Fidelity F.7: ODT Headers/Footers/Sections — parse style:page-layout (page-layout-properties), parse style:master-page (header/footer with text + page-number/page-count fields), parse header-first/footer-first (ODF 1.3). Build SectionProperties + Header/Footer nodes from master page. Write page-layout + master-page with header/footer content to styles.xml. Round-trip page layout, headers, footers, first-page headers, footer with page number fields. 12 new tests. | crates/s1-format-odt/src/style_parser.rs, style_writer.rs, reader.rs, writer.rs |
+| 2026-03-13 | Release 1.0.0: R.1 `#[non_exhaustive]` on 25 public enums + wildcard match arms. R.2 thiserror migration for all error types (except s1-model). R.3 API surface audit: added missing re-exports (Borders, BorderSide, BorderStyle, TabStop, TabAlignment, TabLeader, MediaId, MediaStore, TableWidth, VerticalAlignment). R.4 CI/CD GitHub Actions (7 jobs). R.5 crates.io metadata. R.6 large-document benchmarks. R.7 version bump to 1.0.0. | ~40 files across workspace |
 
 ---
 

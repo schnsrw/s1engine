@@ -91,6 +91,7 @@ fn hf_type_to_str(hf_type: HeaderFooterType) -> &'static str {
         HeaderFooterType::Default => "default",
         HeaderFooterType::First => "first",
         HeaderFooterType::Even => "even",
+        _ => "default",
     }
 }
 

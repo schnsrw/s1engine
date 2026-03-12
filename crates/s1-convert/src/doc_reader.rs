@@ -32,9 +32,7 @@ pub fn read_doc(data: &[u8]) -> Result<DocumentModel, ConvertError> {
         .map_err(|e| ConvertError::InvalidDoc(format!("not a valid OLE2 file: {e}")))?;
 
     // Check for WordDocument stream (required for .doc files)
-    let has_word_doc = comp
-        .walk()
-        .any(|entry| entry.name() == "WordDocument");
+    let has_word_doc = comp.walk().any(|entry| entry.name() == "WordDocument");
 
     if !has_word_doc {
         return Err(ConvertError::InvalidDoc(
@@ -82,7 +80,9 @@ pub fn read_doc(data: &[u8]) -> Result<DocumentModel, ConvertError> {
 /// Tries multiple strategies:
 /// 1. Read from "WordDocument" stream and extract ASCII/Unicode text segments
 /// 2. Fall back to brute-force text extraction from all streams
-fn extract_text_from_doc(comp: &mut cfb::CompoundFile<Cursor<&[u8]>>) -> Result<String, ConvertError> {
+fn extract_text_from_doc(
+    comp: &mut cfb::CompoundFile<Cursor<&[u8]>>,
+) -> Result<String, ConvertError> {
     // Strategy: read the WordDocument stream and extract text heuristically.
     // The real DOC binary format stores text in a "clx" (complex) or "piece table"
     // structure. Full parsing would require implementing the entire MS-DOC spec.
@@ -175,11 +175,7 @@ fn extract_text_heuristic(data: &[u8]) -> String {
 }
 
 /// Add a text run to a paragraph.
-fn add_text_run(
-    doc: &mut DocumentModel,
-    para_id: NodeId,
-    text: &str,
-) -> Result<(), ConvertError> {
+fn add_text_run(doc: &mut DocumentModel, para_id: NodeId, text: &str) -> Result<(), ConvertError> {
     let run_id = doc.next_id();
     doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
         .map_err(|e| ConvertError::InvalidDoc(format!("{e}")))?;

@@ -104,10 +104,7 @@ impl NodeType {
     pub fn is_block(&self) -> bool {
         matches!(
             self,
-            NodeType::Paragraph
-                | NodeType::Table
-                | NodeType::Section
-                | NodeType::TableOfContents
+            NodeType::Paragraph | NodeType::Table | NodeType::Section | NodeType::TableOfContents
         )
     }
 
@@ -140,8 +137,19 @@ impl NodeType {
                 NodeType::Footer,
                 NodeType::CommentBody,
             ],
-            NodeType::Body => &[NodeType::Section, NodeType::Paragraph, NodeType::Table, NodeType::Image, NodeType::TableOfContents],
-            NodeType::Section => &[NodeType::Paragraph, NodeType::Table, NodeType::Image, NodeType::TableOfContents],
+            NodeType::Body => &[
+                NodeType::Section,
+                NodeType::Paragraph,
+                NodeType::Table,
+                NodeType::Image,
+                NodeType::TableOfContents,
+            ],
+            NodeType::Section => &[
+                NodeType::Paragraph,
+                NodeType::Table,
+                NodeType::Image,
+                NodeType::TableOfContents,
+            ],
             NodeType::TableOfContents => &[NodeType::Paragraph],
             NodeType::Paragraph => &[
                 NodeType::Run,

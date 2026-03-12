@@ -13,6 +13,7 @@ use s1_model::DocumentModel;
 
 /// Errors produced by the Markdown format crate.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum MdError {
     /// A model insertion error.
     #[error("model error: {0}")]

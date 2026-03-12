@@ -71,6 +71,7 @@ impl Color {
 
 /// Text alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Alignment {
     Left,
     Center,
@@ -80,6 +81,7 @@ pub enum Alignment {
 
 /// Underline style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum UnderlineStyle {
     None,
     Single,
@@ -92,6 +94,7 @@ pub enum UnderlineStyle {
 
 /// Line spacing configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum LineSpacing {
     Single,
     OnePointFive,
@@ -106,6 +109,7 @@ pub enum LineSpacing {
 
 /// Page orientation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum PageOrientation {
     Portrait,
     Landscape,
@@ -113,6 +117,7 @@ pub enum PageOrientation {
 
 /// Table or cell width specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum TableWidth {
     Auto,
     /// Fixed width in points.
@@ -123,6 +128,7 @@ pub enum TableWidth {
 
 /// Vertical alignment within a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum VerticalAlignment {
     Top,
     Center,
@@ -142,6 +148,7 @@ pub struct TabStop {
 
 /// Tab stop alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TabAlignment {
     Left,
     Center,
@@ -151,6 +158,7 @@ pub enum TabAlignment {
 
 /// Tab leader character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum TabLeader {
     None,
     Dot,
@@ -173,6 +181,7 @@ pub struct ListInfo {
 
 /// List numbering format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ListFormat {
     Bullet,
     /// 1, 2, 3, ...
@@ -207,6 +216,7 @@ pub struct BorderSide {
 
 /// Border line style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BorderStyle {
     None,
     Single,
@@ -222,6 +232,7 @@ pub struct MediaId(pub u64);
 
 /// Type of dynamic field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FieldType {
     PageNumber,
     PageCount,

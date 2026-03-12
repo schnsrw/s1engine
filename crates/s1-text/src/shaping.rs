@@ -115,7 +115,7 @@ mod tests {
         if let Some(font) = get_test_font() {
             let glyphs = shape_text("Hello", &font, 12.0, &[], None, Direction::Ltr).unwrap();
             assert_eq!(glyphs.len(), 5); // One glyph per character
-            // All glyphs should have positive advance
+                                         // All glyphs should have positive advance
             for g in &glyphs {
                 assert!(g.x_advance > 0.0, "glyph {g:?} has non-positive advance");
             }
@@ -158,8 +158,7 @@ mod tests {
     #[test]
     fn shape_unicode_text() {
         if let Some(font) = get_test_font() {
-            let glyphs =
-                shape_text("café", &font, 12.0, &[], None, Direction::Ltr).unwrap();
+            let glyphs = shape_text("café", &font, 12.0, &[], None, Direction::Ltr).unwrap();
             // 'c', 'a', 'f', 'é' = 4 glyphs
             assert_eq!(glyphs.len(), 4);
         }
@@ -168,8 +167,7 @@ mod tests {
     #[test]
     fn shape_cluster_mapping() {
         if let Some(font) = get_test_font() {
-            let glyphs =
-                shape_text("ABC", &font, 12.0, &[], None, Direction::Ltr).unwrap();
+            let glyphs = shape_text("ABC", &font, 12.0, &[], None, Direction::Ltr).unwrap();
             // Clusters should map back to source bytes: 0, 1, 2
             assert_eq!(glyphs[0].cluster, 0);
             assert_eq!(glyphs[1].cluster, 1);
@@ -180,8 +178,7 @@ mod tests {
     #[test]
     fn measure_width() {
         if let Some(font) = get_test_font() {
-            let glyphs =
-                shape_text("Hello World", &font, 12.0, &[], None, Direction::Ltr).unwrap();
+            let glyphs = shape_text("Hello World", &font, 12.0, &[], None, Direction::Ltr).unwrap();
             let width = measure_shaped_width(&glyphs);
             assert!(width > 0.0);
         }
@@ -192,8 +189,7 @@ mod tests {
         if let Some(font) = get_test_font() {
             // Enable kerning explicitly
             let features = vec![FontFeature::enabled(*b"kern")];
-            let glyphs =
-                shape_text("AV", &font, 12.0, &features, None, Direction::Ltr).unwrap();
+            let glyphs = shape_text("AV", &font, 12.0, &features, None, Direction::Ltr).unwrap();
             assert_eq!(glyphs.len(), 2);
         }
     }

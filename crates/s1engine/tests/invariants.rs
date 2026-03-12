@@ -49,8 +49,7 @@ fn undo_redo_preserves_text_across_multiple_edits() {
         .unwrap();
     let snap1 = doc.to_plain_text();
 
-    doc.apply(Operation::insert_text(text_id, 11, "!"))
-        .unwrap();
+    doc.apply(Operation::insert_text(text_id, 11, "!")).unwrap();
     let snap2 = doc.to_plain_text();
 
     doc.apply(Operation::delete_text(text_id, 0, 6)).unwrap();
@@ -110,7 +109,10 @@ fn undo_after_attribute_change_restores_exactly() {
     // Undo
     doc.undo().unwrap();
     let after = doc.node(run_id).unwrap().attributes.clone();
-    assert_eq!(before, after, "attributes must be exactly restored after undo");
+    assert_eq!(
+        before, after,
+        "attributes must be exactly restored after undo"
+    );
 }
 
 // ─── Cross-Format Text Preservation ─────────────────────────────────
@@ -137,7 +139,10 @@ fn docx_roundtrip_preserves_text() {
     let reopened = engine.open(&docx_bytes).unwrap();
     let roundtrip_text = reopened.to_plain_text();
 
-    assert_eq!(original_text, roundtrip_text, "DOCX round-trip must preserve text");
+    assert_eq!(
+        original_text, roundtrip_text,
+        "DOCX round-trip must preserve text"
+    );
 }
 
 #[test]
@@ -153,7 +158,11 @@ fn odt_roundtrip_preserves_text() {
     let engine = Engine::new();
     let reopened = engine.open(&odt_bytes).unwrap();
 
-    assert_eq!(original_text, reopened.to_plain_text(), "ODT round-trip must preserve text");
+    assert_eq!(
+        original_text,
+        reopened.to_plain_text(),
+        "ODT round-trip must preserve text"
+    );
 }
 
 #[test]
@@ -342,7 +351,11 @@ fn unicode_text_survives_docx_roundtrip() {
     let engine = Engine::new();
     let reopened = engine.open(&docx).unwrap();
 
-    assert_eq!(original, reopened.to_plain_text(), "Unicode text must survive DOCX roundtrip");
+    assert_eq!(
+        original,
+        reopened.to_plain_text(),
+        "Unicode text must survive DOCX roundtrip"
+    );
 }
 
 // --- Public Contract Semantics -----------------------------------------

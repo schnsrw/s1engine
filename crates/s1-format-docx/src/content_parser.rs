@@ -2282,7 +2282,11 @@ mod tests {
         assert_eq!(toc.node_type, NodeType::TableOfContents);
 
         // Should have the cached entry paragraphs (field-only paragraphs removed)
-        assert!(toc.children.len() >= 2, "Expected at least 2 cached entries, got {}", toc.children.len());
+        assert!(
+            toc.children.len() >= 2,
+            "Expected at least 2 cached entries, got {}",
+            toc.children.len()
+        );
 
         // Verify entry text
         let entry1 = doc.node(toc.children[0]).unwrap();

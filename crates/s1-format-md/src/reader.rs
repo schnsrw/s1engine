@@ -81,7 +81,13 @@ fn process_event(
             Tag::Paragraph => {
                 if !ctx.in_table {
                     let para_id = doc.next_id();
-                    insert_node(doc, ctx.body_id, ctx.body_child_index, para_id, NodeType::Paragraph)?;
+                    insert_node(
+                        doc,
+                        ctx.body_id,
+                        ctx.body_child_index,
+                        para_id,
+                        NodeType::Paragraph,
+                    )?;
                     ctx.body_child_index += 1;
                     ctx.container_stack.push((para_id, 0));
                 }
@@ -110,7 +116,13 @@ fn process_event(
             }
             Tag::CodeBlock(_kind) => {
                 let para_id = doc.next_id();
-                insert_node(doc, ctx.body_id, ctx.body_child_index, para_id, NodeType::Paragraph)?;
+                insert_node(
+                    doc,
+                    ctx.body_id,
+                    ctx.body_child_index,
+                    para_id,
+                    NodeType::Paragraph,
+                )?;
                 ctx.body_child_index += 1;
                 ctx.container_stack.push((para_id, 0));
                 ctx.code = true;
@@ -118,7 +130,9 @@ fn process_event(
             Tag::Link { dest_url, .. } => {
                 ctx.link_url = Some(dest_url.to_string());
             }
-            Tag::Image { dest_url, title, .. } => {
+            Tag::Image {
+                dest_url, title, ..
+            } => {
                 // Store image reference as attributes on a placeholder image node
                 if let Some((parent_id, _)) = ctx.container_stack.last().copied() {
                     let img_id = doc.next_id();
@@ -175,11 +189,18 @@ fn process_event(
                 ctx.container_stack.push((para_id, 0));
             }
             Tag::BlockQuote(_) => {
-                ctx.container_stack.push((ctx.body_id, ctx.body_child_index));
+                ctx.container_stack
+                    .push((ctx.body_id, ctx.body_child_index));
             }
             Tag::Table(_alignments) => {
                 let table_id = doc.next_id();
-                insert_node(doc, ctx.body_id, ctx.body_child_index, table_id, NodeType::Table)?;
+                insert_node(
+                    doc,
+                    ctx.body_id,
+                    ctx.body_child_index,
+                    table_id,
+                    NodeType::Table,
+                )?;
                 ctx.body_child_index += 1;
                 ctx.in_table = true;
                 ctx.table_id = Some(table_id);
@@ -188,7 +209,13 @@ fn process_event(
             Tag::TableHead => {
                 if let Some(table_id) = ctx.table_id {
                     let row_id = doc.next_id();
-                    insert_node(doc, table_id, ctx.table_child_index, row_id, NodeType::TableRow)?;
+                    insert_node(
+                        doc,
+                        table_id,
+                        ctx.table_child_index,
+                        row_id,
+                        NodeType::TableRow,
+                    )?;
                     ctx.table_child_index += 1;
                     ctx.table_row_id = Some(row_id);
                     ctx.row_child_index = 0;
@@ -197,7 +224,13 @@ fn process_event(
             Tag::TableRow => {
                 if let Some(table_id) = ctx.table_id {
                     let row_id = doc.next_id();
-                    insert_node(doc, table_id, ctx.table_child_index, row_id, NodeType::TableRow)?;
+                    insert_node(
+                        doc,
+                        table_id,
+                        ctx.table_child_index,
+                        row_id,
+                        NodeType::TableRow,
+                    )?;
                     ctx.table_child_index += 1;
                     ctx.table_row_id = Some(row_id);
                     ctx.row_child_index = 0;
@@ -206,7 +239,13 @@ fn process_event(
             Tag::TableCell => {
                 if let Some(row_id) = ctx.table_row_id {
                     let cell_id = doc.next_id();
-                    insert_node(doc, row_id, ctx.row_child_index, cell_id, NodeType::TableCell)?;
+                    insert_node(
+                        doc,
+                        row_id,
+                        ctx.row_child_index,
+                        cell_id,
+                        NodeType::TableCell,
+                    )?;
                     ctx.row_child_index += 1;
 
                     let para_id = doc.next_id();
@@ -294,10 +333,8 @@ fn process_event(
         Event::Rule => {
             let para_id = doc.next_id();
             let mut para = Node::new(para_id, NodeType::Paragraph);
-            para.attributes.set(
-                AttributeKey::PageBreakBefore,
-                AttributeValue::Bool(true),
-            );
+            para.attributes
+                .set(AttributeKey::PageBreakBefore, AttributeValue::Bool(true));
             doc.insert_node(ctx.body_id, ctx.body_child_index, para)
                 .map_err(|e| MdError::Model(e.to_string()))?;
             ctx.body_child_index += 1;
@@ -326,13 +363,16 @@ fn emit_text(doc: &mut DocumentModel, ctx: &mut ReadContext, text: &str) -> Resu
     let run_id = doc.next_id();
     let mut run = Node::new(run_id, NodeType::Run);
     if ctx.bold {
-        run.attributes.set(AttributeKey::Bold, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Bold, AttributeValue::Bool(true));
     }
     if ctx.italic {
-        run.attributes.set(AttributeKey::Italic, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Italic, AttributeValue::Bool(true));
     }
     if ctx.strikethrough {
-        run.attributes.set(AttributeKey::Strikethrough, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Strikethrough, AttributeValue::Bool(true));
     }
     if ctx.code {
         run.attributes.set(
@@ -467,7 +507,10 @@ mod tests {
         let body = doc.node(body_id).unwrap();
         let para = doc.node(body.children[0]).unwrap();
         let run = doc.node(para.children[0]).unwrap();
-        assert_eq!(run.attributes.get_bool(&AttributeKey::Strikethrough), Some(true));
+        assert_eq!(
+            run.attributes.get_bool(&AttributeKey::Strikethrough),
+            Some(true)
+        );
     }
 
     #[test]
@@ -477,7 +520,10 @@ mod tests {
         let body = doc.node(body_id).unwrap();
         let para = doc.node(body.children[0]).unwrap();
         let run = doc.node(para.children[0]).unwrap();
-        assert_eq!(run.attributes.get_string(&AttributeKey::FontFamily), Some("monospace"));
+        assert_eq!(
+            run.attributes.get_string(&AttributeKey::FontFamily),
+            Some("monospace")
+        );
     }
 
     #[test]
@@ -541,7 +587,9 @@ mod tests {
         let mut found_nested = false;
         for &child_id in &body.children {
             if let Some(node) = doc.node(child_id) {
-                if let Some(AttributeValue::ListInfo(info)) = node.attributes.get(&AttributeKey::ListInfo) {
+                if let Some(AttributeValue::ListInfo(info)) =
+                    node.attributes.get(&AttributeKey::ListInfo)
+                {
                     if info.level >= 2 {
                         found_nested = true;
                     }
@@ -569,7 +617,9 @@ mod tests {
         let body = doc.node(body_id).unwrap();
         let para = doc.node(body.children[0]).unwrap();
         let has_break = para.children.iter().any(|&id| {
-            doc.node(id).map(|n| n.node_type == NodeType::LineBreak).unwrap_or(false)
+            doc.node(id)
+                .map(|n| n.node_type == NodeType::LineBreak)
+                .unwrap_or(false)
         });
         assert!(has_break, "Expected a LineBreak node");
     }

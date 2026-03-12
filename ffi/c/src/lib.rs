@@ -424,12 +424,7 @@ mod tests {
 
             let engine = s1_engine_new();
             let mut error: *mut S1Error = ptr::null_mut();
-            let doc = s1_engine_open(
-                engine,
-                docx_bytes.as_ptr(),
-                docx_bytes.len(),
-                &mut error,
-            );
+            let doc = s1_engine_open(engine, docx_bytes.as_ptr(), docx_bytes.len(), &mut error);
             assert!(!doc.is_null(), "open failed");
             assert!(error.is_null());
 
@@ -481,12 +476,7 @@ mod tests {
 
             let engine = s1_engine_new();
             let mut error: *mut S1Error = ptr::null_mut();
-            let doc = s1_engine_open(
-                engine,
-                docx_bytes.as_ptr(),
-                docx_bytes.len(),
-                &mut error,
-            );
+            let doc = s1_engine_open(engine, docx_bytes.as_ptr(), docx_bytes.len(), &mut error);
             assert!(!doc.is_null());
 
             let title = s1_document_metadata_title(doc);
@@ -574,12 +564,7 @@ mod tests {
             let mut error: *mut S1Error = ptr::null_mut();
 
             // Open the DOCX
-            let doc = s1_engine_open(
-                engine,
-                docx_bytes.as_ptr(),
-                docx_bytes.len(),
-                &mut error,
-            );
+            let doc = s1_engine_open(engine, docx_bytes.as_ptr(), docx_bytes.len(), &mut error);
             assert!(!doc.is_null());
 
             // Export as TXT

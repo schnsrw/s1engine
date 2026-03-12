@@ -34,7 +34,10 @@ impl WasmEngine {
     ///
     /// Supports DOCX, ODT, and TXT formats.
     pub fn open(&self, data: &[u8]) -> Result<WasmDocument, JsError> {
-        let doc = self.inner.open(data).map_err(|e| JsError::new(&e.to_string()))?;
+        let doc = self
+            .inner
+            .open(data)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(WasmDocument { inner: Some(doc) })
     }
 

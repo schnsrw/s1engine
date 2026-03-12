@@ -8,8 +8,8 @@ use s1_text::{FontDatabase, FontId, FontMetrics, ShapedGlyph};
 
 use crate::error::LayoutError;
 use crate::style_resolver::{
-    resolve_paragraph_style, resolve_run_style, ResolvedParagraphStyle,
-    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
+    resolve_paragraph_style, resolve_run_style, ResolvedParagraphStyle, DEFAULT_FONT_FAMILY,
+    DEFAULT_FONT_SIZE,
 };
 use crate::types::*;
 
@@ -44,11 +44,7 @@ pub struct LayoutEngine<'a> {
 
 impl<'a> LayoutEngine<'a> {
     /// Create a new layout engine.
-    pub fn new(
-        doc: &'a DocumentModel,
-        font_db: &'a FontDatabase,
-        config: LayoutConfig,
-    ) -> Self {
+    pub fn new(doc: &'a DocumentModel, font_db: &'a FontDatabase, config: LayoutConfig) -> Self {
         Self {
             doc,
             font_db,
@@ -125,9 +121,7 @@ impl<'a> LayoutEngine<'a> {
                     let block_height = block.bounds.height;
 
                     // Check if this block fits on the current page
-                    if current_y + block_height > content_rect.bottom()
-                        && !page_blocks.is_empty()
-                    {
+                    if current_y + block_height > content_rect.bottom() && !page_blocks.is_empty() {
                         pages.push(self.make_page(
                             page_index,
                             &page_layout,
@@ -155,9 +149,7 @@ impl<'a> LayoutEngine<'a> {
                     let block = self.layout_table_cached(*node_id, content_rect, current_y)?;
                     let block_height = block.bounds.height;
 
-                    if current_y + block_height > content_rect.bottom()
-                        && !page_blocks.is_empty()
-                    {
+                    if current_y + block_height > content_rect.bottom() && !page_blocks.is_empty() {
                         pages.push(self.make_page(
                             page_index,
                             &page_layout,
@@ -166,8 +158,7 @@ impl<'a> LayoutEngine<'a> {
                         page_index += 1;
                         current_y = content_rect.y;
 
-                        let block =
-                            self.layout_table_cached(*node_id, content_rect, current_y)?;
+                        let block = self.layout_table_cached(*node_id, content_rect, current_y)?;
                         let block_height = block.bounds.height;
                         page_blocks.push(block);
                         current_y += block_height;
@@ -180,9 +171,7 @@ impl<'a> LayoutEngine<'a> {
                     let block = self.layout_image(*node_id, content_rect, current_y)?;
                     let block_height = block.bounds.height;
 
-                    if current_y + block_height > content_rect.bottom()
-                        && !page_blocks.is_empty()
-                    {
+                    if current_y + block_height > content_rect.bottom() && !page_blocks.is_empty() {
                         pages.push(self.make_page(
                             page_index,
                             &page_layout,
@@ -366,8 +355,7 @@ impl<'a> LayoutEngine<'a> {
         content_rect: Rect,
         y_pos: f64,
     ) -> Result<LayoutBlock, LayoutError> {
-        let available_width =
-            content_rect.width - para_style.indent_left - para_style.indent_right;
+        let available_width = content_rect.width - para_style.indent_left - para_style.indent_right;
         let x_start = content_rect.x + para_style.indent_left;
 
         let para = match self.doc.node(para_id) {
@@ -430,12 +418,8 @@ impl<'a> LayoutEngine<'a> {
 
         // Break into lines (greedy algorithm)
         let first_line_indent = para_style.indent_first_line;
-        let lines = self.break_into_lines(
-            &shaped_runs,
-            available_width,
-            first_line_indent,
-            para_style,
-        );
+        let lines =
+            self.break_into_lines(&shaped_runs, available_width, first_line_indent, para_style);
 
         // Compute total paragraph height
         let total_height: f64 = lines.iter().map(|l| l.height).sum();
@@ -508,7 +492,10 @@ impl<'a> LayoutEngine<'a> {
             // Check parent node (could be a Hyperlink container via HyperlinkUrl attribute)
             run_node.parent.and_then(|parent_id| {
                 self.doc.node(parent_id).and_then(|parent| {
-                    parent.attributes.get_string(&AttributeKey::HyperlinkUrl).map(|s| s.to_string())
+                    parent
+                        .attributes
+                        .get_string(&AttributeKey::HyperlinkUrl)
+                        .map(|s| s.to_string())
                 })
             })
         });
@@ -566,11 +553,14 @@ impl<'a> LayoutEngine<'a> {
 
             for item in &items[start..end] {
                 match item {
-                    BreakItem::Box { run_idx, width, height, .. } => {
+                    BreakItem::Box {
+                        run_idx,
+                        width,
+                        height,
+                        ..
+                    } => {
                         let run_info = &runs[*run_idx];
-                        let font_id = run_info
-                            .font_id
-                            .unwrap_or(FontId(fontdb::ID::dummy()));
+                        let font_id = run_info.font_id.unwrap_or(FontId(fontdb::ID::dummy()));
 
                         line_runs.push(GlyphRun {
                             source_id: run_info.source_id,
@@ -595,7 +585,11 @@ impl<'a> LayoutEngine<'a> {
             }
 
             let line_height = compute_line_height(
-                if max_height > 0.0 { max_height } else { DEFAULT_FONT_SIZE },
+                if max_height > 0.0 {
+                    max_height
+                } else {
+                    DEFAULT_FONT_SIZE
+                },
                 &para_style.line_spacing,
             );
             lines.push(LayoutLine {
@@ -807,7 +801,9 @@ impl<'a> LayoutEngine<'a> {
         let final_h = height * scale;
 
         let media_id_val = node.and_then(|n| {
-            if let Some(AttributeValue::MediaId(mid)) = n.attributes.get(&AttributeKey::ImageMediaId) {
+            if let Some(AttributeValue::MediaId(mid)) =
+                n.attributes.get(&AttributeKey::ImageMediaId)
+            {
                 Some(mid.0)
             } else {
                 None
@@ -818,7 +814,9 @@ impl<'a> LayoutEngine<'a> {
             .map(|id| format!("{id}"))
             .or_else(|| {
                 node.and_then(|n| {
-                    n.attributes.get_string(&AttributeKey::ImageMediaId).map(|s| s.to_string())
+                    n.attributes
+                        .get_string(&AttributeKey::ImageMediaId)
+                        .map(|s| s.to_string())
                 })
             })
             .unwrap_or_default();
@@ -1146,7 +1144,9 @@ impl<'a> LayoutEngine<'a> {
                     for &child_id in &para_node.children {
                         if let Some(child) = self.doc.node(child_id) {
                             if child.node_type == NodeType::BookmarkStart {
-                                if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
+                                if let Some(name) =
+                                    child.attributes.get_string(&AttributeKey::BookmarkName)
+                                {
                                     bookmarks.push(LayoutBookmark {
                                         name: name.to_string(),
                                         page_index: page.index,
@@ -1223,7 +1223,9 @@ fn hash_node(doc: &DocumentModel, node_id: NodeId, hash: &mut u64) {
             use std::hash::{Hash, Hasher};
             struct FnvHasher(u64);
             impl Hasher for FnvHasher {
-                fn finish(&self) -> u64 { self.0 }
+                fn finish(&self) -> u64 {
+                    self.0
+                }
                 fn write(&mut self, bytes: &[u8]) {
                     for &b in bytes {
                         self.0 ^= b as u64;
@@ -1294,6 +1296,7 @@ fn compute_line_height(max_run_height: f64, line_spacing: &LineSpacing) -> f64 {
         LineSpacing::Multiple(m) => max_run_height * m,
         LineSpacing::AtLeast(min) => max_run_height.max(*min),
         LineSpacing::Exact(exact) => *exact,
+        _ => max_run_height,
     }
 }
 
@@ -1358,10 +1361,8 @@ fn knuth_plass_breaks(
     let mut active: Vec<usize> = vec![0]; // indices into nodes
 
     for (i, item) in items.iter().enumerate() {
-        let is_feasible_break = matches!(
-            item,
-            BreakItem::Glue { .. } | BreakItem::ForcedBreak { .. }
-        );
+        let is_feasible_break =
+            matches!(item, BreakItem::Glue { .. } | BreakItem::ForcedBreak { .. });
 
         if !is_feasible_break {
             continue;
@@ -1520,11 +1521,7 @@ fn knuth_plass_breaks(
 }
 
 /// Greedy line breaking fallback.
-fn greedy_breaks(
-    items: &[BreakItem],
-    available_width: f64,
-    first_line_indent: f64,
-) -> Vec<usize> {
+fn greedy_breaks(items: &[BreakItem], available_width: f64, first_line_indent: f64) -> Vec<usize> {
     let mut breaks = vec![0];
     let mut current_width = 0.0;
     let mut is_first_line = true;
@@ -1837,8 +1834,7 @@ mod tests {
         doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
             .unwrap();
         let t1 = doc.next_id();
-        doc.insert_node(r1, 0, Node::text(t1, "Page 1"))
-            .unwrap();
+        doc.insert_node(r1, 0, Node::text(t1, "Page 1")).unwrap();
 
         // Second paragraph with page break before
         let p2 = doc.next_id();
@@ -1851,8 +1847,7 @@ mod tests {
         doc.insert_node(p2, 0, Node::new(r2, NodeType::Run))
             .unwrap();
         let t2 = doc.next_id();
-        doc.insert_node(r2, 0, Node::text(t2, "Page 2"))
-            .unwrap();
+        doc.insert_node(r2, 0, Node::text(t2, "Page 2")).unwrap();
 
         let font_db = FontDatabase::new();
         let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
@@ -2039,11 +2034,17 @@ mod tests {
 
         // Header should be near the top
         let header = page.header.as_ref().unwrap();
-        assert!(header.bounds.y < 72.0, "header should be in top margin area");
+        assert!(
+            header.bounds.y < 72.0,
+            "header should be in top margin area"
+        );
 
         // Footer should be near the bottom
         let footer = page.footer.as_ref().unwrap();
-        assert!(footer.bounds.y > 700.0, "footer should be in bottom margin area");
+        assert!(
+            footer.bounds.y > 700.0,
+            "footer should be in bottom margin area"
+        );
     }
 
     #[test]
@@ -2066,8 +2067,7 @@ mod tests {
             doc.insert_node(pid, 0, Node::new(rid, NodeType::Run))
                 .unwrap();
             let tid = doc.next_id();
-            doc.insert_node(rid, 0, Node::text(tid, *text))
-                .unwrap();
+            doc.insert_node(rid, 0, Node::text(tid, *text)).unwrap();
         }
 
         // Footer with PAGE field
@@ -2102,7 +2102,11 @@ mod tests {
 
         // Each page should have a footer
         for page in &result.pages {
-            assert!(page.footer.is_some(), "page {} should have footer", page.index);
+            assert!(
+                page.footer.is_some(),
+                "page {} should have footer",
+                page.index
+            );
         }
     }
 
@@ -2223,10 +2227,7 @@ mod tests {
 
         // Results should be equivalent
         assert_eq!(result1.pages.len(), result2.pages.len());
-        assert_eq!(
-            result1.pages[0].blocks.len(),
-            result2.pages[0].blocks.len()
-        );
+        assert_eq!(result1.pages[0].blocks.len(), result2.pages[0].blocks.len());
     }
 
     #[test]
@@ -2433,12 +2434,8 @@ mod tests {
             doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
                 .unwrap();
             let text_id = doc.next_id();
-            doc.insert_node(
-                run_id,
-                0,
-                Node::text(text_id, "Performance test paragraph"),
-            )
-            .unwrap();
+            doc.insert_node(run_id, 0, Node::text(text_id, "Performance test paragraph"))
+                .unwrap();
         }
 
         let font_db = FontDatabase::new();
@@ -2456,6 +2453,9 @@ mod tests {
 
         assert_eq!(result1.pages.len(), result2.pages.len());
         // Cache should have entries for each paragraph
-        assert!(cache.len() >= 50, "Cache should have entries for all paragraphs");
+        assert!(
+            cache.len() >= 50,
+            "Cache should have entries for all paragraphs"
+        );
     }
 }

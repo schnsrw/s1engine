@@ -81,6 +81,7 @@ fn write_level(lvl: &s1_model::NumberingLevel, xml: &mut String) {
             s1_model::Alignment::Center => "center",
             s1_model::Alignment::Right => "right",
             s1_model::Alignment::Justify => "left",
+            _ => "left",
         };
         xml.push_str(&format!(r#"<w:lvlJc w:val="{val}"/>"#));
     }

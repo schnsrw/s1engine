@@ -138,8 +138,12 @@ mod tests {
         let mut doc = DocumentModel::new();
         let root = doc.root_id();
         let body_id = doc.next_id();
-        doc.insert_node(root, 0, s1_model::Node::new(body_id, s1_model::NodeType::Body))
-            .unwrap();
+        doc.insert_node(
+            root,
+            0,
+            s1_model::Node::new(body_id, s1_model::NodeType::Body),
+        )
+        .unwrap();
         let para_id = doc.next_id();
         doc.insert_node(
             body_id,
@@ -158,8 +162,7 @@ mod tests {
         doc.insert_node(run_id, 0, s1_model::Node::text(text_id, "Convert me"))
             .unwrap();
 
-        let docx_bytes =
-            s1_format_docx::write(&doc).unwrap();
+        let docx_bytes = s1_format_docx::write(&doc).unwrap();
 
         // Convert DOCX → ODT
         let odt_bytes = convert(&docx_bytes, SourceFormat::Docx, TargetFormat::Odt).unwrap();
@@ -179,8 +182,12 @@ mod tests {
         let mut doc = DocumentModel::new();
         let root = doc.root_id();
         let body_id = doc.next_id();
-        doc.insert_node(root, 0, s1_model::Node::new(body_id, s1_model::NodeType::Body))
-            .unwrap();
+        doc.insert_node(
+            root,
+            0,
+            s1_model::Node::new(body_id, s1_model::NodeType::Body),
+        )
+        .unwrap();
         let para_id = doc.next_id();
         doc.insert_node(
             body_id,
@@ -223,8 +230,12 @@ mod tests {
         let mut doc = DocumentModel::new();
         let root = doc.root_id();
         let body_id = doc.next_id();
-        doc.insert_node(root, 0, s1_model::Node::new(body_id, s1_model::NodeType::Body))
-            .unwrap();
+        doc.insert_node(
+            root,
+            0,
+            s1_model::Node::new(body_id, s1_model::NodeType::Body),
+        )
+        .unwrap();
         let docx_bytes = s1_format_docx::write(&doc).unwrap();
 
         let model = convert_to_model(&docx_bytes, SourceFormat::Docx).unwrap();

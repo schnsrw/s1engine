@@ -12,7 +12,12 @@ fn build_small_doc() -> s1engine::Document {
         .title("Benchmark Doc")
         .heading(1, "Introduction")
         .text("This is a test paragraph with some content.")
-        .paragraph(|p| p.text("Normal ").bold("bold").text(" and ").italic("italic"))
+        .paragraph(|p| {
+            p.text("Normal ")
+                .bold("bold")
+                .text(" and ")
+                .italic("italic")
+        })
         .build()
 }
 
@@ -24,6 +29,22 @@ fn build_medium_doc() -> s1engine::Document {
             .text(&format!(
                 "Paragraph {} with enough content to be realistic. \
                  Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+                i + 1
+            ));
+    }
+    builder.build()
+}
+
+fn build_large_doc() -> s1engine::Document {
+    let mut builder = DocumentBuilder::new().title("Large Document (~100 pages)");
+    for i in 0..500 {
+        builder = builder
+            .heading(2, &format!("Section {}", i + 1))
+            .text(&format!(
+                "Paragraph {} of the large benchmark document. \
+                 Lorem ipsum dolor sit amet, consectetur adipiscing elit, \
+                 sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. \
+                 Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.",
                 i + 1
             ));
     }
@@ -250,6 +271,72 @@ fn bench_format_detection(c: &mut Criterion) {
     });
 }
 
+fn bench_builder_large_100_pages(c: &mut Criterion) {
+    c.bench_function("builder_large_500_paragraphs", |b| {
+        b.iter(|| {
+            let doc = build_large_doc();
+            black_box(doc);
+        });
+    });
+}
+
+#[cfg(feature = "docx")]
+fn bench_export_docx_large(c: &mut Criterion) {
+    let doc = build_large_doc();
+    c.bench_function("export_docx_large_500_paragraphs", |b| {
+        b.iter(|| {
+            let bytes = doc.export(Format::Docx).unwrap();
+            black_box(bytes);
+        });
+    });
+}
+
+#[cfg(feature = "docx")]
+fn bench_open_docx_large(c: &mut Criterion) {
+    let doc = build_large_doc();
+    let bytes = doc.export(Format::Docx).unwrap();
+    let engine = Engine::new();
+
+    c.bench_function("open_docx_large_500_paragraphs", |b| {
+        b.iter(|| {
+            let doc = engine.open(black_box(&bytes)).unwrap();
+            black_box(doc);
+        });
+    });
+}
+
+#[cfg(feature = "odt")]
+fn bench_roundtrip_odt_small(c: &mut Criterion) {
+    let doc = DocumentBuilder::new()
+        .title("Small ODT Roundtrip")
+        .heading(1, "Introduction")
+        .text("First paragraph with some content.")
+        .text("Second paragraph for the roundtrip benchmark.")
+        .paragraph(|p| p.text("Mixed ").bold("bold").text(" and ").italic("italic"))
+        .text("Final paragraph to round things out.")
+        .build();
+    let bytes = doc.export(Format::Odt).unwrap();
+    let engine = Engine::new();
+
+    c.bench_function("roundtrip_odt_small_5_paragraphs", |b| {
+        b.iter(|| {
+            let doc = engine.open(black_box(&bytes)).unwrap();
+            let out = doc.export(Format::Odt).unwrap();
+            black_box(out);
+        });
+    });
+}
+
+fn bench_to_plain_text_large(c: &mut Criterion) {
+    let doc = build_large_doc();
+    c.bench_function("to_plain_text_large_500_paragraphs", |b| {
+        b.iter(|| {
+            let text = doc.to_plain_text();
+            black_box(text);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_create_empty,
@@ -267,5 +354,28 @@ criterion_group!(
     bench_roundtrip_docx,
     bench_undo_redo,
     bench_format_detection,
+    bench_builder_large_100_pages,
+    bench_to_plain_text_large,
 );
+
+#[cfg(feature = "docx")]
+criterion_group!(
+    benches_docx_large,
+    bench_export_docx_large,
+    bench_open_docx_large,
+);
+
+#[cfg(feature = "odt")]
+criterion_group!(benches_odt, bench_roundtrip_odt_small,);
+
+#[cfg(all(feature = "docx", feature = "odt"))]
+criterion_main!(benches, benches_docx_large, benches_odt);
+
+#[cfg(all(feature = "docx", not(feature = "odt")))]
+criterion_main!(benches, benches_docx_large);
+
+#[cfg(all(not(feature = "docx"), feature = "odt"))]
+criterion_main!(benches, benches_odt);
+
+#[cfg(all(not(feature = "docx"), not(feature = "odt")))]
 criterion_main!(benches);

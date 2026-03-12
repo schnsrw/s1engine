@@ -184,9 +184,7 @@ fn build_style_chain(doc: &DocumentModel, style_id: &str) -> Vec<String> {
             break; // prevent cycles
         }
         chain.push(sid.clone());
-        current = doc
-            .style_by_id(&sid)
-            .and_then(|s| s.parent_id.clone());
+        current = doc.style_by_id(&sid).and_then(|s| s.parent_id.clone());
     }
 
     chain.reverse(); // root first
@@ -209,10 +207,7 @@ fn apply_paragraph_attrs(node: &Node, style: &mut ResolvedParagraphStyle) {
     }
 }
 
-fn apply_spacing_from_attrs(
-    attrs: &s1_model::AttributeMap,
-    style: &mut ResolvedParagraphStyle,
-) {
+fn apply_spacing_from_attrs(attrs: &s1_model::AttributeMap, style: &mut ResolvedParagraphStyle) {
     if let Some(AttributeValue::Float(v)) = attrs.get(&AttributeKey::SpacingBefore) {
         style.space_before = *v;
     }
@@ -302,8 +297,10 @@ mod tests {
             .unwrap();
         let para_id = doc.next_id();
         let mut para = Node::new(para_id, NodeType::Paragraph);
-        para.attributes
-            .set(AttributeKey::Alignment, AttributeValue::Alignment(Alignment::Center));
+        para.attributes.set(
+            AttributeKey::Alignment,
+            AttributeValue::Alignment(Alignment::Center),
+        );
         para.attributes
             .set(AttributeKey::SpacingBefore, AttributeValue::Float(12.0));
         doc.insert_node(body_id, 0, para).unwrap();

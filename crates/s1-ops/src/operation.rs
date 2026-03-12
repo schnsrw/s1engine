@@ -626,27 +626,19 @@ pub fn validate(model: &DocumentModel, op: &Operation) -> Result<(), OperationEr
 }
 
 /// Error from applying or validating an operation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[non_exhaustive]
 pub enum OperationError {
     /// Error from the document model layer.
+    #[error("{0}")]
     Model(ModelError),
     /// Cannot delete or move the root node.
+    #[error("Cannot delete the root node")]
     CannotDeleteRoot,
     /// Style not found.
+    #[error("Style not found: {0}")]
     StyleNotFound(String),
 }
-
-impl std::fmt::Display for OperationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Model(e) => write!(f, "{e}"),
-            Self::CannotDeleteRoot => write!(f, "Cannot delete the root node"),
-            Self::StyleNotFound(id) => write!(f, "Style not found: {id}"),
-        }
-    }
-}
-
-impl std::error::Error for OperationError {}
 
 #[cfg(test)]
 mod tests {
@@ -1036,17 +1028,23 @@ mod tests {
         let body_id = doc.body_id().unwrap();
 
         let tbl_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(tbl_id, NodeType::Table)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(tbl_id, NodeType::Table))
+            .unwrap();
         let row_id = doc.next_id();
-        doc.insert_node(tbl_id, 0, Node::new(row_id, NodeType::TableRow)).unwrap();
+        doc.insert_node(tbl_id, 0, Node::new(row_id, NodeType::TableRow))
+            .unwrap();
         let cell_id = doc.next_id();
-        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell)).unwrap();
+        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell))
+            .unwrap();
         let para_id = doc.next_id();
-        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
         let run_id = doc.next_id();
-        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "Table text")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Table text"))
+            .unwrap();
 
         let initial_count = doc.node_count();
 
@@ -1093,20 +1091,13 @@ mod tests {
         // Set initial: bold=true, fontSize=12
         apply(
             &mut doc,
-            &Operation::set_attributes(
-                run_id,
-                AttributeMap::new().bold(true).font_size(12.0),
-            ),
+            &Operation::set_attributes(run_id, AttributeMap::new().bold(true).font_size(12.0)),
         )
         .unwrap();
 
         // Now overwrite fontSize=24 AND add italic=true
         let mixed_attrs = AttributeMap::new().font_size(24.0).italic(true);
-        let inverse = apply(
-            &mut doc,
-            &Operation::set_attributes(run_id, mixed_attrs),
-        )
-        .unwrap();
+        let inverse = apply(&mut doc, &Operation::set_attributes(run_id, mixed_attrs)).unwrap();
 
         // Verify forward apply
         let node = doc.node(run_id).unwrap();
@@ -1142,7 +1133,10 @@ mod tests {
         apply(&mut doc, &inverse).unwrap();
 
         let after = doc.node(run_id).unwrap().attributes.clone();
-        assert_eq!(before, after, "attributes must be exactly restored after undo");
+        assert_eq!(
+            before, after,
+            "attributes must be exactly restored after undo"
+        );
     }
 
     // ─── P0 Regression: Unicode-safe text operations ────────────────────
@@ -1153,11 +1147,17 @@ mod tests {
 
         // Insert after the 'é' (char offset 4)
         let inverse = apply(&mut doc, &Operation::insert_text(text_id, 4, "!")).unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café!"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("café!")
+        );
 
         // Undo
         apply(&mut doc, &inverse).unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("café")
+        );
     }
 
     #[test]
@@ -1166,7 +1166,10 @@ mod tests {
         let original = doc.to_plain_text();
 
         let inverse = apply(&mut doc, &Operation::insert_text(text_id, 1, "X")).unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{1F600}X\u{1F601}"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("\u{1F600}X\u{1F601}")
+        );
 
         apply(&mut doc, &inverse).unwrap();
         assert_eq!(doc.to_plain_text(), original);
@@ -1179,7 +1182,10 @@ mod tests {
 
         // Delete "éllo" (chars 1..5)
         let inverse = apply(&mut doc, &Operation::delete_text(text_id, 1, 4)).unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("h wörld"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("h wörld")
+        );
 
         apply(&mut doc, &inverse).unwrap();
         assert_eq!(doc.to_plain_text(), original);

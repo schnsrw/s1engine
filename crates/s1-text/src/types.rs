@@ -2,6 +2,7 @@
 
 /// Text direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Direction {
     /// Left-to-right (Latin, CJK, etc.)
     Ltr,

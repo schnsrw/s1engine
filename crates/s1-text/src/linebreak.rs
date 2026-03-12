@@ -82,10 +82,7 @@ mod tests {
     fn linebreak_newline_is_mandatory() {
         let breaks = line_break_opportunities("line1\nline2");
         let mandatory: Vec<_> = breaks.iter().filter(|b| b.mandatory).collect();
-        assert!(
-            !mandatory.is_empty(),
-            "expected mandatory break at newline"
-        );
+        assert!(!mandatory.is_empty(), "expected mandatory break at newline");
     }
 
     #[test]

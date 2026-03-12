@@ -174,6 +174,7 @@ fn collect_block_font_usage(block: &LayoutBlock, usage: &mut HashMap<FontId, Vec
             }
         }
         LayoutBlockKind::Image { .. } => {}
+        _ => {}
     }
 }
 
@@ -345,24 +346,12 @@ fn collect_and_embed_images(
                     embed_decoded_image(pdf, xobject_ref, data)?;
                 }
 
-                image_map.insert(
-                    media_id.clone(),
-                    PdfImage {
-                        name,
-                        xobject_ref,
-                    },
-                );
+                image_map.insert(media_id.clone(), PdfImage { name, xobject_ref });
             }
             LayoutBlockKind::Table { rows } => {
                 for row in rows {
                     for cell in &row.cells {
-                        collect_and_embed_images(
-                            pdf,
-                            alloc,
-                            &cell.blocks,
-                            image_map,
-                            img_idx,
-                        )?;
+                        collect_and_embed_images(pdf, alloc, &cell.blocks, image_map, img_idx)?;
                     }
                 }
             }
@@ -651,6 +640,7 @@ fn render_block(
                 content.restore_state();
             }
         }
+        _ => {}
     }
 }
 
@@ -862,9 +852,7 @@ end";
 mod tests {
     use super::*;
     use s1_layout::{LayoutConfig, LayoutEngine};
-    use s1_model::{
-        AttributeKey, AttributeValue, DocumentModel, MediaId, Node, NodeType,
-    };
+    use s1_model::{AttributeKey, AttributeValue, DocumentModel, MediaId, Node, NodeType};
 
     fn make_simple_doc(text: &str) -> DocumentModel {
         let mut doc = DocumentModel::new();
@@ -1113,9 +1101,10 @@ mod tests {
 
         // Create an Image node with MediaId attribute
         let mut image_node = Node::new(doc.next_id(), NodeType::Image);
-        image_node
-            .attributes
-            .set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+        image_node.attributes.set(
+            AttributeKey::ImageMediaId,
+            AttributeValue::MediaId(media_id),
+        );
         image_node
             .attributes
             .set(AttributeKey::ImageWidth, AttributeValue::Float(72.0));
@@ -1192,9 +1181,10 @@ mod tests {
 
         // Use a specific size
         let mut image_node = Node::new(doc.next_id(), NodeType::Image);
-        image_node
-            .attributes
-            .set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+        image_node.attributes.set(
+            AttributeKey::ImageMediaId,
+            AttributeValue::MediaId(media_id),
+        );
         image_node
             .attributes
             .set(AttributeKey::ImageWidth, AttributeValue::Float(200.0));
@@ -1248,9 +1238,10 @@ mod tests {
             .insert("image/png".to_string(), png_data, None);
 
         let mut image_node = Node::new(doc.next_id(), NodeType::Image);
-        image_node
-            .attributes
-            .set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+        image_node.attributes.set(
+            AttributeKey::ImageMediaId,
+            AttributeValue::MediaId(media_id),
+        );
         image_node
             .attributes
             .set(AttributeKey::ImageWidth, AttributeValue::Float(72.0));
@@ -1284,9 +1275,10 @@ mod tests {
 
         for idx in 0..3 {
             let mut image_node = Node::new(doc.next_id(), NodeType::Image);
-            image_node
-                .attributes
-                .set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+            image_node.attributes.set(
+                AttributeKey::ImageMediaId,
+                AttributeValue::MediaId(media_id),
+            );
             image_node
                 .attributes
                 .set(AttributeKey::ImageWidth, AttributeValue::Float(50.0));
@@ -1343,7 +1335,13 @@ mod tests {
         // Should have image block with no data
         let has_no_data = layout.pages.iter().any(|p| {
             p.blocks.iter().any(|b| {
-                matches!(&b.kind, LayoutBlockKind::Image { image_data: None, .. })
+                matches!(
+                    &b.kind,
+                    LayoutBlockKind::Image {
+                        image_data: None,
+                        ..
+                    }
+                )
             })
         });
         assert!(has_no_data, "Image without media should have no data");
@@ -1501,7 +1499,10 @@ mod tests {
         doc.insert_node(
             run_id,
             0,
-            Node::text(text_id, "This is a very long hyperlink text that might wrap"),
+            Node::text(
+                text_id,
+                "This is a very long hyperlink text that might wrap",
+            ),
         )
         .unwrap();
 
@@ -1634,8 +1635,7 @@ mod tests {
             doc.insert_node(body_id, i, Node::new(p, NodeType::Paragraph))
                 .unwrap();
             let r = doc.next_id();
-            doc.insert_node(p, 0, Node::new(r, NodeType::Run))
-                .unwrap();
+            doc.insert_node(p, 0, Node::new(r, NodeType::Run)).unwrap();
             let t = doc.next_id();
             doc.insert_node(r, 0, Node::text(t, "Filler paragraph line"))
                 .unwrap();

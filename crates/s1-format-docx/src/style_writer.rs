@@ -27,6 +27,7 @@ pub fn write_styles_xml(doc: &DocumentModel) -> String {
             StyleType::Character => "character",
             StyleType::Table => "table",
             StyleType::List => "numbering",
+            _ => "paragraph",
         };
 
         xml.push_str(&format!(

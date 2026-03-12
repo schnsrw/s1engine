@@ -33,6 +33,7 @@ pub struct OdtPageLayout {
 
 /// A segment of text in a header/footer paragraph.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum HfSegment {
     /// Plain text.
     Text(String),
@@ -92,10 +93,8 @@ pub fn parse_styles_xml(
                     }
                 }
                 b"master-page" => {
-                    let layout_name =
-                        get_attr(&e, b"page-layout-name").unwrap_or_default();
-                    let layout =
-                        page_layouts.get(&layout_name).cloned().unwrap_or_default();
+                    let layout_name = get_attr(&e, b"page-layout-name").unwrap_or_default();
+                    let layout = page_layouts.get(&layout_name).cloned().unwrap_or_default();
                     master_page_info = Some(parse_master_page(&mut reader, layout)?);
                 }
                 _ => {}
@@ -107,12 +106,12 @@ pub fn parse_styles_xml(
                     }
                 }
                 b"master-page" => {
-                    let layout_name =
-                        get_attr(&e, b"page-layout-name").unwrap_or_default();
-                    let layout =
-                        page_layouts.get(&layout_name).cloned().unwrap_or_default();
-                    master_page_info =
-                        Some(OdtMasterPage { layout, ..Default::default() });
+                    let layout_name = get_attr(&e, b"page-layout-name").unwrap_or_default();
+                    let layout = page_layouts.get(&layout_name).cloned().unwrap_or_default();
+                    master_page_info = Some(OdtMasterPage {
+                        layout,
+                        ..Default::default()
+                    });
                 }
                 _ => {}
             },
@@ -325,15 +324,11 @@ fn parse_page_layout(reader: &mut Reader<&[u8]>) -> Result<OdtPageLayout, OdtErr
 
     loop {
         match reader.read_event() {
-            Ok(Event::Start(ref e))
-                if e.local_name().as_ref() == b"page-layout-properties" =>
-            {
+            Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"page-layout-properties" => {
                 extract_page_layout_props(e, &mut layout);
                 skip_to_end(reader, b"page-layout-properties")?;
             }
-            Ok(Event::Empty(ref e))
-                if e.local_name().as_ref() == b"page-layout-properties" =>
-            {
+            Ok(Event::Empty(ref e)) if e.local_name().as_ref() == b"page-layout-properties" => {
                 extract_page_layout_props(e, &mut layout);
             }
             Ok(Event::End(ref e)) if e.local_name().as_ref() == b"page-layout" => break,
@@ -347,10 +342,7 @@ fn parse_page_layout(reader: &mut Reader<&[u8]>) -> Result<OdtPageLayout, OdtErr
 }
 
 /// Extract page layout properties from `<style:page-layout-properties>` attributes.
-fn extract_page_layout_props(
-    e: &quick_xml::events::BytesStart<'_>,
-    layout: &mut OdtPageLayout,
-) {
+fn extract_page_layout_props(e: &quick_xml::events::BytesStart<'_>, layout: &mut OdtPageLayout) {
     if let Some(w) = get_attr(e, b"page-width").and_then(|s| parse_length(&s)) {
         layout.page_width = Some(w);
     }
@@ -667,9 +659,7 @@ mod tests {
 
         let first = mp.first_header.unwrap();
         assert_eq!(first.paragraphs.len(), 1);
-        assert!(
-            matches!(&first.paragraphs[0][0], HfSegment::Text(t) if t == "Title Page Header")
-        );
+        assert!(matches!(&first.paragraphs[0][0], HfSegment::Text(t) if t == "Title Page Header"));
     }
 
     #[test]

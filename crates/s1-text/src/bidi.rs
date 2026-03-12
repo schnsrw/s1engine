@@ -100,7 +100,11 @@ mod tests {
         let text = "Hello \u{0627}\u{0644}\u{0639}\u{0631}\u{0628}\u{064A}\u{0629} World";
         let runs = bidi_resolve(text);
         // Should have multiple runs with different directions
-        assert!(runs.len() >= 2, "expected multiple bidi runs, got {}", runs.len());
+        assert!(
+            runs.len() >= 2,
+            "expected multiple bidi runs, got {}",
+            runs.len()
+        );
         // At least one LTR and one RTL run
         let has_ltr = runs.iter().any(|r| r.direction == Direction::Ltr);
         let has_rtl = runs.iter().any(|r| r.direction == Direction::Rtl);

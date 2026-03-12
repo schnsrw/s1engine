@@ -451,8 +451,8 @@ mod tests {
     #[test]
     fn roundtrip_footer_with_page_number() {
         use s1_model::{
-            AttributeKey, AttributeValue, FieldType, HeaderFooterRef,
-            HeaderFooterType, Node, SectionProperties,
+            AttributeKey, AttributeValue, FieldType, HeaderFooterRef, HeaderFooterType, Node,
+            SectionProperties,
         };
 
         let mut doc = DocumentModel::new();

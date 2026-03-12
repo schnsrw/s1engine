@@ -32,12 +32,7 @@ fn main() {
                         .cell("15,000")
                         .cell("+50%")
                 })
-                .row(|r| {
-                    r.cell("Revenue")
-                        .cell("$1.2M")
-                        .cell("$1.5M")
-                        .cell("+25%")
-                })
+                .row(|r| r.cell("Revenue").cell("$1.2M").cell("$1.5M").cell("+25%"))
                 .row(|r| r.cell("NPS").cell("72").cell("78").cell("+6"))
         })
         .heading(2, "Highlights")

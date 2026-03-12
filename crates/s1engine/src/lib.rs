@@ -45,10 +45,11 @@ pub use format::Format;
 
 // Re-export key model types consumers will need.
 pub use s1_model::{
-    Alignment, AttributeKey, AttributeMap, AttributeValue, Color, DocumentMetadata, DocumentModel,
-    FieldType, HeaderFooterRef, HeaderFooterType, LineSpacing, ListFormat, ListInfo, Node, NodeId,
-    NodeType, PageOrientation, SectionBreakType, SectionProperties, Style, StyleType,
-    UnderlineStyle,
+    Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders, Color,
+    DocumentMetadata, DocumentModel, FieldType, HeaderFooterRef, HeaderFooterType, LineSpacing,
+    ListFormat, ListInfo, MediaId, MediaStore, Node, NodeId, NodeType, PageOrientation,
+    SectionBreakType, SectionProperties, Style, StyleType, TabAlignment, TabLeader, TabStop,
+    TableWidth, UnderlineStyle, VerticalAlignment,
 };
 
 // Re-export operation types.
@@ -56,8 +57,18 @@ pub use s1_ops::{
     History, Operation, OperationError, Position, Selection, Transaction, TransactionBuilder,
 };
 
-// Provide access to internal crates for advanced use cases.
+/// Low-level access to the core document model types.
+///
+/// This module re-exports the full `s1-model` crate for advanced use cases
+/// that need types not covered by the top-level re-exports. Types accessed
+/// through this module are part of the public API and follow semver.
 pub use s1_model as model;
+
+/// Low-level access to the operations layer.
+///
+/// This module re-exports the full `s1-ops` crate for advanced use cases
+/// that need direct operation construction beyond what [`Document`] provides.
+/// Types accessed through this module are part of the public API and follow semver.
 pub use s1_ops as ops;
 
 // CRDT / collaboration support (feature-gated).

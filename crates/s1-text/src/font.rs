@@ -137,8 +137,7 @@ impl Font {
 
     /// Get the horizontal advance width for a glyph (in font units).
     pub fn glyph_hor_advance(&self, glyph_id: u16) -> Option<u16> {
-        self.face
-            .glyph_hor_advance(ttf_parser::GlyphId(glyph_id))
+        self.face.glyph_hor_advance(ttf_parser::GlyphId(glyph_id))
     }
 
     /// Get the number of glyphs in the font.

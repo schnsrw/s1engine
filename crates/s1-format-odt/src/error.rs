@@ -1,32 +1,22 @@
 //! Error types for the ODT format crate.
 
-use std::fmt;
-
 /// Error type for ODT format operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OdtError {
     /// Error reading the ZIP archive.
+    #[error("ODT ZIP error: {0}")]
     Zip(String),
     /// Error parsing XML content.
+    #[error("ODT XML error: {0}")]
     Xml(String),
     /// A required file is missing from the ODT archive.
+    #[error("Missing file in ODT: {0}")]
     MissingFile(String),
     /// The document structure is invalid.
+    #[error("Invalid ODT structure: {0}")]
     InvalidStructure(String),
 }
-
-impl fmt::Display for OdtError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Zip(msg) => write!(f, "ODT ZIP error: {msg}"),
-            Self::Xml(msg) => write!(f, "ODT XML error: {msg}"),
-            Self::MissingFile(path) => write!(f, "Missing file in ODT: {path}"),
-            Self::InvalidStructure(msg) => write!(f, "Invalid ODT structure: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for OdtError {}
 
 impl From<zip::result::ZipError> for OdtError {
     fn from(e: zip::result::ZipError) -> Self {

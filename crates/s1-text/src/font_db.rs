@@ -119,16 +119,13 @@ impl FontDatabase {
 
     /// Get font family name for a given font ID.
     pub fn family_name(&self, id: FontId) -> Option<String> {
-        self.db
-            .face(id.0)
-            .map(|info| {
-                info.families
-                    .first()
-                    .map(|(name, _)| name.clone())
-                    .unwrap_or_default()
-            })
+        self.db.face(id.0).map(|info| {
+            info.families
+                .first()
+                .map(|(name, _)| name.clone())
+                .unwrap_or_default()
+        })
     }
-
 }
 
 impl Default for FontDatabase {
@@ -173,7 +170,10 @@ mod tests {
                 // Bold variant should also exist
                 if let Some(bold) = db.find(family, true, false) {
                     // They should be different font IDs
-                    assert_ne!(regular, bold, "bold should differ from regular for {family}");
+                    assert_ne!(
+                        regular, bold,
+                        "bold should differ from regular for {family}"
+                    );
                     return;
                 }
             }

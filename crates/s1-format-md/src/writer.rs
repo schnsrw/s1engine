@@ -375,10 +375,12 @@ mod tests {
 
         let run_id = doc.next_id();
         let mut run = Node::new(run_id, NodeType::Run);
-        run.attributes.set(AttributeKey::Bold, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Bold, AttributeValue::Bool(true));
         doc.insert_node(para_id, 0, run).unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "bold")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "bold"))
+            .unwrap();
 
         assert!(write(&doc).contains("**bold**"));
     }
@@ -394,10 +396,12 @@ mod tests {
 
         let run_id = doc.next_id();
         let mut run = Node::new(run_id, NodeType::Run);
-        run.attributes.set(AttributeKey::Italic, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Italic, AttributeValue::Bool(true));
         doc.insert_node(para_id, 0, run).unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "italic")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "italic"))
+            .unwrap();
 
         assert!(write(&doc).contains("*italic*"));
     }
@@ -413,11 +417,14 @@ mod tests {
 
         let run_id = doc.next_id();
         let mut run = Node::new(run_id, NodeType::Run);
-        run.attributes.set(AttributeKey::Bold, AttributeValue::Bool(true));
-        run.attributes.set(AttributeKey::Italic, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Bold, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Italic, AttributeValue::Bool(true));
         doc.insert_node(para_id, 0, run).unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "both")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "both"))
+            .unwrap();
 
         assert!(write(&doc).contains("***both***"));
     }
@@ -433,10 +440,12 @@ mod tests {
 
         let run_id = doc.next_id();
         let mut run = Node::new(run_id, NodeType::Run);
-        run.attributes.set(AttributeKey::Strikethrough, AttributeValue::Bool(true));
+        run.attributes
+            .set(AttributeKey::Strikethrough, AttributeValue::Bool(true));
         doc.insert_node(para_id, 0, run).unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "struck")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "struck"))
+            .unwrap();
 
         assert!(write(&doc).contains("~~struck~~"));
     }
@@ -458,7 +467,8 @@ mod tests {
         );
         doc.insert_node(para_id, 0, run).unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "Link")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Link"))
+            .unwrap();
 
         assert!(write(&doc).contains("[Link](https://example.com)"));
     }
@@ -574,7 +584,8 @@ mod tests {
         doc.insert_node(para_id, 0, Node::new(run1_id, NodeType::Run))
             .unwrap();
         let t1_id = doc.next_id();
-        doc.insert_node(run1_id, 0, Node::text(t1_id, "Line 1")).unwrap();
+        doc.insert_node(run1_id, 0, Node::text(t1_id, "Line 1"))
+            .unwrap();
 
         let br_id = doc.next_id();
         doc.insert_node(para_id, 1, Node::new(br_id, NodeType::LineBreak))
@@ -584,7 +595,8 @@ mod tests {
         doc.insert_node(para_id, 2, Node::new(run2_id, NodeType::Run))
             .unwrap();
         let t2_id = doc.next_id();
-        doc.insert_node(run2_id, 0, Node::text(t2_id, "Line 2")).unwrap();
+        doc.insert_node(run2_id, 0, Node::text(t2_id, "Line 2"))
+            .unwrap();
 
         assert!(write(&doc).contains("Line 1  \nLine 2"));
     }

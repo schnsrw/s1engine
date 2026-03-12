@@ -260,8 +260,7 @@ fn create_hf_node(
             match segment {
                 HfSegment::Text(text) => {
                     let run_id = doc.next_id();
-                    let run_idx =
-                        doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
+                    let run_idx = doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
                     doc.insert_node(para_id, run_idx, Node::new(run_id, NodeType::Run))
                         .map_err(|e| OdtError::InvalidStructure(format!("{e}")))?;
 
@@ -276,8 +275,7 @@ fn create_hf_node(
                         AttributeKey::FieldType,
                         AttributeValue::FieldType(FieldType::PageNumber),
                     );
-                    let idx =
-                        doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
+                    let idx = doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
                     doc.insert_node(para_id, idx, field)
                         .map_err(|e| OdtError::InvalidStructure(format!("{e}")))?;
                 }
@@ -288,8 +286,7 @@ fn create_hf_node(
                         AttributeKey::FieldType,
                         AttributeValue::FieldType(FieldType::PageCount),
                     );
-                    let idx =
-                        doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
+                    let idx = doc.node(para_id).map(|n| n.children.len()).unwrap_or(0);
                     doc.insert_node(para_id, idx, field)
                         .map_err(|e| OdtError::InvalidStructure(format!("{e}")))?;
                 }
@@ -405,8 +402,7 @@ mod tests {
             .compression_method(zip::CompressionMethod::Deflated);
 
         zip.start_file("mimetype", stored).unwrap();
-        std::io::Write::write_all(&mut zip, b"application/vnd.oasis.opendocument.text")
-            .unwrap();
+        std::io::Write::write_all(&mut zip, b"application/vnd.oasis.opendocument.text").unwrap();
 
         zip.start_file("content.xml", deflated).unwrap();
         std::io::Write::write_all(&mut zip, content_xml.as_bytes()).unwrap();
@@ -505,17 +501,13 @@ mod tests {
         assert!(sect.has_footers());
 
         // Verify header node exists and contains text
-        let hdr_ref = sect
-            .header(s1_model::HeaderFooterType::Default)
-            .unwrap();
+        let hdr_ref = sect.header(s1_model::HeaderFooterType::Default).unwrap();
         let hdr_node = doc.node(hdr_ref.node_id).unwrap();
         assert_eq!(hdr_node.node_type, s1_model::NodeType::Header);
         assert!(!hdr_node.children.is_empty());
 
         // Verify footer has paragraph with field
-        let ftr_ref = sect
-            .footer(s1_model::HeaderFooterType::Default)
-            .unwrap();
+        let ftr_ref = sect.footer(s1_model::HeaderFooterType::Default).unwrap();
         let ftr_node = doc.node(ftr_ref.node_id).unwrap();
         assert_eq!(ftr_node.node_type, s1_model::NodeType::Footer);
     }

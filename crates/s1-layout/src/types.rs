@@ -59,6 +59,7 @@ pub struct LayoutBlock {
 
 /// The kind of a layout block.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum LayoutBlockKind {
     /// A paragraph with broken lines.
     Paragraph {
@@ -280,7 +281,13 @@ impl LayoutCache {
 
     /// Insert or update a cached block for the given node ID.
     pub fn insert(&mut self, node_id: NodeId, content_hash: u64, block: LayoutBlock) {
-        self.entries.insert(node_id, CacheEntry { content_hash, block });
+        self.entries.insert(
+            node_id,
+            CacheEntry {
+                content_hash,
+                block,
+            },
+        );
     }
 
     /// Number of entries in the cache.

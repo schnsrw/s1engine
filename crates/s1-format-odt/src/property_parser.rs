@@ -2,8 +2,8 @@
 
 use quick_xml::events::BytesStart;
 use s1_model::{
-    Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders,
-    Color, LineSpacing, TabAlignment, TabLeader, TabStop, UnderlineStyle,
+    Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders, Color,
+    LineSpacing, TabAlignment, TabLeader, TabStop, UnderlineStyle,
 };
 
 use quick_xml::events::Event;
@@ -195,10 +195,7 @@ pub fn parse_paragraph_properties(e: &BytesStart<'_>) -> AttributeMap {
     // Keep lines together: fo:keep-together="always"
     if let Some(kt) = get_attr(e, b"keep-together") {
         if kt == "always" {
-            attrs.set(
-                AttributeKey::KeepLinesTogether,
-                AttributeValue::Bool(true),
-            );
+            attrs.set(AttributeKey::KeepLinesTogether, AttributeValue::Bool(true));
         }
     }
 
@@ -228,7 +225,11 @@ pub fn parse_paragraph_properties(e: &BytesStart<'_>) -> AttributeMap {
         right: right.or(all),
     };
 
-    if borders.top.is_some() || borders.bottom.is_some() || borders.left.is_some() || borders.right.is_some() {
+    if borders.top.is_some()
+        || borders.bottom.is_some()
+        || borders.left.is_some()
+        || borders.right.is_some()
+    {
         attrs.set(
             AttributeKey::ParagraphBorders,
             AttributeValue::Borders(borders),
@@ -256,7 +257,12 @@ fn parse_border_value(s: &str) -> Option<BorderSide> {
         "none" => BorderStyle::None,
         _ => BorderStyle::Single,
     };
-    let color = Color::from_hex(parts[2].trim_start_matches('#')).unwrap_or(Color { r: 0, g: 0, b: 0, a: 255 });
+    let color = Color::from_hex(parts[2].trim_start_matches('#')).unwrap_or(Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
 
     Some(BorderSide {
         style,
@@ -270,10 +276,7 @@ fn parse_border_value(s: &str) -> Option<BorderSide> {
 ///
 /// Call this after `parse_paragraph_properties` when the element was `Event::Start`
 /// (not self-closing). Reads up to the closing `</style:paragraph-properties>`.
-pub fn parse_paragraph_properties_children(
-    reader: &mut Reader<&[u8]>,
-    attrs: &mut AttributeMap,
-) {
+pub fn parse_paragraph_properties_children(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) {
     let mut tab_stops: Vec<TabStop> = Vec::new();
 
     loop {
@@ -300,38 +303,45 @@ pub fn parse_paragraph_properties_children(
     }
 
     if !tab_stops.is_empty() {
-        attrs.set(
-            AttributeKey::TabStops,
-            AttributeValue::TabStops(tab_stops),
-        );
+        attrs.set(AttributeKey::TabStops, AttributeValue::TabStops(tab_stops));
     }
 }
 
 /// Parse a single `<style:tab-stop>` element.
 fn parse_tab_stop_element(e: &BytesStart<'_>) -> Option<TabStop> {
     let position = get_attr(e, b"position").and_then(|v| parse_length(&v))?;
-    let alignment = get_attr(e, b"type").map(|v| match v.as_str() {
-        "center" => TabAlignment::Center,
-        "right" => TabAlignment::Right,
-        "char" => TabAlignment::Decimal,
-        _ => TabAlignment::Left,
-    }).unwrap_or(TabAlignment::Left);
-    let leader = get_attr(e, b"leader-text").map(|v| match v.as_str() {
-        "." => TabLeader::Dot,
-        "-" => TabLeader::Dash,
-        "_" => TabLeader::Underscore,
-        _ => TabLeader::None,
-    }).unwrap_or_else(|| {
-        // Also check style:leader-style
-        get_attr(e, b"leader-style").map(|v| match v.as_str() {
-            "dotted" => TabLeader::Dot,
-            "dash" => TabLeader::Dash,
-            "solid" => TabLeader::Underscore,
+    let alignment = get_attr(e, b"type")
+        .map(|v| match v.as_str() {
+            "center" => TabAlignment::Center,
+            "right" => TabAlignment::Right,
+            "char" => TabAlignment::Decimal,
+            _ => TabAlignment::Left,
+        })
+        .unwrap_or(TabAlignment::Left);
+    let leader = get_attr(e, b"leader-text")
+        .map(|v| match v.as_str() {
+            "." => TabLeader::Dot,
+            "-" => TabLeader::Dash,
+            "_" => TabLeader::Underscore,
             _ => TabLeader::None,
-        }).unwrap_or(TabLeader::None)
-    });
+        })
+        .unwrap_or_else(|| {
+            // Also check style:leader-style
+            get_attr(e, b"leader-style")
+                .map(|v| match v.as_str() {
+                    "dotted" => TabLeader::Dot,
+                    "dash" => TabLeader::Dash,
+                    "solid" => TabLeader::Underscore,
+                    _ => TabLeader::None,
+                })
+                .unwrap_or(TabLeader::None)
+        });
 
-    Some(TabStop { position, alignment, leader })
+    Some(TabStop {
+        position,
+        alignment,
+        leader,
+    })
 }
 
 /// Parse a font size string (e.g. "12pt", "16px", "1cm") to points.
@@ -485,36 +495,29 @@ mod tests {
 
     #[test]
     fn parse_superscript() {
-        let attrs = parse_text_attrs(
-            r#"<style:text-properties style:text-position="super 58%"/>"#,
-        );
+        let attrs = parse_text_attrs(r#"<style:text-properties style:text-position="super 58%"/>"#);
         assert_eq!(attrs.get_bool(&AttributeKey::Superscript), Some(true));
         assert_eq!(attrs.get_bool(&AttributeKey::Subscript), None);
     }
 
     #[test]
     fn parse_subscript() {
-        let attrs = parse_text_attrs(
-            r#"<style:text-properties style:text-position="sub 58%"/>"#,
-        );
+        let attrs = parse_text_attrs(r#"<style:text-properties style:text-position="sub 58%"/>"#);
         assert_eq!(attrs.get_bool(&AttributeKey::Subscript), Some(true));
         assert_eq!(attrs.get_bool(&AttributeKey::Superscript), None);
     }
 
     #[test]
     fn parse_character_spacing() {
-        let attrs = parse_text_attrs(
-            r#"<style:text-properties fo:letter-spacing="0.1cm"/>"#,
-        );
+        let attrs = parse_text_attrs(r#"<style:text-properties fo:letter-spacing="0.1cm"/>"#);
         let pts = attrs.get_f64(&AttributeKey::FontSpacing).unwrap();
         assert!((pts - 2.835).abs() < 0.01); // 0.1cm ≈ 2.835pt
     }
 
     #[test]
     fn parse_paragraph_shading() {
-        let attrs = parse_para_attrs(
-            r##"<style:paragraph-properties fo:background-color="#FFFF00"/>"##,
-        );
+        let attrs =
+            parse_para_attrs(r##"<style:paragraph-properties fo:background-color="#FFFF00"/>"##);
         match attrs.get(&AttributeKey::Background) {
             Some(AttributeValue::Color(c)) => {
                 assert_eq!(c.r, 255);
@@ -527,17 +530,14 @@ mod tests {
 
     #[test]
     fn parse_keep_lines_together() {
-        let attrs = parse_para_attrs(
-            r#"<style:paragraph-properties fo:keep-together="always"/>"#,
-        );
+        let attrs = parse_para_attrs(r#"<style:paragraph-properties fo:keep-together="always"/>"#);
         assert_eq!(attrs.get_bool(&AttributeKey::KeepLinesTogether), Some(true));
     }
 
     #[test]
     fn parse_paragraph_border_all() {
-        let attrs = parse_para_attrs(
-            r#"<style:paragraph-properties fo:border="0.06pt solid #000000"/>"#,
-        );
+        let attrs =
+            parse_para_attrs(r#"<style:paragraph-properties fo:border="0.06pt solid #000000"/>"#);
         match attrs.get(&AttributeKey::ParagraphBorders) {
             Some(AttributeValue::Borders(borders)) => {
                 assert!(borders.top.is_some());

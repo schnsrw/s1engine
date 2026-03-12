@@ -55,16 +55,22 @@ fn collect_blocks(doc: &DocumentModel, container_id: NodeId, blocks: &mut Vec<St
                 }
 
                 // Check for list marker (ListInfo attribute)
-                if let Some(AttributeValue::ListInfo(ref li)) = child.attributes.get(&AttributeKey::ListInfo) {
+                if let Some(AttributeValue::ListInfo(ref li)) =
+                    child.attributes.get(&AttributeKey::ListInfo)
+                {
                     let indent = "  ".repeat(li.level as usize);
                     text.push_str(&indent);
                     match li.num_format {
                         ListFormat::Bullet => text.push_str("- "),
-                        ListFormat::Decimal | ListFormat::LowerAlpha | ListFormat::UpperAlpha
-                        | ListFormat::LowerRoman | ListFormat::UpperRoman => {
+                        ListFormat::Decimal
+                        | ListFormat::LowerAlpha
+                        | ListFormat::UpperAlpha
+                        | ListFormat::LowerRoman
+                        | ListFormat::UpperRoman => {
                             let start = li.start.unwrap_or(1);
                             text.push_str(&format!("{}. ", start));
                         }
+                        _ => text.push_str("- "),
                     }
                 }
 
@@ -114,7 +120,11 @@ fn collect_blocks(doc: &DocumentModel, container_id: NodeId, blocks: &mut Vec<St
 /// Returns `Some(level)` if `StyleId` is "HeadingN" (1–6).
 fn heading_level_from_attrs(attrs: &s1_model::AttributeMap) -> Option<u8> {
     let style_id = attrs.get_string(&AttributeKey::StyleId)?;
-    style_id.strip_prefix("Heading")?.parse::<u8>().ok().filter(|&l| (1..=6).contains(&l))
+    style_id
+        .strip_prefix("Heading")?
+        .parse::<u8>()
+        .ok()
+        .filter(|&l| (1..=6).contains(&l))
 }
 
 /// Write inline content (runs, text, breaks) into a string.
@@ -401,9 +411,11 @@ mod tests {
         );
         doc.insert_node(body_id, 1, para1).unwrap();
         let r1 = doc.next_id();
-        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
         let t1 = doc.next_id();
-        doc.insert_node(r1, 0, Node::text(t1, "Chapter One")).unwrap();
+        doc.insert_node(r1, 0, Node::text(t1, "Chapter One"))
+            .unwrap();
 
         // Add H2
         let p2 = doc.next_id();
@@ -414,7 +426,8 @@ mod tests {
         );
         doc.insert_node(body_id, 2, para2).unwrap();
         let r2 = doc.next_id();
-        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run))
+            .unwrap();
         let t2 = doc.next_id();
         doc.insert_node(r2, 0, Node::text(t2, "Section A")).unwrap();
 
@@ -434,11 +447,14 @@ mod tests {
         doc.insert_node(body_id, 0, toc).unwrap();
 
         let p1 = doc.next_id();
-        doc.insert_node(toc_id, 0, Node::new(p1, NodeType::Paragraph)).unwrap();
+        doc.insert_node(toc_id, 0, Node::new(p1, NodeType::Paragraph))
+            .unwrap();
         let r1 = doc.next_id();
-        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
         let t1 = doc.next_id();
-        doc.insert_node(r1, 0, Node::text(t1, "Cached Entry")).unwrap();
+        doc.insert_node(r1, 0, Node::text(t1, "Cached Entry"))
+            .unwrap();
 
         let text = write_string(&doc);
         assert_eq!(text, "Cached Entry");
@@ -456,7 +472,10 @@ mod tests {
         let mut doc = DocumentModel::new();
         let body_id = doc.body_id().unwrap();
 
-        for (i, (level, text)) in [(1, "Title"), (2, "Subtitle"), (3, "Section")].iter().enumerate() {
+        for (i, (level, text)) in [(1, "Title"), (2, "Subtitle"), (3, "Section")]
+            .iter()
+            .enumerate()
+        {
             let p = doc.next_id();
             let mut para = Node::new(p, NodeType::Paragraph);
             para.attributes.set(
@@ -507,7 +526,10 @@ mod tests {
         let mut doc = DocumentModel::new();
         let body_id = doc.body_id().unwrap();
 
-        for (i, (num, item)) in [(1, "First"), (2, "Second"), (3, "Third")].iter().enumerate() {
+        for (i, (num, item)) in [(1, "First"), (2, "Second"), (3, "Third")]
+            .iter()
+            .enumerate()
+        {
             let p = doc.next_id();
             let mut para = Node::new(p, NodeType::Paragraph);
             para.attributes.set(
@@ -549,7 +571,8 @@ mod tests {
         );
         doc.insert_node(body_id, 0, para0).unwrap();
         let r0 = doc.next_id();
-        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run)).unwrap();
+        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run))
+            .unwrap();
         let t0 = doc.next_id();
         doc.insert_node(r0, 0, Node::text(t0, "Top")).unwrap();
 
@@ -567,7 +590,8 @@ mod tests {
         );
         doc.insert_node(body_id, 1, para1).unwrap();
         let r1 = doc.next_id();
-        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
         let t1 = doc.next_id();
         doc.insert_node(r1, 0, Node::text(t1, "Nested")).unwrap();
 
@@ -582,9 +606,11 @@ mod tests {
 
         // Paragraph before
         let p1 = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(p1, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(p1, NodeType::Paragraph))
+            .unwrap();
         let r1 = doc.next_id();
-        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
         let t1 = doc.next_id();
         doc.insert_node(r1, 0, Node::text(t1, "Before")).unwrap();
 
@@ -597,7 +623,8 @@ mod tests {
         );
         doc.insert_node(body_id, 1, para2).unwrap();
         let r2 = doc.next_id();
-        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run))
+            .unwrap();
         let t2 = doc.next_id();
         doc.insert_node(r2, 0, Node::text(t2, "After")).unwrap();
 
@@ -620,18 +647,22 @@ mod tests {
         );
         doc.insert_node(body_id, idx, para0).unwrap();
         let r0 = doc.next_id();
-        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run)).unwrap();
+        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run))
+            .unwrap();
         let t0 = doc.next_id();
         doc.insert_node(r0, 0, Node::text(t0, "Title")).unwrap();
         idx += 1;
 
         // Normal paragraph
         let p1 = doc.next_id();
-        doc.insert_node(body_id, idx, Node::new(p1, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, idx, Node::new(p1, NodeType::Paragraph))
+            .unwrap();
         let r1 = doc.next_id();
-        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
         let t1 = doc.next_id();
-        doc.insert_node(r1, 0, Node::text(t1, "Some text.")).unwrap();
+        doc.insert_node(r1, 0, Node::text(t1, "Some text."))
+            .unwrap();
         idx += 1;
 
         // Bullet item
@@ -648,7 +679,8 @@ mod tests {
         );
         doc.insert_node(body_id, idx, para2).unwrap();
         let r2 = doc.next_id();
-        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run))
+            .unwrap();
         let t2 = doc.next_id();
         doc.insert_node(r2, 0, Node::text(t2, "Item")).unwrap();
 

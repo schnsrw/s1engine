@@ -1151,10 +1151,7 @@ mod tests {
         let body = doc.node(body_id).unwrap();
         let toc = doc.node(body.children[0]).unwrap();
         assert_eq!(toc.node_type, NodeType::TableOfContents);
-        assert_eq!(
-            toc.attributes.get_i64(&AttributeKey::TocMaxLevel),
-            Some(3)
-        );
+        assert_eq!(toc.attributes.get_i64(&AttributeKey::TocMaxLevel), Some(3));
     }
 
     #[test]

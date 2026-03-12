@@ -151,6 +151,7 @@ pub fn field_type_to_instruction(ft: FieldType) -> String {
         FieldType::Author => "AUTHOR".to_string(),
         FieldType::TableOfContents => "TOC".to_string(),
         FieldType::Custom => "CUSTOM".to_string(),
+        _ => "CUSTOM".to_string(),
     }
 }
 
@@ -165,6 +166,7 @@ fn field_type_placeholder(ft: FieldType) -> &'static str {
         FieldType::Author => "Author",
         FieldType::TableOfContents => "",
         FieldType::Custom => "",
+        _ => "",
     }
 }
 

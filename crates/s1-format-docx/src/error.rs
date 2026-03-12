@@ -1,32 +1,22 @@
 //! Error types for the DOCX format crate.
 
-use std::fmt;
-
 /// Error type for DOCX format operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DocxError {
     /// Error reading the ZIP archive.
+    #[error("DOCX ZIP error: {0}")]
     Zip(String),
     /// Error parsing XML content.
+    #[error("DOCX XML error: {0}")]
     Xml(String),
     /// A required file is missing from the DOCX archive.
+    #[error("Missing file in DOCX: {0}")]
     MissingFile(String),
     /// The document structure is invalid.
+    #[error("Invalid DOCX structure: {0}")]
     InvalidStructure(String),
 }
-
-impl fmt::Display for DocxError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Zip(msg) => write!(f, "DOCX ZIP error: {msg}"),
-            Self::Xml(msg) => write!(f, "DOCX XML error: {msg}"),
-            Self::MissingFile(path) => write!(f, "Missing file in DOCX: {path}"),
-            Self::InvalidStructure(msg) => write!(f, "Invalid DOCX structure: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for DocxError {}
 
 impl From<zip::result::ZipError> for DocxError {
     fn from(e: zip::result::ZipError) -> Self {

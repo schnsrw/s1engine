@@ -70,8 +70,7 @@ impl Format {
             }
         } else if data.len() >= 4 && &data[0..4] == b"%PDF" {
             Self::Pdf
-        } else if data.len() >= 8
-            && data[0..8] == [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
+        } else if data.len() >= 8 && data[0..8] == [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
         {
             Self::Doc
         } else {

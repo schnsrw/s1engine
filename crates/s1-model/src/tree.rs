@@ -17,6 +17,7 @@ use crate::styles::{resolve_style_chain, Style};
 
 /// Error type for document model operations.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ModelError {
     /// The specified node was not found.
     NodeNotFound(NodeId),
@@ -637,7 +638,11 @@ impl DocumentModel {
         headings
     }
 
-    fn collect_headings_from(&self, container_id: NodeId, headings: &mut Vec<(NodeId, u8, String)>) {
+    fn collect_headings_from(
+        &self,
+        container_id: NodeId,
+        headings: &mut Vec<(NodeId, u8, String)>,
+    ) {
         let node = match self.node(container_id) {
             Some(n) => n,
             None => return,
@@ -1089,10 +1094,16 @@ mod tests {
         let (mut doc, _p, _r, text_id) = doc_with_text("café");
         // "café" has 4 chars but 5 bytes (é = 2 bytes)
         doc.insert_text(text_id, 4, "!").unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café!"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("café!")
+        );
 
         doc.insert_text(text_id, 0, "\u{2603}").unwrap(); // snowman U+2603
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{2603}caf\u{00e9}!"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("\u{2603}caf\u{00e9}!")
+        );
     }
 
     #[test]
@@ -1101,7 +1112,10 @@ mod tests {
         let (mut doc, _p, _r, text_id) = doc_with_text("\u{1F600}\u{1F601}");
         // 2 chars, each 4 bytes
         doc.insert_text(text_id, 1, "X").unwrap();
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{1F600}X\u{1F601}"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("\u{1F600}X\u{1F601}")
+        );
     }
 
     #[test]
@@ -1110,7 +1124,10 @@ mod tests {
         // Delete the accented char (char offset 1, length 1)
         let deleted = doc.delete_text(text_id, 1, 1).unwrap();
         assert_eq!(deleted, "\u{00e9}");
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("hllo"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("hllo")
+        );
     }
 
     #[test]
@@ -1119,7 +1136,10 @@ mod tests {
         // Delete char at offset 1 (the 4-byte char), length 1
         let deleted = doc.delete_text(text_id, 1, 1).unwrap();
         assert_eq!(deleted, "\u{1F600}");
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("ab\u{1F601}c"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("ab\u{1F601}c")
+        );
     }
 
     #[test]
@@ -1135,7 +1155,10 @@ mod tests {
     fn insert_text_mixed_script() {
         let (mut doc, _p, _r, text_id) = doc_with_text("hello世界");
         doc.insert_text(text_id, 5, "\u{2192}").unwrap(); // rightwards arrow
-        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("hello\u{2192}\u{4e16}\u{754c}"));
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("hello\u{2192}\u{4e16}\u{754c}")
+        );
     }
 
     // ─── Cycle detection regression tests ────────────────────────────────
@@ -1145,7 +1168,8 @@ mod tests {
         let mut doc = DocumentModel::new();
         let body_id = doc.body_id().unwrap();
         let para_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         // Moving a node under itself must fail
         let result = doc.move_node(para_id, para_id, 0);
@@ -1159,9 +1183,11 @@ mod tests {
 
         // Build: body > para > run
         let para_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
         let run_id = doc.next_id();
-        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
 
         // Moving para under its own child (run) must fail — would create cycle
         let result = doc.move_node(para_id, run_id, 0);
@@ -1175,13 +1201,17 @@ mod tests {
 
         // body > table > row > cell > para
         let tbl = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(tbl, NodeType::Table)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(tbl, NodeType::Table))
+            .unwrap();
         let row = doc.next_id();
-        doc.insert_node(tbl, 0, Node::new(row, NodeType::TableRow)).unwrap();
+        doc.insert_node(tbl, 0, Node::new(row, NodeType::TableRow))
+            .unwrap();
         let cell = doc.next_id();
-        doc.insert_node(row, 0, Node::new(cell, NodeType::TableCell)).unwrap();
+        doc.insert_node(row, 0, Node::new(cell, NodeType::TableCell))
+            .unwrap();
         let para = doc.next_id();
-        doc.insert_node(cell, 0, Node::new(para, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cell, 0, Node::new(para, NodeType::Paragraph))
+            .unwrap();
 
         // Moving table under its deep descendant (para) must fail
         let result = doc.move_node(tbl, para, 0);

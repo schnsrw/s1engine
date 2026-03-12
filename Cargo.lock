@@ -1276,7 +1276,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "s1-convert"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cfb",
  "pretty_assertions",
@@ -1288,28 +1288,30 @@ dependencies = [
 
 [[package]]
 name = "s1-crdt"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pretty_assertions",
  "proptest",
  "s1-model",
  "s1-ops",
+ "thiserror",
 ]
 
 [[package]]
 name = "s1-format-docx"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "pretty_assertions",
  "quick-xml",
  "s1-model",
+ "thiserror",
  "zip",
 ]
 
 [[package]]
 name = "s1-format-md"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pulldown-cmark",
  "s1-model",
@@ -1318,17 +1320,18 @@ dependencies = [
 
 [[package]]
 name = "s1-format-odt"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pretty_assertions",
  "quick-xml",
  "s1-model",
+ "thiserror",
  "zip",
 ]
 
 [[package]]
 name = "s1-format-pdf"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fontdb",
  "image",
@@ -1344,16 +1347,17 @@ dependencies = [
 
 [[package]]
 name = "s1-format-txt"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "encoding_rs",
  "pretty_assertions",
  "s1-model",
+ "thiserror",
 ]
 
 [[package]]
 name = "s1-layout"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fontdb",
  "pretty_assertions",
@@ -1364,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "s1-model"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pretty_assertions",
  "proptest",
@@ -1372,16 +1376,17 @@ dependencies = [
 
 [[package]]
 name = "s1-ops"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "pretty_assertions",
  "proptest",
  "s1-model",
+ "thiserror",
 ]
 
 [[package]]
 name = "s1-text"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "fontdb",
  "pretty_assertions",
@@ -1395,7 +1400,7 @@ dependencies = [
 
 [[package]]
 name = "s1engine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "pretty_assertions",
@@ -1416,14 +1421,14 @@ dependencies = [
 
 [[package]]
 name = "s1engine-c"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "s1engine",
 ]
 
 [[package]]
 name = "s1engine-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "js-sys",
  "s1-text",

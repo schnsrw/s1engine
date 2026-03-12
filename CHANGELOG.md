@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-13
+
+### Changed
+- All public enums now have `#[non_exhaustive]` for forward-compatible API evolution
+- All error types (except s1-model) migrated to `thiserror` derive macros
+- Added missing public re-exports: `Borders`, `BorderSide`, `BorderStyle`, `TabStop`, `TabAlignment`, `TabLeader`, `MediaId`, `MediaStore`, `TableWidth`, `VerticalAlignment`
+- Documented `model` and `ops` escape-hatch re-exports
+
 ### Added
 
 **Core Engine**
@@ -90,6 +98,6 @@ Measured via criterion on a single core (representative, not a guarantee):
 | DOCX round-trip (small) | ~124 us |
 | Undo/redo 10 operations | ~7.2 us |
 
-## [0.1.0] - Unreleased
+## [0.1.0]
 
-Initial development release. Not yet published to crates.io.
+Initial development release (pre-release). Not published to crates.io.

@@ -62,6 +62,7 @@ impl Style {
 
 /// The type of a style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum StyleType {
     Paragraph,
     Character,

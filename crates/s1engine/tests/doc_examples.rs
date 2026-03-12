@@ -79,10 +79,7 @@ fn readme_builder_pattern() {
 
     // Verify metadata
     assert_eq!(doc.metadata().title.as_deref(), Some("Quarterly Report"));
-    assert_eq!(
-        doc.metadata().creator.as_deref(),
-        Some("Engineering Team")
-    );
+    assert_eq!(doc.metadata().creator.as_deref(), Some("Engineering Team"));
 
     // Verify text content
     let text = doc.to_plain_text();
@@ -394,11 +391,7 @@ fn api_design_collaboration() {
 
     let text_id = doc.next_id();
     let _crdt_op = doc
-        .apply_local(Operation::insert_node(
-            run_id,
-            0,
-            Node::text(text_id, ""),
-        ))
+        .apply_local(Operation::insert_node(run_id, 0, Node::text(text_id, "")))
         .unwrap();
 
     // Apply a local text insert (returns CrdtOperation for broadcast)

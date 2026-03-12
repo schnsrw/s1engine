@@ -264,7 +264,10 @@ fn write_paragraph_children(
 
         match child.node_type {
             NodeType::Run => {
-                let child_url = child.attributes.get_string(&AttributeKey::HyperlinkUrl).map(|s| s.to_string());
+                let child_url = child
+                    .attributes
+                    .get_string(&AttributeKey::HyperlinkUrl)
+                    .map(|s| s.to_string());
 
                 // Close hyperlink if URL changed
                 if current_hyperlink_url.is_some() && current_hyperlink_url != child_url {
@@ -573,9 +576,7 @@ fn write_toc_odt(
         .get_string(&AttributeKey::TocTitle)
         .unwrap_or("Table of Contents");
 
-    xml.push_str(
-        r#"<text:table-of-content text:name="TOC" text:protected="false">"#,
-    );
+    xml.push_str(r#"<text:table-of-content text:name="TOC" text:protected="false">"#);
     xml.push_str(&format!(
         r#"<text:table-of-content-source text:outline-level="{}">"#,
         max_level
@@ -867,7 +868,8 @@ mod tests {
 
         let toc_id = doc.next_id();
         let mut toc = Node::new(toc_id, NodeType::TableOfContents);
-        toc.attributes.set(AttributeKey::TocMaxLevel, AttributeValue::Int(2));
+        toc.attributes
+            .set(AttributeKey::TocMaxLevel, AttributeValue::Int(2));
         toc.attributes.set(
             AttributeKey::TocTitle,
             AttributeValue::String("Contents".into()),
@@ -1075,35 +1077,50 @@ mod tests {
         let root_children = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
         let cb_id = doc.next_id();
         let mut cb = Node::new(cb_id, NodeType::CommentBody);
-        cb.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
-        cb.attributes.set(AttributeKey::CommentAuthor, AttributeValue::String("Alice".into()));
-        cb.attributes.set(AttributeKey::CommentDate, AttributeValue::String("2024-01-15".into()));
+        cb.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cb.attributes.set(
+            AttributeKey::CommentAuthor,
+            AttributeValue::String("Alice".into()),
+        );
+        cb.attributes.set(
+            AttributeKey::CommentDate,
+            AttributeValue::String("2024-01-15".into()),
+        );
         doc.insert_node(root_id, root_children, cb).unwrap();
 
         let cp_id = doc.next_id();
-        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph))
+            .unwrap();
         let cr_id = doc.next_id();
-        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run)).unwrap();
+        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run))
+            .unwrap();
         let ct_id = doc.next_id();
-        doc.insert_node(cr_id, 0, Node::text(ct_id, "Nice!")).unwrap();
+        doc.insert_node(cr_id, 0, Node::text(ct_id, "Nice!"))
+            .unwrap();
 
         // Create paragraph with CommentStart/End
         let para_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         let cs_id = doc.next_id();
         let mut cs = Node::new(cs_id, NodeType::CommentStart);
-        cs.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cs.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
         doc.insert_node(para_id, 0, cs).unwrap();
 
         let run_id = doc.next_id();
-        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run)).unwrap();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run))
+            .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "annotated")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "annotated"))
+            .unwrap();
 
         let ce_id = doc.next_id();
         let mut ce = Node::new(ce_id, NodeType::CommentEnd);
-        ce.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        ce.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
         doc.insert_node(para_id, 2, ce).unwrap();
 
         let (xml, _) = write_content_xml(&doc);
@@ -1120,11 +1137,14 @@ mod tests {
         let body_id = doc.body_id().unwrap();
 
         let para_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
         let run_id = doc.next_id();
-        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "plain")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "plain"))
+            .unwrap();
 
         let (xml, _) = write_content_xml(&doc);
         assert!(!xml.contains("office:annotation"));
@@ -1140,34 +1160,46 @@ mod tests {
         let root_children = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
         let cb_id = doc.next_id();
         let mut cb = Node::new(cb_id, NodeType::CommentBody);
-        cb.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
-        cb.attributes.set(AttributeKey::CommentAuthor, AttributeValue::String("Bob".into()));
+        cb.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cb.attributes.set(
+            AttributeKey::CommentAuthor,
+            AttributeValue::String("Bob".into()),
+        );
         doc.insert_node(root_id, root_children, cb).unwrap();
 
         let cp_id = doc.next_id();
-        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph))
+            .unwrap();
         let cr_id = doc.next_id();
-        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run)).unwrap();
+        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run))
+            .unwrap();
         let ct_id = doc.next_id();
-        doc.insert_node(cr_id, 0, Node::text(ct_id, "Feedback")).unwrap();
+        doc.insert_node(cr_id, 0, Node::text(ct_id, "Feedback"))
+            .unwrap();
 
         // Create paragraph
         let para_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         let cs_id = doc.next_id();
         let mut cs = Node::new(cs_id, NodeType::CommentStart);
-        cs.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cs.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
         doc.insert_node(para_id, 0, cs).unwrap();
 
         let run_id = doc.next_id();
-        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run)).unwrap();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run))
+            .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "text")).unwrap();
+        doc.insert_node(run_id, 0, Node::text(text_id, "text"))
+            .unwrap();
 
         let ce_id = doc.next_id();
         let mut ce = Node::new(ce_id, NodeType::CommentEnd);
-        ce.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        ce.attributes
+            .set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
         doc.insert_node(para_id, 2, ce).unwrap();
 
         // Write

@@ -230,6 +230,7 @@ pub fn list_format_to_ooxml(fmt: ListFormat) -> &'static str {
         ListFormat::UpperAlpha => "upperLetter",
         ListFormat::LowerRoman => "lowerRoman",
         ListFormat::UpperRoman => "upperRoman",
+        _ => "decimal",
     }
 }
 

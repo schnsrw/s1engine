@@ -6,7 +6,7 @@ Designed as an embeddable SDK for building document editors, converters, and col
 
 ## Status
 
-**Pre-release** (`0.1.x`) -- All 5 phases complete. Core functionality works. API is not yet stable.
+**1.0.0** -- Stable API. All 5 phases complete.
 
 - Comprehensive test suite across 13 crates (run `cargo test --workspace` to verify)
 - DOCX, ODT, TXT, Markdown read/write with round-trip fidelity
@@ -97,7 +97,7 @@ std::fs::write("output.odt", output)?;
 ```toml
 [dependencies]
 # Default: DOCX + ODT + TXT + Markdown
-s1engine = "0.1"
+s1engine = "1.0"
 
 # Minimal: just DOCX parsing
 s1engine = { version = "0.1", default-features = false, features = ["docx"] }

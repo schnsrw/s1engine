@@ -36,6 +36,7 @@ pub fn write_text_properties(attrs: &AttributeMap) -> String {
             UnderlineStyle::Dashed => "dash",
             UnderlineStyle::Wave => "wave",
             UnderlineStyle::None => "none",
+            _ => "none",
         };
         if *style != UnderlineStyle::None {
             props.push(format!(r#"style:text-underline-style="{val}""#));
@@ -79,6 +80,7 @@ pub fn write_paragraph_properties(attrs: &AttributeMap) -> String {
             Alignment::Center => "center",
             Alignment::Right => "end",
             Alignment::Justify => "justify",
+            _ => "start",
         };
         props.push(format!(r#"fo:text-align="{val}""#));
     }
@@ -121,6 +123,7 @@ pub fn write_paragraph_properties(attrs: &AttributeMap) -> String {
                     points_to_cm(*pts)
                 ));
             }
+            _ => {}
         }
     }
     if let Some(true) = attrs.get_bool(&AttributeKey::PageBreakBefore) {
@@ -142,7 +145,10 @@ pub fn write_paragraph_properties(attrs: &AttributeMap) -> String {
             props.push(format!(r#"fo:border-top="{}""#, border_side_to_odf(side)));
         }
         if let Some(ref side) = borders.bottom {
-            props.push(format!(r#"fo:border-bottom="{}""#, border_side_to_odf(side)));
+            props.push(format!(
+                r#"fo:border-bottom="{}""#,
+                border_side_to_odf(side)
+            ));
         }
         if let Some(ref side) = borders.left {
             props.push(format!(r#"fo:border-left="{}""#, border_side_to_odf(side)));
@@ -153,35 +159,41 @@ pub fn write_paragraph_properties(attrs: &AttributeMap) -> String {
     }
 
     // Tab stops — these require child elements
-    let tab_stops_xml = if let Some(AttributeValue::TabStops(tabs)) = attrs.get(&AttributeKey::TabStops) {
-        if tabs.is_empty() {
-            String::new()
-        } else {
-            let mut xml = String::from("<style:tab-stops>");
-            for ts in tabs {
-                xml.push_str("<style:tab-stop");
-                xml.push_str(&format!(r#" style:position="{}""#, points_to_cm(ts.position)));
-                let tab_type = match ts.alignment {
-                    TabAlignment::Left => "left",
-                    TabAlignment::Center => "center",
-                    TabAlignment::Right => "right",
-                    TabAlignment::Decimal => "char",
-                };
-                xml.push_str(&format!(r#" style:type="{tab_type}""#));
-                match ts.leader {
-                    TabLeader::None => {}
-                    TabLeader::Dot => xml.push_str(r#" style:leader-text=".""#),
-                    TabLeader::Dash => xml.push_str(r#" style:leader-text="-""#),
-                    TabLeader::Underscore => xml.push_str(r#" style:leader-text="_""#),
+    let tab_stops_xml =
+        if let Some(AttributeValue::TabStops(tabs)) = attrs.get(&AttributeKey::TabStops) {
+            if tabs.is_empty() {
+                String::new()
+            } else {
+                let mut xml = String::from("<style:tab-stops>");
+                for ts in tabs {
+                    xml.push_str("<style:tab-stop");
+                    xml.push_str(&format!(
+                        r#" style:position="{}""#,
+                        points_to_cm(ts.position)
+                    ));
+                    let tab_type = match ts.alignment {
+                        TabAlignment::Left => "left",
+                        TabAlignment::Center => "center",
+                        TabAlignment::Right => "right",
+                        TabAlignment::Decimal => "char",
+                        _ => "left",
+                    };
+                    xml.push_str(&format!(r#" style:type="{tab_type}""#));
+                    match ts.leader {
+                        TabLeader::None => {}
+                        TabLeader::Dot => xml.push_str(r#" style:leader-text=".""#),
+                        TabLeader::Dash => xml.push_str(r#" style:leader-text="-""#),
+                        TabLeader::Underscore => xml.push_str(r#" style:leader-text="_""#),
+                        _ => {}
+                    }
+                    xml.push_str("/>");
                 }
-                xml.push_str("/>");
+                xml.push_str("</style:tab-stops>");
+                xml
             }
-            xml.push_str("</style:tab-stops>");
-            xml
-        }
-    } else {
-        String::new()
-    };
+        } else {
+            String::new()
+        };
 
     if props.is_empty() && tab_stops_xml.is_empty() {
         String::new()
@@ -205,6 +217,7 @@ fn border_side_to_odf(side: &s1_model::BorderSide) -> String {
         BorderStyle::Dashed => "dashed",
         BorderStyle::Dotted => "dotted",
         BorderStyle::Thick => "solid",
+        _ => "none",
     };
     format!("{:.2}pt {} #{}", side.width, style, side.color.to_hex())
 }
@@ -220,6 +233,7 @@ pub fn write_table_cell_properties(attrs: &AttributeMap) -> String {
             VerticalAlignment::Top => "top",
             VerticalAlignment::Center => "middle",
             VerticalAlignment::Bottom => "bottom",
+            _ => "top",
         };
         props.push(format!(r#"style:vertical-align="{val}""#));
     }
@@ -348,8 +362,16 @@ mod tests {
         attrs.set(
             AttributeKey::TabStops,
             AttributeValue::TabStops(vec![
-                TabStop { position: 72.0, alignment: TabAlignment::Left, leader: TabLeader::None },
-                TabStop { position: 144.0, alignment: TabAlignment::Right, leader: TabLeader::Dot },
+                TabStop {
+                    position: 72.0,
+                    alignment: TabAlignment::Left,
+                    leader: TabLeader::None,
+                },
+                TabStop {
+                    position: 144.0,
+                    alignment: TabAlignment::Right,
+                    leader: TabLeader::Dot,
+                },
             ]),
         );
         let xml = write_paragraph_properties(&attrs);
@@ -369,8 +391,18 @@ mod tests {
         attrs.set(
             AttributeKey::ParagraphBorders,
             AttributeValue::Borders(Borders {
-                top: Some(BorderSide { style: BorderStyle::Single, width: 1.0, color: Color::new(0, 0, 0), spacing: 0.0 }),
-                bottom: Some(BorderSide { style: BorderStyle::Dashed, width: 0.5, color: Color::new(255, 0, 0), spacing: 0.0 }),
+                top: Some(BorderSide {
+                    style: BorderStyle::Single,
+                    width: 1.0,
+                    color: Color::new(0, 0, 0),
+                    spacing: 0.0,
+                }),
+                bottom: Some(BorderSide {
+                    style: BorderStyle::Dashed,
+                    width: 0.5,
+                    color: Color::new(255, 0, 0),
+                    spacing: 0.0,
+                }),
                 left: None,
                 right: None,
             }),

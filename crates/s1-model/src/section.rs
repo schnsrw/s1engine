@@ -22,6 +22,7 @@ pub enum SectionBreakType {
 
 /// Type of header/footer reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum HeaderFooterType {
     /// Used on all pages (unless first/even overrides are active).
     Default,

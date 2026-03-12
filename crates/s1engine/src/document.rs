@@ -3,7 +3,9 @@
 //! [`Document`] wraps [`DocumentModel`] with undo/redo history and provides
 //! a convenient API for reading, editing, and exporting documents.
 
-use s1_model::{AttributeKey, AttributeValue, DocumentMetadata, DocumentModel, Node, NodeId, NodeType};
+use s1_model::{
+    AttributeKey, AttributeValue, DocumentMetadata, DocumentModel, Node, NodeId, NodeType,
+};
 use s1_ops::{History, Operation, Transaction, TransactionBuilder};
 
 use crate::error::Error;
@@ -293,10 +295,14 @@ impl Document {
 
             // Add a run with the heading text
             let run_id = self.model.next_id();
-            let _ = self.model.insert_node(para_id, 0, Node::new(run_id, NodeType::Run));
+            let _ = self
+                .model
+                .insert_node(para_id, 0, Node::new(run_id, NodeType::Run));
 
             let text_id = self.model.next_id();
-            let _ = self.model.insert_node(run_id, 0, Node::text(text_id, text.clone()));
+            let _ = self
+                .model
+                .insert_node(run_id, 0, Node::text(text_id, text.clone()));
 
             child_index += 1;
         }

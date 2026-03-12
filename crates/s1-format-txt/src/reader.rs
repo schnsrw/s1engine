@@ -8,14 +8,13 @@
 //! Empty lines become empty paragraphs (no Run/Text children).
 
 use encoding_rs::{UTF_16BE, UTF_16LE, UTF_8};
-use s1_model::{
-    AttributeKey, AttributeValue, DocumentModel, ListFormat, ListInfo, Node, NodeType,
-};
+use s1_model::{AttributeKey, AttributeValue, DocumentModel, ListFormat, ListInfo, Node, NodeType};
 
 use crate::error::TxtError;
 
 /// The encoding that was detected during reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DetectedEncoding {
     Utf8,
     Utf8Bom,
@@ -126,7 +125,8 @@ fn text_to_document(text: &str) -> DocumentModel {
         if *line == "---" {
             let para_id = doc.next_id();
             let mut para = Node::new(para_id, NodeType::Paragraph);
-            para.attributes.set(AttributeKey::PageBreakBefore, AttributeValue::Bool(true));
+            para.attributes
+                .set(AttributeKey::PageBreakBefore, AttributeValue::Bool(true));
             doc.insert_node(body_id, child_index, para).unwrap();
             child_index += 1;
             continue;

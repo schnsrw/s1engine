@@ -112,7 +112,9 @@ fn docx_with_deeply_nested_xml() {
     let options = zip::write::SimpleFileOptions::default();
     zip.start_file("word/document.xml", options).unwrap();
 
-    let mut xml = String::from(r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#);
+    let mut xml = String::from(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#,
+    );
     // 100 levels of nested paragraphs (invalid but shouldn't panic)
     for _ in 0..100 {
         xml.push_str("<w:p><w:r><w:t>x</w:t></w:r>");
@@ -158,7 +160,8 @@ fn odt_with_missing_content_xml() {
     let mut zip = zip::ZipWriter::new(Cursor::new(buf));
     let options = zip::write::SimpleFileOptions::default();
     zip.start_file("mimetype", options).unwrap();
-    zip.write_all(b"application/vnd.oasis.opendocument.text").unwrap();
+    zip.write_all(b"application/vnd.oasis.opendocument.text")
+        .unwrap();
     let bytes = zip.finish().unwrap().into_inner();
 
     let engine = Engine::new();

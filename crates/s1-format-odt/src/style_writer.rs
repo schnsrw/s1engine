@@ -33,6 +33,7 @@ pub fn write_styles_xml(doc: &DocumentModel) -> Option<String> {
                 StyleType::Character => "text",
                 StyleType::Table => "table",
                 StyleType::List => "list",
+                _ => "paragraph",
             };
 
             xml.push_str(&format!(
@@ -79,9 +80,7 @@ pub fn write_styles_xml(doc: &DocumentModel) -> Option<String> {
 
         // <office:master-styles> with <style:master-page>
         xml.push_str("<office:master-styles>");
-        xml.push_str(
-            r#"<style:master-page style:name="Standard" style:page-layout-name="pm1">"#,
-        );
+        xml.push_str(r#"<style:master-page style:name="Standard" style:page-layout-name="pm1">"#);
 
         // Default header
         if let Some(hf_ref) = sect.header(HeaderFooterType::Default) {
@@ -133,6 +132,7 @@ fn write_page_layout_properties(sect: &s1_model::SectionProperties, xml: &mut St
     let orient = match sect.orientation {
         PageOrientation::Landscape => "landscape",
         PageOrientation::Portrait => "portrait",
+        _ => "portrait",
     };
     xml.push_str(&format!(r#" style:print-orientation="{orient}""#));
     xml.push_str(&format!(
@@ -190,9 +190,7 @@ fn write_hf_content(doc: &DocumentModel, hf_id: s1_model::NodeId, xml: &mut Stri
                         child.attributes.get(&AttributeKey::FieldType)
                     {
                         match ft {
-                            FieldType::PageNumber => {
-                                xml.push_str("<text:page-number/>")
-                            }
+                            FieldType::PageNumber => xml.push_str("<text:page-number/>"),
                             FieldType::PageCount => xml.push_str("<text:page-count/>"),
                             _ => {}
                         }
@@ -246,8 +244,7 @@ mod tests {
     fn write_character_style() {
         let mut doc = DocumentModel::new();
         let attrs = AttributeMap::new().italic(true);
-        let style =
-            Style::new("Emphasis", "Emphasis", StyleType::Character).with_attributes(attrs);
+        let style = Style::new("Emphasis", "Emphasis", StyleType::Character).with_attributes(attrs);
         doc.set_style(style);
 
         let xml = write_styles_xml(&doc).unwrap();
@@ -277,8 +274,8 @@ mod tests {
     #[test]
     fn write_header_footer() {
         use s1_model::{
-            AttributeKey, AttributeValue, FieldType, HeaderFooterRef, HeaderFooterType,
-            Node, NodeType, SectionProperties,
+            AttributeKey, AttributeValue, FieldType, HeaderFooterRef, HeaderFooterType, Node,
+            NodeType, SectionProperties,
         };
 
         let mut doc = DocumentModel::new();

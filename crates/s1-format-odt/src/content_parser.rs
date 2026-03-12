@@ -149,7 +149,8 @@ fn parse_paragraph_into(
                     b"a" => {
                         // Hyperlink — extract URL and set on child runs
                         let url = get_attr(e, b"href").unwrap_or_default();
-                        let added = parse_hyperlink_into(reader, doc, e, ctx, para_id, child_index, &url)?;
+                        let added =
+                            parse_hyperlink_into(reader, doc, e, ctx, para_id, child_index, &url)?;
                         child_index += added;
                     }
                     b"frame" => {
@@ -221,10 +222,8 @@ fn parse_paragraph_into(
                         if let Some(name) = get_attr(e, b"name") {
                             let bm_id = doc.next_id();
                             let mut bm = Node::new(bm_id, NodeType::BookmarkStart);
-                            bm.attributes.set(
-                                AttributeKey::BookmarkName,
-                                AttributeValue::String(name),
-                            );
+                            bm.attributes
+                                .set(AttributeKey::BookmarkName, AttributeValue::String(name));
                             doc.insert_node(para_id, child_index, bm)
                                 .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                             child_index += 1;
@@ -234,10 +233,8 @@ fn parse_paragraph_into(
                         if let Some(name) = get_attr(e, b"name") {
                             let bm_id = doc.next_id();
                             let mut bm = Node::new(bm_id, NodeType::BookmarkEnd);
-                            bm.attributes.set(
-                                AttributeKey::BookmarkName,
-                                AttributeValue::String(name),
-                            );
+                            bm.attributes
+                                .set(AttributeKey::BookmarkName, AttributeValue::String(name));
                             doc.insert_node(para_id, child_index, bm)
                                 .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                             child_index += 1;
@@ -258,10 +255,9 @@ fn parse_paragraph_into(
 
                             let be_id = doc.next_id();
                             let mut be_node = Node::new(be_id, NodeType::BookmarkEnd);
-                            be_node.attributes.set(
-                                AttributeKey::BookmarkName,
-                                AttributeValue::String(name),
-                            );
+                            be_node
+                                .attributes
+                                .set(AttributeKey::BookmarkName, AttributeValue::String(name));
                             doc.insert_node(para_id, child_index, be_node)
                                 .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                             child_index += 1;
@@ -271,10 +267,8 @@ fn parse_paragraph_into(
                         if let Some(name) = get_attr(e, b"name") {
                             let ce_id = doc.next_id();
                             let mut ce = Node::new(ce_id, NodeType::CommentEnd);
-                            ce.attributes.set(
-                                AttributeKey::CommentId,
-                                AttributeValue::String(name),
-                            );
+                            ce.attributes
+                                .set(AttributeKey::CommentId, AttributeValue::String(name));
                             doc.insert_node(para_id, child_index, ce)
                                 .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                             child_index += 1;
@@ -472,10 +466,14 @@ fn parse_hyperlink_into(
                                     let mut run_node = Node::new(run_id, NodeType::Run);
                                     run_node.attributes.merge(&span_attrs);
                                     doc.insert_node(parent_id, start_index + count, run_node)
-                                        .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                                        .map_err(|e| {
+                                            OdtError::InvalidStructure(format!("{e:?}"))
+                                        })?;
                                     let text_id = doc.next_id();
                                     doc.insert_node(run_id, 0, Node::text(text_id, text))
-                                        .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                                        .map_err(|e| {
+                                            OdtError::InvalidStructure(format!("{e:?}"))
+                                        })?;
                                     count += 1;
                                 }
                             }
@@ -599,10 +597,8 @@ fn parse_annotation_into(
     // Create CommentStart node inline in the paragraph
     let cs_id = doc.next_id();
     let mut cs = Node::new(cs_id, NodeType::CommentStart);
-    cs.attributes.set(
-        AttributeKey::CommentId,
-        AttributeValue::String(comment_id),
-    );
+    cs.attributes
+        .set(AttributeKey::CommentId, AttributeValue::String(comment_id));
     doc.insert_node(parent_id, index, cs)
         .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
 
@@ -624,12 +620,8 @@ fn parse_annotation_paragraph(
                     let text = text.to_string();
                     if !text.is_empty() {
                         let run_id = doc.next_id();
-                        doc.insert_node(
-                            para_id,
-                            child_index,
-                            Node::new(run_id, NodeType::Run),
-                        )
-                        .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        doc.insert_node(para_id, child_index, Node::new(run_id, NodeType::Run))
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                         let text_id = doc.next_id();
                         doc.insert_node(run_id, 0, Node::text(text_id, text))
                             .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
@@ -643,12 +635,8 @@ fn parse_annotation_paragraph(
                     let text = text.to_string();
                     if !text.is_empty() {
                         let run_id = doc.next_id();
-                        doc.insert_node(
-                            para_id,
-                            child_index,
-                            Node::new(run_id, NodeType::Run),
-                        )
-                        .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        doc.insert_node(para_id, child_index, Node::new(run_id, NodeType::Run))
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                         let text_id = doc.next_id();
                         doc.insert_node(run_id, 0, Node::text(text_id, text))
                             .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
@@ -871,10 +859,8 @@ fn parse_toc_into(
                         if let Some(level_str) = get_attr(e, b"outline-level") {
                             if let Ok(level) = level_str.parse::<i64>() {
                                 if let Some(toc) = doc.node_mut(toc_id) {
-                                    toc.attributes.set(
-                                        AttributeKey::TocMaxLevel,
-                                        AttributeValue::Int(level),
-                                    );
+                                    toc.attributes
+                                        .set(AttributeKey::TocMaxLevel, AttributeValue::Int(level));
                                 }
                             }
                         }
@@ -889,16 +875,23 @@ fn parse_toc_into(
                         // Read title text attribute
                         if let Some(title) = get_attr(e, b"name") {
                             if let Some(toc) = doc.node_mut(toc_id) {
-                                toc.attributes.set(
-                                    AttributeKey::TocTitle,
-                                    AttributeValue::String(title),
-                                );
+                                toc.attributes
+                                    .set(AttributeKey::TocTitle, AttributeValue::String(title));
                             }
                         }
                     }
                     b"p" if in_index_body && !in_index_title => {
                         // Cached entry paragraph
-                        parse_paragraph_into(reader, doc, e, ctx, toc_id, toc_child_index, false, None)?;
+                        parse_paragraph_into(
+                            reader,
+                            doc,
+                            e,
+                            ctx,
+                            toc_id,
+                            toc_child_index,
+                            false,
+                            None,
+                        )?;
                         toc_child_index += 1;
                     }
                     b"p" if in_index_title => {
@@ -926,10 +919,8 @@ fn parse_toc_into(
                     if let Some(level_str) = get_attr(e, b"outline-level") {
                         if let Ok(level) = level_str.parse::<i64>() {
                             if let Some(toc) = doc.node_mut(toc_id) {
-                                toc.attributes.set(
-                                    AttributeKey::TocMaxLevel,
-                                    AttributeValue::Int(level),
-                                );
+                                toc.attributes
+                                    .set(AttributeKey::TocMaxLevel, AttributeValue::Int(level));
                             }
                         }
                     }
@@ -1437,9 +1428,8 @@ mod tests {
 
     #[test]
     fn parse_bookmark_collapsed() {
-        let doc = parse_body_xml(
-            r#"<text:p><text:bookmark text:name="point1"/>Some text</text:p>"#,
-        );
+        let doc =
+            parse_body_xml(r#"<text:p><text:bookmark text:name="point1"/>Some text</text:p>"#);
         let body_id = doc.body_id().unwrap();
         let body = doc.node(body_id).unwrap();
         let para = doc.node(body.children[0]).unwrap();
@@ -1535,7 +1525,10 @@ mod tests {
                     child.attributes.get_string(&AttributeKey::CommentAuthor),
                     Some("Bob")
                 );
-                assert!(child.attributes.get_string(&AttributeKey::CommentDate).is_none());
+                assert!(child
+                    .attributes
+                    .get_string(&AttributeKey::CommentDate)
+                    .is_none());
                 found = true;
             }
         }
@@ -1562,9 +1555,8 @@ mod tests {
 
     #[test]
     fn parse_annotation_end_only() {
-        let doc = parse_body_xml(
-            r#"<text:p>text<office:annotation-end office:name="orphan"/></text:p>"#,
-        );
+        let doc =
+            parse_body_xml(r#"<text:p>text<office:annotation-end office:name="orphan"/></text:p>"#);
         let body_id = doc.body_id().unwrap();
         let body = doc.node(body_id).unwrap();
         let para = doc.node(body.children[0]).unwrap();
