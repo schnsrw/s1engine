@@ -204,7 +204,50 @@ pub fn apply(model: &mut DocumentModel, op: &Operation) -> Result<Operation, Ope
             })
         }
 
-        Operation::DeleteNode { target_id, .. } => {
+        Operation::DeleteNode {
+            target_id,
+            parent_id: stored_parent,
+            index: stored_index,
+            snapshot,
+        } => {
+            // If this is an "undo" (snapshot + parent + index set), re-insert the subtree
+            if let (Some(parent_id), Some(index), Some(snap)) =
+                (stored_parent, stored_index, snapshot)
+            {
+                // Re-insert root node under the original parent via model API
+                // (sets parent ref, adds to parent's children list)
+                let mut root_node = snap[0].clone();
+                // Clear children — we'll restore them via direct insertion below
+                root_node.children.clear();
+                model
+                    .insert_node(*parent_id, *index, root_node)
+                    .map_err(OperationError::Model)?;
+
+                // Re-insert all descendants directly into model storage.
+                // The snapshot preserves each node's parent and children refs,
+                // so we restore them as-is without going through insert_node
+                // (which would duplicate children list entries).
+                for desc in snap.iter().skip(1) {
+                    model.restore_node(desc.clone());
+                }
+
+                // Restore the root's original children list from the snapshot
+                if let Some(root_snap) = snap.first() {
+                    if let Some(root) = model.node_mut(*target_id) {
+                        root.children = root_snap.children.clone();
+                    }
+                }
+
+                // Inverse of re-insert is delete again
+                return Ok(Operation::DeleteNode {
+                    target_id: *target_id,
+                    parent_id: None,
+                    index: None,
+                    snapshot: None,
+                });
+            }
+
+            // Normal delete: snapshot the subtree and remove it
             let node = model
                 .node(*target_id)
                 .ok_or(OperationError::Model(ModelError::NodeNotFound(*target_id)))?;
@@ -221,26 +264,23 @@ pub fn apply(model: &mut DocumentModel, op: &Operation) -> Result<Operation, Ope
                 .position(|&id| id == *target_id)
                 .unwrap_or(0);
 
-            // Snapshot the subtree for undo
-            let mut snapshot = Vec::new();
-            snapshot.push(node.clone());
+            // Snapshot the subtree for undo (root + all descendants in DFS order)
+            let mut snap = Vec::new();
+            snap.push(node.clone());
             for desc in model.descendants(*target_id) {
-                snapshot.push(desc.clone());
+                snap.push(desc.clone());
             }
 
             model
                 .remove_node(*target_id)
                 .map_err(OperationError::Model)?;
 
-            // Inverse: re-insert the entire subtree
-            Ok(Operation::InsertNode {
-                parent_id,
-                index,
-                node: snapshot.into_iter().next().unwrap(),
-                // Note: descendants are re-inserted via the snapshot in the node's children
-                // The InsertNode inverse will re-insert just the root; descendants need
-                // a compound inverse. For now, we store a simplified inverse.
-                // Full subtree undo is handled by Transaction grouping.
+            // Inverse: a DeleteNode with snapshot that will re-insert subtree
+            Ok(Operation::DeleteNode {
+                target_id: *target_id,
+                parent_id: Some(parent_id),
+                index: Some(index),
+                snapshot: Some(snap),
             })
         }
 
@@ -291,7 +331,7 @@ pub fn apply(model: &mut DocumentModel, op: &Operation) -> Result<Operation, Ope
             Ok(Operation::DeleteText {
                 target_id: *target_id,
                 offset: *offset,
-                length: text.len(),
+                length: text.chars().count(),
                 deleted_text: Some(text.clone()),
             })
         }
@@ -316,50 +356,47 @@ pub fn apply(model: &mut DocumentModel, op: &Operation) -> Result<Operation, Ope
         Operation::SetAttributes {
             target_id,
             attributes,
-            ..
+            previous,
         } => {
             let node = model
                 .node(*target_id)
                 .ok_or(OperationError::Model(ModelError::NodeNotFound(*target_id)))?;
 
-            // Capture previous values for undo
-            let mut previous = AttributeMap::new();
-            for (key, _) in attributes.iter() {
-                if let Some(old_val) = node.attributes.get(key) {
-                    previous.set(key.clone(), old_val.clone());
+            // If this is an undo (previous is set), restore old values and remove added keys
+            if let Some(prev) = previous {
+                let node = model.node_mut(*target_id).unwrap();
+                // First, remove all keys that were set in the original operation
+                for (key, _) in attributes.iter() {
+                    node.attributes.remove(key);
                 }
+                // Then restore previous values (keys that existed before the original op)
+                node.attributes.merge(prev);
+
+                // Inverse of undo is the original operation
+                return Ok(Operation::SetAttributes {
+                    target_id: *target_id,
+                    attributes: attributes.clone(),
+                    previous: None,
+                });
             }
 
-            // Track which keys are being added (not present before)
-            let mut added_keys = Vec::new();
+            // Normal forward apply: capture previous values for undo
+            let mut prev_values = AttributeMap::new();
             for (key, _) in attributes.iter() {
-                if !node.attributes.contains(key) {
-                    added_keys.push(key.clone());
+                if let Some(old_val) = node.attributes.get(key) {
+                    prev_values.set(key.clone(), old_val.clone());
                 }
             }
 
             let node = model.node_mut(*target_id).unwrap();
             node.attributes.merge(attributes);
 
-            // Inverse: restore previous values and remove newly added keys
-            // This is a compound of SetAttributes (restore old) + RemoveAttributes (remove new)
-            // For simplicity, we produce a SetAttributes that restores the old state
-            // plus removal of added keys
-            if added_keys.is_empty() {
-                Ok(Operation::SetAttributes {
-                    target_id: *target_id,
-                    attributes: previous,
-                    previous: None,
-                })
-            } else {
-                // For keys that were added, we need to remove them on undo
-                // Store the previous as-is; the added keys had no previous value
-                Ok(Operation::RemoveAttributes {
-                    target_id: *target_id,
-                    keys: added_keys,
-                    removed: None,
-                })
-            }
+            // Inverse: a SetAttributes with `previous` set for complete undo
+            Ok(Operation::SetAttributes {
+                target_id: *target_id,
+                attributes: attributes.clone(),
+                previous: Some(prev_values),
+            })
         }
 
         Operation::RemoveAttributes {
@@ -956,5 +993,262 @@ mod tests {
 
         apply(&mut doc, &inverse).unwrap();
         assert_eq!(doc.to_plain_text(), original);
+    }
+
+    // ─── P0 Regression: Subtree undo ───────────────────────────────────
+
+    #[test]
+    fn subtree_undo_restores_entire_tree() {
+        // body > para > run > text("Hello")
+        let (mut doc, body_id, para_id, run_id, text_id) = setup_doc("Hello");
+        let initial_count = doc.node_count();
+
+        // Delete the paragraph (takes run + text with it)
+        let inverse = apply(&mut doc, &Operation::delete_node(para_id)).unwrap();
+        assert!(doc.node(para_id).is_none());
+        assert!(doc.node(run_id).is_none());
+        assert!(doc.node(text_id).is_none());
+        assert_eq!(doc.node_count(), initial_count - 3);
+
+        // Undo: must restore all 3 nodes
+        apply(&mut doc, &inverse).unwrap();
+        assert!(doc.node(para_id).is_some());
+        assert!(doc.node(run_id).is_some());
+        assert!(doc.node(text_id).is_some());
+        assert_eq!(doc.node_count(), initial_count);
+
+        // Verify text content survived
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("Hello")
+        );
+
+        // Verify parent-child structure
+        assert_eq!(doc.node(para_id).unwrap().parent, Some(body_id));
+        assert!(doc.node(para_id).unwrap().children.contains(&run_id));
+        assert!(doc.node(run_id).unwrap().children.contains(&text_id));
+    }
+
+    #[test]
+    fn subtree_undo_deep_table() {
+        // body > table > row > cell > para > run > text
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let tbl_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(tbl_id, NodeType::Table)).unwrap();
+        let row_id = doc.next_id();
+        doc.insert_node(tbl_id, 0, Node::new(row_id, NodeType::TableRow)).unwrap();
+        let cell_id = doc.next_id();
+        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell)).unwrap();
+        let para_id = doc.next_id();
+        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Table text")).unwrap();
+
+        let initial_count = doc.node_count();
+
+        // Delete the entire table
+        let inverse = apply(&mut doc, &Operation::delete_node(tbl_id)).unwrap();
+        assert_eq!(doc.node_count(), initial_count - 6);
+
+        // Undo: all 6 nodes restored
+        apply(&mut doc, &inverse).unwrap();
+        assert_eq!(doc.node_count(), initial_count);
+        assert_eq!(
+            doc.node(text_id).unwrap().text_content.as_deref(),
+            Some("Table text")
+        );
+    }
+
+    #[test]
+    fn subtree_undo_redo_roundtrip() {
+        let (mut doc, _body_id, para_id, _run_id, text_id) = setup_doc("Roundtrip");
+        let original_text = doc.to_plain_text();
+        let initial_count = doc.node_count();
+
+        // Delete
+        let undo_op = apply(&mut doc, &Operation::delete_node(para_id)).unwrap();
+        assert_eq!(doc.to_plain_text(), "");
+
+        // Undo (restore)
+        let redo_op = apply(&mut doc, &undo_op).unwrap();
+        assert_eq!(doc.to_plain_text(), original_text);
+        assert_eq!(doc.node_count(), initial_count);
+
+        // Redo (delete again)
+        apply(&mut doc, &redo_op).unwrap();
+        assert!(doc.node(text_id).is_none());
+        assert_eq!(doc.to_plain_text(), "");
+    }
+
+    // ─── P0 Regression: Mixed attribute undo ────────────────────────────
+
+    #[test]
+    fn attribute_undo_mixed_add_and_overwrite() {
+        let (mut doc, _, _, run_id, _) = setup_doc("Hello");
+
+        // Set initial: bold=true, fontSize=12
+        apply(
+            &mut doc,
+            &Operation::set_attributes(
+                run_id,
+                AttributeMap::new().bold(true).font_size(12.0),
+            ),
+        )
+        .unwrap();
+
+        // Now overwrite fontSize=24 AND add italic=true
+        let mixed_attrs = AttributeMap::new().font_size(24.0).italic(true);
+        let inverse = apply(
+            &mut doc,
+            &Operation::set_attributes(run_id, mixed_attrs),
+        )
+        .unwrap();
+
+        // Verify forward apply
+        let node = doc.node(run_id).unwrap();
+        assert_eq!(node.attributes.get_f64(&AttributeKey::FontSize), Some(24.0));
+        assert_eq!(node.attributes.get_bool(&AttributeKey::Italic), Some(true));
+        assert_eq!(node.attributes.get_bool(&AttributeKey::Bold), Some(true)); // untouched
+
+        // Undo: fontSize restored to 12, italic removed, bold untouched
+        apply(&mut doc, &inverse).unwrap();
+        let node = doc.node(run_id).unwrap();
+        assert_eq!(node.attributes.get_f64(&AttributeKey::FontSize), Some(12.0));
+        assert!(!node.attributes.contains(&AttributeKey::Italic)); // was added, now removed
+        assert_eq!(node.attributes.get_bool(&AttributeKey::Bold), Some(true)); // untouched
+    }
+
+    #[test]
+    fn attribute_undo_byte_exact_equality() {
+        // Exit criteria from remark.md: "undo after mixed attribute edits restores
+        // byte-for-byte attribute equality"
+        let (mut doc, _, _, run_id, _) = setup_doc("Hello");
+
+        // Set initial attributes
+        let initial = AttributeMap::new().bold(true).font_size(16.0);
+        apply(&mut doc, &Operation::set_attributes(run_id, initial)).unwrap();
+
+        let before = doc.node(run_id).unwrap().attributes.clone();
+
+        // Apply mixed changes
+        let changes = AttributeMap::new().font_size(24.0).italic(true);
+        let inverse = apply(&mut doc, &Operation::set_attributes(run_id, changes)).unwrap();
+
+        // Undo
+        apply(&mut doc, &inverse).unwrap();
+
+        let after = doc.node(run_id).unwrap().attributes.clone();
+        assert_eq!(before, after, "attributes must be exactly restored after undo");
+    }
+
+    // ─── P0 Regression: Unicode-safe text operations ────────────────────
+
+    #[test]
+    fn op_insert_text_unicode_multibyte() {
+        let (mut doc, _, _, _, text_id) = setup_doc("café");
+
+        // Insert after the 'é' (char offset 4)
+        let inverse = apply(&mut doc, &Operation::insert_text(text_id, 4, "!")).unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café!"));
+
+        // Undo
+        apply(&mut doc, &inverse).unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café"));
+    }
+
+    #[test]
+    fn op_insert_text_4byte_roundtrip() {
+        let (mut doc, _, _, _, text_id) = setup_doc("\u{1F600}\u{1F601}");
+        let original = doc.to_plain_text();
+
+        let inverse = apply(&mut doc, &Operation::insert_text(text_id, 1, "X")).unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{1F600}X\u{1F601}"));
+
+        apply(&mut doc, &inverse).unwrap();
+        assert_eq!(doc.to_plain_text(), original);
+    }
+
+    #[test]
+    fn op_delete_text_unicode_roundtrip() {
+        let (mut doc, _, _, _, text_id) = setup_doc("héllo wörld");
+        let original = doc.to_plain_text();
+
+        // Delete "éllo" (chars 1..5)
+        let inverse = apply(&mut doc, &Operation::delete_text(text_id, 1, 4)).unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("h wörld"));
+
+        apply(&mut doc, &inverse).unwrap();
+        assert_eq!(doc.to_plain_text(), original);
+    }
+
+    #[test]
+    fn op_text_arabic_hindi_mixed() {
+        let (mut doc, _, _, _, text_id) = setup_doc("مرحبا");
+        let original = doc.to_plain_text();
+
+        let inverse = apply(&mut doc, &Operation::insert_text(text_id, 2, "\u{2192}")).unwrap();
+        let content = doc.node(text_id).unwrap().text_content.clone().unwrap();
+        assert_eq!(content.chars().count(), 6);
+
+        apply(&mut doc, &inverse).unwrap();
+        assert_eq!(doc.to_plain_text(), original);
+    }
+
+    // ─── Property-based tests ───────────────────────────────────────────
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn insert_text_invert_roundtrip(
+                base_text in "[a-zA-Z]{1,20}",
+                insert_text in "[a-zA-Z0-9 ]{1,20}",
+                offset_pct in 0.0f64..=1.0,
+            ) {
+                let (mut doc, _, _, _, text_id) = setup_doc(&base_text);
+                let original_text = doc.to_plain_text();
+                let text_len = base_text.len();
+                let offset = (offset_pct * text_len as f64).floor() as usize;
+                let offset = offset.min(text_len);
+
+                let op = Operation::insert_text(text_id, offset, &insert_text);
+                let inverse = apply(&mut doc, &op).unwrap();
+
+                // Text changed
+                prop_assert_ne!(doc.to_plain_text(), original_text.clone());
+
+                // Applying inverse restores original
+                apply(&mut doc, &inverse).unwrap();
+                prop_assert_eq!(doc.to_plain_text(), original_text);
+            }
+
+            #[test]
+            fn delete_text_invert_roundtrip(
+                base_text in "[a-zA-Z]{5,30}",
+                start_pct in 0.0f64..1.0,
+                len_pct in 0.01f64..=0.5,
+            ) {
+                let (mut doc, _, _, _, text_id) = setup_doc(&base_text);
+                let original_text = doc.to_plain_text();
+                let text_len = base_text.len();
+                let offset = (start_pct * text_len as f64).floor() as usize;
+                let offset = offset.min(text_len.saturating_sub(1));
+                let max_len = text_len - offset;
+                let length = ((len_pct * max_len as f64).ceil() as usize).max(1).min(max_len);
+
+                let op = Operation::delete_text(text_id, offset, length);
+                let inverse = apply(&mut doc, &op).unwrap();
+
+                // Applying inverse restores original
+                apply(&mut doc, &inverse).unwrap();
+                prop_assert_eq!(doc.to_plain_text(), original_text);
+            }
+        }
     }
 }

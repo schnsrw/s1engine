@@ -1081,159 +1081,462 @@ pub struct BreakOpportunity {
 
 ## 10. Engine Facade (`s1engine`)
 
-### 10.1 Primary API
+### 10.1 Engine
+
+`Engine` is a stateless, zero-cost factory. It holds no configuration and no
+internal state. It can be freely shared across threads.
 
 ```rust
 /// The main entry point for s1engine.
-pub struct Engine {
-    config: EngineConfig,
-}
+pub struct Engine;  // unit struct, no fields
 
 impl Engine {
     pub fn new() -> Self;
-    pub fn with_config(config: EngineConfig) -> Self;
 
     /// Create a new empty document.
-    pub fn create_document(&self) -> Document;
+    pub fn create(&self) -> Document;
 
-    /// Open a document from bytes (format auto-detected).
+    /// Open a document from bytes (format auto-detected from magic bytes).
     pub fn open(&self, data: &[u8]) -> Result<Document, Error>;
 
-    /// Open a document from file path (format detected from extension + magic bytes).
+    /// Open a document from bytes with an explicit format.
+    pub fn open_as(&self, data: &[u8], format: Format) -> Result<Document, Error>;
+
+    /// Open a document from a file path (format detected from extension).
     pub fn open_file(&self, path: impl AsRef<Path>) -> Result<Document, Error>;
 
-    /// Convert between formats without loading into Document.
-    pub fn convert(&self, data: &[u8], from: Format, to: Format) -> Result<Vec<u8>, Error>;
+    /// Create a new collaborative document (feature-gated: `crdt`).
+    #[cfg(feature = "crdt")]
+    pub fn create_collab(&self, replica_id: u64) -> CollabDocument;
+
+    /// Open a document as a collaborative document (feature-gated: `crdt`).
+    #[cfg(feature = "crdt")]
+    pub fn open_collab(&self, data: &[u8], replica_id: u64) -> Result<CollabDocument, Error>;
 }
 
-#[derive(Debug, Clone)]
-pub struct EngineConfig {
-    /// Maximum undo history depth (default: 100).
-    pub max_undo_depth: usize,
-    /// Font search directories (in addition to system fonts).
-    pub font_dirs: Vec<PathBuf>,
-    /// Default page size in points (default: US Letter 612x792).
-    pub default_page_size: (f64, f64),
-}
+impl Default for Engine { fn default() -> Self { Self::new() } }
+```
 
-/// A loaded document with full editing capabilities.
-pub struct Document { /* internal: model, history, media */ }
+### 10.2 Document
+
+`Document` wraps `DocumentModel` with an undo/redo `History` and provides
+the high-level API for querying, editing, and exporting.
+
+```rust
+pub struct Document {
+    model: DocumentModel,
+    history: History,
+}
 
 impl Document {
-    // --- Export ---
-    pub fn export(&self, format: Format) -> Result<Vec<u8>, Error>;
-    pub fn save(&self, path: impl AsRef<Path>, format: Format) -> Result<(), Error>;
-
-    // --- Metadata ---
-    pub fn metadata(&self) -> &DocumentMetadata;
-
-    // --- Editing ---
-    pub fn begin_transaction(&mut self, description: &str) -> TransactionBuilder;
-    pub fn apply(&mut self, op: Operation) -> Result<(), Error>;
-    pub fn undo(&mut self) -> Result<(), Error>;
-    pub fn redo(&mut self) -> Result<(), Error>;
-    pub fn can_undo(&self) -> bool;
-    pub fn can_redo(&self) -> bool;
-
-    // --- Queries ---
-    pub fn to_plain_text(&self) -> String;
-    pub fn paragraphs(&self) -> impl Iterator<Item = ParagraphRef>;
-    pub fn node(&self, id: NodeId) -> Option<NodeRef>;
-    pub fn find_text(&self, query: &str) -> Vec<TextMatch>;
-    pub fn find_replace(&mut self, find: &str, replace: &str) -> Result<usize, Error>;
-
-    // --- Layout ---
-    pub fn layout(&self) -> Result<LayoutDocument, Error>;
+    // --- Construction ---
+    pub fn new() -> Self;
+    pub fn from_model(model: DocumentModel) -> Self;
 
     // --- Model access ---
     pub fn model(&self) -> &DocumentModel;
+    pub fn model_mut(&mut self) -> &mut DocumentModel;  // escape hatch (bypasses undo)
+    pub fn into_model(self) -> DocumentModel;
 
-    // --- Builder ---
-    pub fn builder(&mut self) -> DocumentBuilder;
+    // --- Metadata ---
+    pub fn metadata(&self) -> &DocumentMetadata;
+    pub fn metadata_mut(&mut self) -> &mut DocumentMetadata;
+
+    // --- Content queries ---
+    pub fn to_plain_text(&self) -> String;
+    pub fn body_id(&self) -> Option<NodeId>;
+    pub fn node(&self, id: NodeId) -> Option<&Node>;
+    pub fn next_id(&mut self) -> NodeId;
+    pub fn paragraph_ids(&self) -> Vec<NodeId>;   // top-level body paragraphs only
+    pub fn paragraph_count(&self) -> usize;
+
+    // --- Styles ---
+    pub fn styles(&self) -> &[Style];
+    pub fn style_by_id(&self, id: &str) -> Option<&Style>;
+    pub fn numbering(&self) -> &NumberingDefinitions;
+    pub fn sections(&self) -> &[SectionProperties];
+
+    // --- Transactions ---
+    pub fn begin_transaction(label: &str) -> TransactionBuilder;
+    pub fn apply_transaction(&mut self, txn: &Transaction) -> Result<(), Error>;
+    pub fn apply(&mut self, op: Operation) -> Result<(), Error>;
+
+    // --- Undo / Redo ---
+    pub fn undo(&mut self) -> Result<bool, Error>;
+    pub fn redo(&mut self) -> Result<bool, Error>;
+    pub fn can_undo(&self) -> bool;
+    pub fn can_redo(&self) -> bool;
+    pub fn clear_history(&mut self);
+
+    // --- Export ---
+    pub fn export(&self, format: Format) -> Result<Vec<u8>, Error>;
+    pub fn export_string(&self, format: Format) -> Result<String, Error>;
+}
+
+impl Default for Document { fn default() -> Self { Self::new() } }
+```
+
+Notes:
+
+- `undo()` and `redo()` return `Result<bool, Error>`, where `true` means an
+  operation was undone/redone and `false` means the stack was empty.
+- `model_mut()` is an explicit escape hatch. Direct mutation bypasses
+  undo/redo history and CRDT operation generation.
+- `begin_transaction` is an associated function (not `&self`). It returns a
+  `TransactionBuilder` from `s1-ops`.
+- `export_string` is a convenience for text-oriented formats. For TXT it
+  calls the writer directly; for other formats it exports bytes and
+  attempts UTF-8 conversion.
+
+### 10.3 Transaction API
+
+```rust
+// s1-ops re-exports used by s1engine:
+pub struct Transaction { /* operations + label */ }
+pub struct TransactionBuilder { /* builds a Transaction */ }
+
+impl Transaction {
+    pub fn new() -> Self;                           // empty, unlabeled
+    pub fn with_label(label: &str) -> Self;         // empty, labeled
+    pub fn push(&mut self, op: Operation);
+}
+
+impl TransactionBuilder {
+    pub fn new() -> Self;
+    pub fn label(self, label: &str) -> Self;
 }
 ```
 
-### 10.2 Builder API
+### 10.4 Format Enum
 
 ```rust
-let engine = Engine::new();
-let mut doc = engine.create_document();
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Format {
+    Docx,
+    Odt,
+    Pdf,   // export only
+    Txt,
+}
 
-doc.builder()
-    .metadata(|m| {
-        m.title("My Document")
-         .author("Engineering Team")
-    })
+impl Format {
+    /// Detect from a file extension (case-insensitive). Errors on unknown.
+    pub fn from_extension(ext: &OsStr) -> Result<Self, Error>;
+
+    /// Detect from a file path's extension.
+    pub fn from_path(path: &Path) -> Result<Self, Error>;
+
+    /// Heuristic detection from leading bytes:
+    /// ZIP magic (PK\x03\x04) -> Docx or Odt, %PDF -> Pdf, else Txt.
+    pub fn detect(data: &[u8]) -> Self;
+
+    /// File extension without dot ("docx", "odt", "pdf", "txt").
+    pub fn extension(&self) -> &'static str;
+
+    /// MIME type string.
+    pub fn mime_type(&self) -> &'static str;
+}
+```
+
+### 10.5 Error Enum
+
+```rust
+#[derive(Debug)]
+pub enum Error {
+    /// Error from a format reader/writer (DOCX, ODT, TXT).
+    Format(String),
+    /// Error from an operation (insert, delete, etc.).
+    Operation(OperationError),
+    /// I/O error (file read/write).
+    Io(std::io::Error),
+    /// The requested format is not supported or not enabled.
+    UnsupportedFormat(String),
+    /// Error from the CRDT subsystem (feature-gated: `crdt`).
+    #[cfg(feature = "crdt")]
+    Crdt(CrdtError),
+}
+
+impl std::fmt::Display for Error { /* ... */ }
+impl std::error::Error for Error { /* ... */ }
+
+// From conversions:
+impl From<std::io::Error> for Error;
+impl From<OperationError> for Error;
+impl From<DocxError> for Error;       // feature: docx
+impl From<OdtError> for Error;        // feature: odt
+impl From<TxtError> for Error;        // feature: txt
+impl From<CrdtError> for Error;       // feature: crdt
+```
+
+### 10.6 Builder API
+
+`DocumentBuilder` is a standalone builder that constructs a `Document`
+without requiring an `Engine`. It directly manipulates a `DocumentModel`
+and produces a `Document` via `build()`.
+
+```rust
+pub struct DocumentBuilder { model: DocumentModel }
+
+impl DocumentBuilder {
+    pub fn new() -> Self;
+
+    // Block-level content
+    pub fn heading(self, level: u8, text: &str) -> Self;
+    pub fn paragraph(self, f: impl FnOnce(ParagraphBuilder) -> ParagraphBuilder) -> Self;
+    pub fn text(self, text: &str) -> Self;           // shorthand for single-run paragraph
+    pub fn bullet(self, text: &str) -> Self;         // bulleted list item
+    pub fn numbered(self, text: &str) -> Self;       // numbered list item
+    pub fn list_item(self, text: &str, level: u8, format: ListFormat, num_id: u32) -> Self;
+    pub fn table(self, f: impl FnOnce(TableBuilder) -> TableBuilder) -> Self;
+
+    // Metadata
+    pub fn title(self, title: &str) -> Self;
+    pub fn author(self, author: &str) -> Self;
+
+    // Sections
+    pub fn section(self, props: SectionProperties) -> Self;
+    pub fn section_with_header(self, header_text: &str) -> Self;
+    pub fn section_with_footer(self, footer_text: &str) -> Self;
+    pub fn section_with_header_footer(self, header_text: &str, footer_text: &str) -> Self;
+
+    pub fn build(self) -> Document;
+}
+```
+
+```rust
+pub struct ParagraphBuilder<'a> { model: &'a mut DocumentModel, para_id: NodeId }
+
+impl<'a> ParagraphBuilder<'a> {
+    pub fn text(self, text: &str) -> Self;
+    pub fn bold(self, text: &str) -> Self;
+    pub fn italic(self, text: &str) -> Self;
+    pub fn bold_italic(self, text: &str) -> Self;
+    pub fn underline(self, text: &str) -> Self;
+    pub fn styled(self, text: &str, font: &str, size: f64) -> Self;
+    pub fn colored(self, text: &str, color: Color) -> Self;
+    pub fn line_break(self) -> Self;
+    pub fn superscript(self, text: &str) -> Self;
+    pub fn subscript(self, text: &str) -> Self;
+    pub fn hyperlink(self, url: &str, text: &str) -> Self;
+    pub fn bookmark_start(self, name: &str) -> Self;
+    pub fn bookmark_end(self) -> Self;
+}
+```
+
+```rust
+pub struct TableBuilder<'a> { model: &'a mut DocumentModel, table_id: NodeId }
+
+impl<'a> TableBuilder<'a> {
+    pub fn row(self, f: impl FnOnce(RowBuilder) -> RowBuilder) -> Self;
+    pub fn width(self, width: TableWidth) -> Self;
+}
+
+pub struct RowBuilder<'a> { model: &'a mut DocumentModel, row_id: NodeId }
+
+impl<'a> RowBuilder<'a> {
+    pub fn cell(self, text: &str) -> Self;
+    pub fn rich_cell(self, f: impl FnOnce(ParagraphBuilder) -> ParagraphBuilder) -> Self;
+}
+```
+
+Example usage:
+
+```rust
+use s1engine::{DocumentBuilder, Format};
+
+let doc = DocumentBuilder::new()
+    .title("Quarterly Report")
+    .author("Engineering Team")
     .heading(1, "Introduction")
     .paragraph(|p| {
         p.text("This is ")
          .bold("bold")
-         .text(" and this is ")
+         .text(" and ")
          .italic("italic")
          .text(".")
     })
-    .table(3, 2, |table| {
-        table.cell(0, 0, "Name");
-        table.cell(1, 0, "Age");
-        table.cell(2, 0, "City");
-        table.cell(0, 1, "Alice");
-        table.cell(1, 1, "30");
-        table.cell(2, 1, "Berlin");
+    .table(|t| {
+        t.row(|r| r.cell("Name").cell("Age"))
+         .row(|r| r.cell("Alice").cell("30"))
     })
-    .page_break()
-    .paragraph(|p| p.text("Page two content"))
+    .bullet("First item")
+    .bullet("Second item")
     .build();
 
-doc.save("output.docx", Format::Docx)?;
-doc.save("output.pdf", Format::Pdf)?;
+let bytes = doc.export(Format::Docx)?;
+```
+
+### 10.7 Re-exports
+
+The `s1engine` crate re-exports key types so consumers do not need to
+depend on internal crates directly:
+
+```rust
+// Model types
+pub use s1_model::{
+    Alignment, AttributeKey, AttributeMap, AttributeValue, Color, DocumentMetadata,
+    DocumentModel, FieldType, HeaderFooterRef, HeaderFooterType, LineSpacing,
+    ListFormat, ListInfo, Node, NodeId, NodeType, PageOrientation, SectionBreakType,
+    SectionProperties, Style, StyleType, UnderlineStyle,
+};
+
+// Operation types
+pub use s1_ops::{
+    History, Operation, OperationError, Position, Selection, Transaction, TransactionBuilder,
+};
+
+// Full crate access for advanced use
+pub use s1_model as model;
+pub use s1_ops as ops;
+
+// CRDT types (feature-gated)
+#[cfg(feature = "crdt")]
+pub use s1_crdt as crdt;
+#[cfg(feature = "crdt")]
+pub use s1_crdt::{CollabDocument, CrdtError, CrdtOperation, OpId, StateVector};
 ```
 
 ---
 
 ## 11. FFI Bindings
 
-### 11.1 C API (cbindgen)
+### 11.1 C API (`ffi/c/src/lib.rs`)
+
+The C API uses opaque handle types and `extern "C"` functions. All
+functions are null-safe: passing null returns null, zero, or sets an
+error rather than crashing. All returned handles must be freed by the
+caller using the corresponding `s1_*_free` function.
+
+**Opaque handle types:** `S1Engine`, `S1Document`, `S1Error`, `S1Bytes`, `S1String`
 
 ```c
-// C API — auto-generated from Rust, prefixed with s1_
+// --- Engine lifecycle ---
 S1Engine* s1_engine_new(void);
 void s1_engine_free(S1Engine* engine);
 
-S1Document* s1_engine_open(S1Engine* engine, const uint8_t* data, size_t len, S1Error* err);
-S1Document* s1_engine_open_file(S1Engine* engine, const char* path, S1Error* err);
-S1Document* s1_engine_create_document(S1Engine* engine);
+// --- Document creation / opening ---
+S1Document* s1_engine_create(const S1Engine* engine);
+S1Document* s1_engine_open(
+    const S1Engine* engine,
+    const uint8_t* data,
+    size_t len,
+    S1Error** error_out
+);
 
-int s1_document_export(S1Document* doc, S1Format format, uint8_t** out_data, size_t* out_len, S1Error* err);
-int s1_document_save(S1Document* doc, const char* path, S1Format format, S1Error* err);
-const char* s1_document_to_plain_text(S1Document* doc);
-
+// --- Document operations ---
 void s1_document_free(S1Document* doc);
-void s1_bytes_free(uint8_t* data, size_t len);
-void s1_string_free(char* str);
+S1String* s1_document_plain_text(const S1Document* doc);
+S1Bytes* s1_document_export(
+    const S1Document* doc,
+    const char* format,       // "docx", "odt", "txt", "pdf"
+    S1Error** error_out
+);
+S1String* s1_document_metadata_title(const S1Document* doc);
+size_t s1_document_paragraph_count(const S1Document* doc);
 
-const char* s1_error_message(S1Error* err);
-void s1_error_free(S1Error* err);
+// --- Error handling ---
+const char* s1_error_message(const S1Error* error);
+void s1_error_free(S1Error* error);
+
+// --- String handling ---
+const char* s1_string_ptr(const S1String* s);
+void s1_string_free(S1String* s);
+
+// --- Byte buffer handling ---
+const uint8_t* s1_bytes_data(const S1Bytes* b);
+size_t s1_bytes_len(const S1Bytes* b);
+void s1_bytes_free(S1Bytes* b);
 ```
 
-### 11.2 WASM API (wasm-bindgen)
+Error convention: functions that can fail accept an `S1Error** error_out`
+parameter. On failure the function returns null and sets `*error_out` to
+a non-null error handle. The caller must free the error with
+`s1_error_free`.
+
+Example (C):
+
+```c
+S1Engine* engine = s1_engine_new();
+S1Error* err = NULL;
+S1Document* doc = s1_engine_open(engine, data, len, &err);
+if (!doc) {
+    fprintf(stderr, "open failed: %s\n", s1_error_message(err));
+    s1_error_free(err);
+} else {
+    S1String* text = s1_document_plain_text(doc);
+    printf("%s\n", s1_string_ptr(text));
+    s1_string_free(text);
+    s1_document_free(doc);
+}
+s1_engine_free(engine);
+```
+
+### 11.2 WASM API (`ffi/wasm/src/lib.rs`)
+
+The WASM API exposes `wasm-bindgen` classes callable from JavaScript or
+TypeScript. Format strings are passed as `"docx"`, `"odt"`, `"txt"`, or
+`"pdf"`. Methods that can fail throw a JavaScript error.
 
 ```typescript
-// TypeScript declarations (generated from Rust WASM)
-export class Engine {
-  constructor();
-  open(data: Uint8Array): Document;
-  createDocument(): Document;
+// --- Engine ---
+class WasmEngine {
+    constructor();
+    create(): WasmDocument;
+    open(data: Uint8Array): WasmDocument;             // throws on error
+    open_as(data: Uint8Array, format: string): WasmDocument;  // throws on error
 }
 
-export class Document {
-  export(format: Format): Uint8Array;
-  save(path: string, format: Format): void;
-  toPlainText(): string;
-  applyOperation(op: Operation): void;
-  undo(): void;
-  redo(): void;
-  free(): void;
+// --- Document ---
+class WasmDocument {
+    to_plain_text(): string;                           // throws if freed
+    export(format: string): Uint8Array;                // throws on error
+    metadata_title(): string | undefined;
+    metadata_author(): string | undefined;
+    paragraph_count(): number;
+    free(): void;                                      // releases memory
+    is_valid(): boolean;
 }
+
+// --- Document Builder ---
+class WasmDocumentBuilder {
+    constructor();
+    heading(level: number, text: string): WasmDocumentBuilder;
+    text(text: string): WasmDocumentBuilder;
+    title(title: string): WasmDocumentBuilder;
+    author(author: string): WasmDocumentBuilder;
+    build(): WasmDocument;                             // throws if already consumed
+}
+
+// --- Font Database ---
+class WasmFontDatabase {
+    constructor();                                     // empty database
+    load_font(data: Uint8Array): void;
+    font_count(): number;
+}
+
+// --- Free function ---
+function detect_format(data: Uint8Array): string;      // returns "docx"|"odt"|"pdf"|"txt"
+```
+
+Example (JavaScript):
+
+```javascript
+import { WasmEngine, WasmDocumentBuilder, detect_format } from "s1engine-wasm";
+
+const engine = new WasmEngine();
+const doc = engine.open(docxBytes);
+console.log(doc.to_plain_text());
+
+const exported = doc.export("txt");
+doc.free();
+
+const doc2 = new WasmDocumentBuilder()
+    .title("Report")
+    .heading(1, "Summary")
+    .text("Contents here.")
+    .build();
+const bytes = doc2.export("docx");
+doc2.free();
 ```
 
 ---
@@ -1241,24 +1544,42 @@ export class Document {
 ## 12. Testing Strategy
 
 ### 12.1 Unit Tests
-- Every crate has `#[cfg(test)] mod tests` in each source file
-- Every public function has at least one test
-- `s1-model` and `s1-ops` use `proptest` for property-based testing
-- Format crates use round-trip tests
+
+Every crate contains `#[cfg(test)] mod tests` blocks in each source file.
+Coverage targets:
+
+- Every public function has at least one test.
+- Format crates (`s1-format-docx`, `s1-format-odt`, `s1-format-txt`) include
+  round-trip tests: read input, write output, re-read, compare.
+- `s1-crdt` uses `proptest` for convergence property-based testing.
 
 ### 12.2 Integration Tests
-- `tests/integration/` — cross-crate workflows
-- Open real-world documents, verify structure, re-export
-- Format conversion pipelines
 
-### 12.3 Fuzz Testing
-- `cargo-fuzz` targets for every format reader
-- Fuzz operation application with random sequences
-- Ensures no panics on any input
+Integration tests live inside crate test directories, not in a top-level
+`tests/` folder.
 
-### 12.4 Fixture Tests
-- Real documents in `tests/fixtures/`
-- See CLAUDE.md for full fixture list
+| Location | Contents |
+|---|---|
+| `crates/s1engine/tests/invariants.rs` | Cross-crate invariant checks (model consistency after operations, undo/redo symmetry) |
+| `crates/s1engine/tests/hostile_inputs.rs` | Fuzz-style hostile input tests for all format readers (malformed ZIP, truncated XML, zero-length input, binary noise). Runs on stable Rust without `cargo-fuzz`. |
+| `crates/s1-crdt/tests/convergence.rs` | 16 multi-replica convergence tests (2/3/5 replicas, partition/heal, snapshot sync, delayed delivery) |
+| `crates/s1-crdt/tests/scenarios.rs` | 17 scenario tests (concurrent inserts, attribute LWW, delete+modify, undo locality) |
+| `crates/s1-crdt/tests/proptests.rs` | Property-based CRDT convergence tests via `proptest` |
+
+### 12.3 Benchmarks
+
+Criterion benchmarks are located at `crates/s1engine/benches/engine_bench.rs`.
+They cover document open, export, and round-trip timing for DOCX, ODT, and TXT.
+
+### 12.4 FFI Tests
+
+Both FFI crates include unit tests that exercise the full lifecycle through
+the foreign interface:
+
+- `ffi/c/src/lib.rs` -- tests for engine create/free, document open/export,
+  null-pointer safety, error handling, metadata access, and format round-trips.
+- `ffi/wasm/src/lib.rs` -- tests for WasmEngine, WasmDocument, WasmDocumentBuilder,
+  WasmFontDatabase, format detection, export, and builder round-trips.
 
 ---
 

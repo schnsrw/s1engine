@@ -41,8 +41,19 @@ impl Document {
 
     /// Get a mutable reference to the underlying document model.
     ///
-    /// **Warning**: Direct mutation bypasses the operation/undo system.
-    /// Prefer using transactions for all edits.
+    /// # Warning
+    ///
+    /// **This is an advanced escape hatch.** Direct mutation bypasses the
+    /// operation system, which means:
+    /// - Changes will NOT be recorded in undo/redo history
+    /// - Changes will NOT generate CRDT operations for collaboration
+    /// - The document may enter an inconsistent state
+    ///
+    /// Prefer [`apply`](Self::apply) or [`apply_transaction`](Self::apply_transaction)
+    /// for all edits that should be undoable or collaborative.
+    ///
+    /// This method exists for cases where you need direct model access
+    /// (e.g., bulk import, format reader integration, or testing).
     pub fn model_mut(&mut self) -> &mut DocumentModel {
         &mut self.model
     }
@@ -86,7 +97,15 @@ impl Document {
         self.model.next_id()
     }
 
-    /// Iterate over paragraph node IDs in document order.
+    /// Return top-level paragraph node IDs in document order.
+    ///
+    /// This returns only direct children of the document body that are
+    /// paragraphs. Paragraphs nested inside tables, headers, footers,
+    /// or other container elements are **not** included.
+    ///
+    /// To traverse all paragraphs (including nested ones), walk the
+    /// document tree via [`model()`](Self::model) and
+    /// [`DocumentModel::node()`].
     pub fn paragraph_ids(&self) -> Vec<NodeId> {
         let body_id = match self.model.body_id() {
             Some(id) => id,
@@ -108,7 +127,10 @@ impl Document {
             .collect()
     }
 
-    /// Count paragraphs.
+    /// Count top-level body paragraphs.
+    ///
+    /// Equivalent to `self.paragraph_ids().len()`. See
+    /// [`paragraph_ids()`](Self::paragraph_ids) for semantics.
     pub fn paragraph_count(&self) -> usize {
         self.paragraph_ids().len()
     }

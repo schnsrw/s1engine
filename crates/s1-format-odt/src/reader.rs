@@ -84,11 +84,25 @@ fn parse_content(
     Ok(())
 }
 
+/// Maximum decompressed size for a single ZIP entry (256 MB).
+const MAX_ZIP_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
+
+/// Maximum decompressed size for media files (64 MB).
+const MAX_MEDIA_ENTRY_SIZE: u64 = 64 * 1024 * 1024;
+
 /// Read a ZIP entry as a UTF-8 string.
 fn read_zip_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<String, OdtError> {
     let mut file = archive
         .by_name(name)
         .map_err(|_| OdtError::MissingFile(name.to_string()))?;
+
+    if file.size() > MAX_ZIP_ENTRY_SIZE {
+        return Err(OdtError::Xml(format!(
+            "ZIP entry '{name}' too large: {} bytes",
+            file.size()
+        )));
+    }
+
     let mut buf = String::new();
     file.read_to_string(&mut buf)?;
     Ok(buf)
@@ -117,6 +131,9 @@ fn extract_images(
 
     for name in image_names {
         let mut file = archive.by_name(&name)?;
+        if file.size() > MAX_MEDIA_ENTRY_SIZE {
+            continue; // Skip oversized media files
+        }
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
 

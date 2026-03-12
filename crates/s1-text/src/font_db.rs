@@ -22,8 +22,12 @@ impl std::fmt::Debug for FontDatabase {
 
 impl FontDatabase {
     /// Create a new font database loaded with system fonts.
+    ///
+    /// On `wasm32` targets, this creates an empty database since there is no
+    /// filesystem. Use `empty()` + `load_font_data()` to add fonts manually.
     pub fn new() -> Self {
         let mut db = fontdb::Database::new();
+        #[cfg(not(target_arch = "wasm32"))]
         db.load_system_fonts();
         Self { db }
     }

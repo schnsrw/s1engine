@@ -132,8 +132,8 @@ impl NodeType {
                 NodeType::Footer,
                 NodeType::CommentBody,
             ],
-            NodeType::Body => &[NodeType::Section, NodeType::Paragraph, NodeType::Table],
-            NodeType::Section => &[NodeType::Paragraph, NodeType::Table],
+            NodeType::Body => &[NodeType::Section, NodeType::Paragraph, NodeType::Table, NodeType::Image],
+            NodeType::Section => &[NodeType::Paragraph, NodeType::Table, NodeType::Image],
             NodeType::Paragraph => &[
                 NodeType::Run,
                 NodeType::LineBreak,

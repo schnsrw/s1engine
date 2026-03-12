@@ -2,12 +2,12 @@
 
 ## Design Principles
 
-1. **Simple things should be simple** — opening a document and exporting it is 3 lines of code
-2. **Complex things should be possible** — full access to the document model for advanced use cases
-3. **No panics** — all fallible operations return `Result`
-4. **Zero-cost abstractions** — high-level API compiles down to efficient code
-5. **Builder pattern** for construction, **iterator pattern** for queries
-6. **Feature flags** for optional functionality — don't pay for what you don't use
+1. **Simple things should be simple** -- opening a document and exporting it is 3 lines of code
+2. **Complex things should be possible** -- full access to the document model for advanced use cases
+3. **No panics** -- all fallible operations return `Result`
+4. **Zero-cost abstractions** -- high-level API compiles down to efficient code
+5. **Builder pattern** for construction, **operation pattern** for editing
+6. **Feature flags** for optional functionality -- don't pay for what you don't use
 
 ---
 
@@ -18,33 +18,26 @@
 default = ["docx", "odt", "txt"]
 
 # Format support (each pulls in its crate)
-docx = ["s1-format-docx"]
-odt = ["s1-format-odt"]
-pdf = ["s1-format-pdf", "s1-layout", "s1-text"]
-txt = ["s1-format-txt"]
+docx = ["dep:s1-format-docx"]
+odt = ["dep:s1-format-odt"]
+pdf = ["dep:s1-format-pdf", "dep:s1-layout", "dep:s1-text"]
+txt = ["dep:s1-format-txt"]
 
 # Conversion
-convert = ["s1-convert"]
-doc-legacy = ["convert"]           # DOC → DOCX conversion
-
-# Text processing (needed for layout and PDF)
-text-shaping = ["s1-text"]
-
-# FFI targets
-ffi-c = []                         # C API
-ffi-wasm = []                      # WASM bindings
+convert = ["dep:s1-convert"]
+doc-legacy = ["convert"]
 
 # Collaboration
-crdt = []                          # CRDT support (Phase 4)
+crdt = ["dep:s1-crdt"]
 ```
 
 Usage:
 ```toml
-# Minimal: just DOCX parsing, no layout/PDF
+# Minimal: just DOCX parsing
 s1engine = { version = "0.1", default-features = false, features = ["docx"] }
 
 # Full: everything
-s1engine = { version = "0.1", features = ["pdf", "convert"] }
+s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
 ```
 
 ---
@@ -54,12 +47,16 @@ s1engine = { version = "0.1", features = ["pdf", "convert"] }
 ### Use Case 1: Open and Read a Document
 
 ```rust
-use s1engine::{Engine, Format};
+use s1engine::Engine;
 
 fn main() -> Result<(), s1engine::Error> {
     let engine = Engine::new();
 
-    // Open from file (format auto-detected from extension)
+    // Open from bytes (format auto-detected from content)
+    let data = std::fs::read("report.docx")?;
+    let doc = engine.open(&data)?;
+
+    // Or open from file path (format detected from extension)
     let doc = engine.open_file("report.docx")?;
 
     // Read metadata
@@ -69,14 +66,12 @@ fn main() -> Result<(), s1engine::Error> {
     // Get plain text
     println!("{}", doc.to_plain_text());
 
-    // Iterate paragraphs
-    for para in doc.paragraphs() {
-        println!("Style: {:?}", para.style_name());
-        for run in para.runs() {
-            print!("{}", run.text());
-            if run.is_bold() { print!(" [bold]"); }
+    // Query structure
+    println!("Paragraphs: {}", doc.paragraph_count());
+    for id in doc.paragraph_ids() {
+        if let Some(node) = doc.node(id) {
+            println!("  {:?}: {:?}", node.node_type, node.text_content);
         }
-        println!();
     }
 
     Ok(())
@@ -86,17 +81,12 @@ fn main() -> Result<(), s1engine::Error> {
 ### Use Case 2: Create a Document from Scratch
 
 ```rust
-use s1engine::{Engine, Format};
+use s1engine::{DocumentBuilder, Format};
 
 fn main() -> Result<(), s1engine::Error> {
-    let engine = Engine::new();
-    let mut doc = engine.create_document();
-
-    doc.builder()
-        .metadata(|m| {
-            m.title("Quarterly Report")
-             .author("Engineering Team")
-        })
+    let doc = DocumentBuilder::new()
+        .title("Quarterly Report")
+        .author("Engineering Team")
         .heading(1, "Q4 2026 Report")
         .paragraph(|p| {
             p.text("Revenue grew by ")
@@ -104,28 +94,20 @@ fn main() -> Result<(), s1engine::Error> {
              .text(" compared to Q3.")
         })
         .heading(2, "Key Metrics")
-        .table(3, 4, |t| {
-            t.cell(0, 0, "Metric");
-            t.cell(1, 0, "Q3");
-            t.cell(2, 0, "Q4");
-            t.cell(0, 1, "Users");
-            t.cell(1, 1, "10,000");
-            t.cell(2, 1, "15,000");
-            t.cell(0, 2, "Revenue");
-            t.cell(1, 2, "$1.2M");
-            t.cell(2, 2, "$1.5M");
-            t.cell(0, 3, "NPS");
-            t.cell(1, 3, "72");
-            t.cell(2, 3, "78");
+        .table(|t| {
+            t.row(|r| r.cell("Metric").cell("Q3").cell("Q4"))
+             .row(|r| r.cell("Users").cell("10,000").cell("15,000"))
+             .row(|r| r.cell("Revenue").cell("$1.2M").cell("$1.5M"))
         })
         .heading(2, "Conclusion")
         .paragraph(|p| p.text("Strong quarter with growth across all metrics."))
         .build();
 
-    doc.save("report.docx", Format::Docx)?;
-    doc.save("report.odt", Format::Odt)?;
-    doc.save("report.pdf", Format::Pdf)?;
-    doc.save("report.txt", Format::Txt)?;
+    let docx_bytes = doc.export(Format::Docx)?;
+    std::fs::write("report.docx", docx_bytes)?;
+
+    let odt_bytes = doc.export(Format::Odt)?;
+    std::fs::write("report.odt", odt_bytes)?;
 
     Ok(())
 }
@@ -134,46 +116,36 @@ fn main() -> Result<(), s1engine::Error> {
 ### Use Case 3: Edit an Existing Document
 
 ```rust
-use s1engine::{Engine, Format};
+use s1engine::{Engine, Format, Operation};
 
 fn main() -> Result<(), s1engine::Error> {
     let engine = Engine::new();
-    let mut doc = engine.open_file("contract.docx")?;
+    let data = std::fs::read("contract.docx")?;
+    let mut doc = engine.open(&data)?;
 
-    // Find and replace text
-    let count = doc.find_replace("COMPANY_NAME", "Acme Corp")?;
-    println!("Replaced {} occurrences", count);
+    // Edit via operations (preserves undo history)
+    let text_id = /* find target text node */;
+    doc.apply(Operation::insert_text(text_id, 0, "DRAFT: "))?;
 
-    // Modify specific paragraph via transaction
-    if let Some(para) = doc.paragraphs().nth(0) {
-        let para_id = para.id();
-        let mut txn = doc.begin_transaction("Update title");
-        txn.set_text(para_id, "Updated Contract Title")?;
-        txn.set_style(para_id, "Heading1")?;
-        txn.commit()?;
-    }
+    // Update metadata directly (not an operation)
+    doc.metadata_mut().title = Some("Updated Contract".to_string());
 
-    // Append content
-    {
-        let mut txn = doc.begin_transaction("Add signature block");
-        txn.append_paragraph(|p| {
-            p.text("Signed: _________________________")
-        })?;
-        txn.append_paragraph(|p| {
-            p.text("Date: _________________________")
-        })?;
-        txn.commit()?;
-    }
+    // Edit via transaction (atomic undo unit)
+    let mut txn = s1engine::Transaction::with_label("Add disclaimer");
+    txn.push(Operation::insert_text(text_id, 0, "CONFIDENTIAL: "));
+    doc.apply_transaction(&txn)?;
 
     // Undo the last transaction
     doc.undo()?;
 
-    doc.save("contract_updated.docx", Format::Docx)?;
+    // Export
+    let output = doc.export(Format::Docx)?;
+    std::fs::write("contract_updated.docx", output)?;
     Ok(())
 }
 ```
 
-### Use Case 4: Format Conversion (CLI Tool)
+### Use Case 4: Format Conversion
 
 ```rust
 use s1engine::{Engine, Format};
@@ -181,103 +153,106 @@ use std::path::Path;
 
 fn main() -> Result<(), s1engine::Error> {
     let engine = Engine::new();
-    let args: Vec<String> = std::env::args().collect();
+    let input = std::fs::read("input.docx")?;
+    let doc = engine.open(&input)?;
 
-    let input = &args[1];
-    let output = &args[2];
+    // Export to different formats
+    let odt = doc.export(Format::Odt)?;
+    std::fs::write("output.odt", odt)?;
 
-    let doc = engine.open_file(input)?;
-    let format = Format::from_extension(Path::new(output).extension())?;
-    doc.save(output, format)?;
+    let txt = doc.export_string(Format::Txt)?;
+    std::fs::write("output.txt", txt)?;
 
-    println!("Converted {} -> {}", input, output);
     Ok(())
 }
 ```
 
-### Use Case 5: Batch Processing (Server)
+### Use Case 5: Batch Processing
 
 ```rust
 use s1engine::Engine;
 
-fn process_upload(engine: &Engine, data: &[u8]) -> Result<ProcessedDoc, s1engine::Error> {
+fn extract_metadata(engine: &Engine, data: &[u8]) -> Result<String, s1engine::Error> {
     let doc = engine.open(data)?;
-
-    Ok(ProcessedDoc {
-        title: doc.metadata().title.clone(),
-        author: doc.metadata().creator.clone(),
-        text: doc.to_plain_text(),
-        word_count: doc.to_plain_text().split_whitespace().count(),
-        page_count: doc.layout()?.pages.len(),
-        paragraphs: doc.paragraphs().count(),
-    })
+    Ok(format!(
+        "Title: {:?}, Author: {:?}, Paragraphs: {}, Text length: {}",
+        doc.metadata().title,
+        doc.metadata().creator,
+        doc.paragraph_count(),
+        doc.to_plain_text().len(),
+    ))
 }
 ```
 
-### Use Case 6: WASM (Browser)
-
-```typescript
-import { Engine, Format } from '@s1engine/wasm';
-
-const engine = new Engine();
-
-// Open a file from <input type="file">
-const fileInput = document.getElementById('file') as HTMLInputElement;
-fileInput.onchange = async () => {
-    const file = fileInput.files![0];
-    const buffer = new Uint8Array(await file.arrayBuffer());
-
-    const doc = engine.open(buffer);
-    console.log('Title:', doc.metadata().title);
-    console.log('Text:', doc.toPlainText());
-
-    // Export as PDF
-    const pdfBytes = doc.export(Format.Pdf);
-    downloadBlob(pdfBytes, 'output.pdf', 'application/pdf');
-
-    doc.free(); // Explicit cleanup in WASM
-};
-
-// Create a document programmatically
-const doc = engine.createDocument();
-doc.builder()
-    .heading(1, 'Hello from WASM')
-    .paragraph('This document was created in the browser.')
-    .build();
-
-const docxBytes = doc.export(Format.Docx);
-doc.free();
-```
-
-### Use Case 7: Collaboration (Phase 4+)
+### Use Case 6: Rich Content with Builder
 
 ```rust
-use s1engine::{Engine, CollabDocument};
+use s1engine::{DocumentBuilder, Format, Color};
 
-// Initialize with unique replica ID
-let engine = Engine::new();
-let mut doc = CollabDocument::new(&engine, 42); // replica_id = 42
+fn main() -> Result<(), s1engine::Error> {
+    let doc = DocumentBuilder::new()
+        .title("Styled Document")
+        .heading(1, "Introduction")
+        .paragraph(|p| {
+            p.text("Normal text, ")
+             .bold("bold text, ")
+             .italic("italic text, ")
+             .bold_italic("both, ")
+             .underline("underlined, ")
+             .superscript("super")
+             .text(" and ")
+             .subscript("sub")
+        })
+        .paragraph(|p| {
+            p.hyperlink("https://example.com", "Click here")
+             .text(" or see ")
+             .bookmark_start("section1")
+             .text("this section")
+             .bookmark_end()
+        })
+        .bullet("First item")
+        .bullet("Second item")
+        .numbered("Step one")
+        .numbered("Step two")
+        .build();
 
-// Local edits produce operations
-let ops = doc.apply_local(InsertText {
-    node: paragraph_id,
-    offset: 5,
-    text: "inserted text".into(),
-})?;
+    std::fs::write("styled.docx", doc.export(Format::Docx)?)?;
+    Ok(())
+}
+```
 
-// Serialize operations for network transport
-let encoded = ops.encode()?;
-send_to_server(encoded);
+### Use Case 7: Collaboration (with `crdt` feature)
 
-// Receive and apply remote operations
-let remote_ops = receive_from_server();
-let decoded = Operations::decode(&remote_ops)?;
-doc.apply_remote(decoded)?;
+```rust
+use s1engine::Engine;
+// These types are available with the `crdt` feature
+use s1engine::{CollabDocument, CrdtOperation, StateVector};
 
-// Get cursor positions of other users (awareness)
-let awareness = doc.awareness();
-for (user_id, cursor) in awareness.cursors() {
-    render_remote_cursor(user_id, cursor);
+fn main() -> Result<(), s1engine::Error> {
+    let engine = Engine::new();
+
+    // Create a collaborative document with unique replica ID
+    let mut doc = engine.create_collab(42);
+
+    // Apply local operations (returns CrdtOps to broadcast)
+    let ops = doc.apply_local(CrdtOperation::insert_text(
+        doc.next_op_id(),
+        /* node_id */, 0, "Hello".into(),
+        None, None,
+    ))?;
+
+    // Serialize for network transport
+    let encoded = s1engine::serialize_operations(&ops)?;
+
+    // On another replica: apply remote operations
+    let remote_ops = s1engine::deserialize_operations(&encoded)?;
+    doc.apply_remote(remote_ops)?;
+
+    // Incremental sync via state vectors
+    let my_state = doc.state_vector();
+    let changes = doc.changes_since(&remote_state_vector);
+
+    Ok(())
 }
 ```
 
@@ -286,70 +261,27 @@ for (user_id, cursor) in awareness.cursors() {
 ## Error Handling
 
 ```rust
-/// Top-level error type (re-exported as s1engine::Error)
-#[derive(Debug, thiserror::Error)]
+/// Top-level error type (s1engine::Error)
 pub enum Error {
-    #[error("Format error: {0}")]
-    Format(#[from] FormatError),
+    /// Format parsing/writing error (DOCX, ODT, TXT, PDF)
+    Format(String),
 
-    #[error("Layout error: {0}")]
-    Layout(#[from] LayoutError),
+    /// Operation validation/application error
+    Operation(s1_ops::OperationError),
 
-    #[error("Operation error: {0}")]
-    Operation(#[from] OperationError),
+    /// File I/O error
+    Io(std::io::Error),
 
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Unsupported format: {0}")]
+    /// Unsupported or unrecognized format
     UnsupportedFormat(String),
-}
 
-#[derive(Debug, thiserror::Error)]
-pub enum FormatError {
-    #[error("Invalid DOCX: {0}")]
-    InvalidDocx(String),
-
-    #[error("Invalid ODT: {0}")]
-    InvalidOdt(String),
-
-    #[error("Malformed XML at line {line}: {message}")]
-    MalformedXml { line: u64, message: String },
-
-    #[error("Missing required part: {0}")]
-    MissingPart(String),
-
-    #[error("Unsupported feature: {0}")]
-    UnsupportedFeature(String),
-
-    #[error("Invalid ZIP archive: {0}")]
-    InvalidZip(String),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum OperationError {
-    #[error("Node not found: ({0}, {1})")]
-    NodeNotFound(u64, u64),  // replica, counter
-
-    #[error("Invalid position: node ({node_replica}, {node_counter}), offset {offset}")]
-    InvalidPosition { node_replica: u64, node_counter: u64, offset: usize },
-
-    #[error("Cannot apply operation: {0}")]
-    InvalidOperation(String),
-
-    #[error("Invalid parent-child relationship: {parent_type:?} cannot contain {child_type:?}")]
-    InvalidHierarchy { parent_type: String, child_type: String },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LayoutError {
-    #[error("Font not found: {family} (bold={bold}, italic={italic})")]
-    FontNotFound { family: String, bold: bool, italic: bool },
-
-    #[error("Text shaping failed: {0}")]
-    ShapingError(String),
+    /// CRDT error (feature-gated)
+    #[cfg(feature = "crdt")]
+    Crdt(s1_crdt::CrdtError),
 }
 ```
+
+Each internal crate has its own error type (`DocxError`, `OdtError`, `PdfError`, `TextError`, `LayoutError`, `ConvertError`, `CrdtError`) that converts into `s1engine::Error` via `From` implementations.
 
 ---
 
@@ -358,7 +290,7 @@ pub enum LayoutError {
 - **Pre-1.0** (`0.x.y`): API may change between minor versions. Use exact version pins.
 - **1.0+**: Semantic versioning. Public API stable within major versions.
 - **Internal crates** (`s1-model`, `s1-ops`, etc.) have independent version numbers.
-- **Facade crate** (`s1engine`) re-exports the stable API — consumers depend on this only.
+- **Facade crate** (`s1engine`) re-exports the stable API -- consumers depend on this only.
 
 ---
 
@@ -372,7 +304,6 @@ pub enum LayoutError {
 | Types | `PascalCase` | `NodeType`, `AttributeMap` |
 | Functions | `snake_case` | `open_file`, `to_plain_text` |
 | Constants | `SCREAMING_SNAKE` | `DEFAULT_FONT_SIZE` |
-| Feature flags | `kebab-case` | `text-shaping`, `ffi-wasm` |
+| Feature flags | `kebab-case` | `doc-legacy`, `crdt` |
 | Error variants | `PascalCase` | `NodeNotFound`, `InvalidDocx` |
 | C API prefix | `s1_` | `s1_engine_new`, `s1_document_free` |
-| WASM/NPM package | `@s1engine/` | `@s1engine/wasm` |

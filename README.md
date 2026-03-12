@@ -1,49 +1,44 @@
 # s1engine
 
-A modern, modular document engine built in Rust. Read, write, edit, and convert documents — DOCX, ODT, PDF, and TXT.
+A modular document engine built in Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, and TXT formats.
 
 Designed as an embeddable SDK for building document editors, converters, and collaborative editing applications.
 
 ## Status
 
-**Pre-alpha** — Architecture and specification phase. Not yet usable.
+**Pre-release** (`0.1.x`) -- Phases 1-4 complete, Phase 5 in progress. Core functionality works. API is not yet stable.
 
-## Features (Planned)
-
-- **Multi-format**: DOCX (OOXML), ODT (ODF), PDF (export), TXT, DOC (via conversion)
-- **Modular**: Use only what you need — just parsing? Just PDF export? Just the model?
-- **CRDT-ready**: Document model designed for collaborative editing from day 1
-- **Cross-platform**: Native (macOS/Linux/Windows), WASM (browser), C FFI
-- **Safe**: Rust memory safety — no buffer overflows, no use-after-free
-- **Fast**: Incremental layout, efficient format parsing, small WASM bundles
+- Comprehensive test suite across 13 crates (run `cargo test --workspace` to verify)
+- DOCX, ODT, TXT read/write with round-trip fidelity
+- PDF export (text, tables, images, hyperlinks, bookmarks)
+- CRDT-based collaborative editing (Fugue text, tree moves, LWW attributes)
+- WASM and C FFI bindings
+- Pure Rust -- zero C/C++ dependencies
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Consumer Applications                │
-└─────────────────┬───────────────────────────────┘
-                  │  Rust API / C FFI / WASM
-┌─────────────────▼───────────────────────────────┐
-│                s1engine (facade)                  │
-├─────────────────────────────────────────────────┤
-│  s1-ops       s1-layout       s1-convert         │
-│  Operations   Page Layout     Format Conversion   │
-├─────────────────────────────────────────────────┤
-│                s1-model                           │
-│          Core Document Model                      │
-├──────────┬──────────┬──────────┬────────────────┤
-│  format  │  format  │  format  │    format       │
-│  -docx   │  -odt    │  -pdf    │    -txt         │
-├──────────┴──────────┴──────────┴────────────────┤
-│              s1-text (FFI Layer)                   │
-│        HarfBuzz · FreeType · ICU                  │
-└─────────────────────────────────────────────────┘
+Consumer Applications
+        |  Rust API / C FFI / WASM
++-------v--------------------------------------------+
+|                s1engine (facade)                    |
+|----------------------------------------------------|
+|  s1-ops       s1-layout       s1-convert           |
+|  Operations   Page Layout     Format Conversion    |
+|  Undo/Redo    Pagination      DOC -> DOCX          |
+|----------------------------------------------------|
+|  s1-crdt                s1-model                   |
+|  Collaborative          Core Document Model        |
+|  Editing (Fugue)        (zero external deps)       |
+|----------------------------------------------------|
+|  format-docx  format-odt  format-pdf  format-txt   |
+|----------------------------------------------------|
+|                s1-text (Pure Rust)                  |
+|        rustybuzz  ttf-parser  fontdb               |
++----------------------------------------------------+
 ```
 
 ## Quick Start
-
-> **Note**: s1engine is not yet published. These examples show the planned API.
 
 ### Open and Read
 
@@ -51,46 +46,49 @@ Designed as an embeddable SDK for building document editors, converters, and col
 use s1engine::{Engine, Format};
 
 let engine = Engine::new();
-let doc = engine.open_file("report.docx")?;
+
+// Open from bytes (format auto-detected)
+let data = std::fs::read("report.docx")?;
+let doc = engine.open(&data)?;
 
 println!("{}", doc.to_plain_text());
-
-for para in doc.paragraphs() {
-    println!("{:?}: {}", para.style_name(), para.text());
-}
+println!("Title: {:?}", doc.metadata().title);
+println!("Paragraphs: {}", doc.paragraph_count());
 ```
 
 ### Create a Document
 
 ```rust
-use s1engine::{Engine, Format};
+use s1engine::DocumentBuilder;
 
-let engine = Engine::new();
-let mut doc = engine.create_document();
-
-doc.builder()
-    .heading(1, "Hello World")
+let doc = DocumentBuilder::new()
+    .title("My Report")
+    .author("Engineering")
+    .heading(1, "Introduction")
     .paragraph(|p| {
         p.text("This is ")
          .bold("s1engine")
-         .text(" — a document engine in Rust.")
+         .text(" -- a document engine in Rust.")
+    })
+    .table(|t| {
+        t.row(|r| r.cell("Name").cell("Value"))
+         .row(|r| r.cell("Users").cell("15,000"))
     })
     .build();
 
-doc.save("output.docx", Format::Docx)?;
-doc.save("output.pdf", Format::Pdf)?;
+let docx_bytes = doc.export(Format::Docx)?;
+let odt_bytes = doc.export(Format::Odt)?;
 ```
 
-### Convert Between Formats
+### Open from File
 
 ```rust
-use s1engine::{Engine, Format};
+use s1engine::Engine;
 
 let engine = Engine::new();
 let doc = engine.open_file("input.docx")?;
-doc.save("output.odt", Format::Odt)?;
-doc.save("output.pdf", Format::Pdf)?;
-doc.save("output.txt", Format::Txt)?;
+let output = doc.export(s1engine::Format::Odt)?;
+std::fs::write("output.odt", output)?;
 ```
 
 ### Cargo Feature Flags
@@ -103,8 +101,8 @@ s1engine = "0.1"
 # Minimal: just DOCX parsing
 s1engine = { version = "0.1", default-features = false, features = ["docx"] }
 
-# Full: everything including PDF export
-s1engine = { version = "0.1", features = ["pdf", "convert"] }
+# Full: everything including PDF export and CRDT
+s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
 ```
 
 | Feature | Description | Default |
@@ -114,64 +112,78 @@ s1engine = { version = "0.1", features = ["pdf", "convert"] }
 | `txt` | Plain text read/write | Yes |
 | `pdf` | PDF export (requires layout + text shaping) | No |
 | `convert` | Format conversion pipelines | No |
-| `doc-legacy` | DOC → DOCX conversion | No |
-| `ffi-c` | C API bindings | No |
-| `ffi-wasm` | WASM bindings | No |
+| `doc-legacy` | DOC text extraction (via OLE2) | No |
 | `crdt` | CRDT collaboration primitives | No |
 
 ## Crate Structure
 
-| Crate | Description |
-|---|---|
-| `s1engine` | Facade — high-level public API |
-| `s1-model` | Core document model (tree, nodes, attributes, styles) |
-| `s1-ops` | Operations, transactions, undo/redo |
-| `s1-format-docx` | DOCX reader/writer |
-| `s1-format-odt` | ODT reader/writer |
-| `s1-format-pdf` | PDF exporter |
-| `s1-format-txt` | Plain text reader/writer |
-| `s1-convert` | Format conversion (incl. DOC → DOCX) |
-| `s1-layout` | Page layout engine |
-| `s1-text` | Text shaping, fonts, Unicode (C++ FFI) |
+| Crate | Description | Tests |
+|---|---|---|
+| `s1engine` | Facade -- high-level public API | 46 |
+| `s1-model` | Core document model (tree, nodes, attributes, styles) | 72 |
+| `s1-ops` | Operations, transactions, undo/redo | 48 |
+| `s1-format-docx` | DOCX reader/writer | 167 |
+| `s1-format-odt` | ODT reader/writer | 63 |
+| `s1-format-pdf` | PDF exporter | 21 |
+| `s1-format-txt` | Plain text reader/writer | 25 |
+| `s1-convert` | Format conversion (incl. DOC text extraction) | 15 |
+| `s1-layout` | Page layout engine (pagination, line breaking) | 38 |
+| `s1-text` | Text shaping, fonts, Unicode (pure Rust) | 39 |
+| `s1-crdt` | CRDT algorithms for collaborative editing | 171 |
+| `ffi/wasm` | WASM bindings (wasm-bindgen) | 12 |
+| `ffi/c` | C FFI bindings (opaque handles) | 10 |
+
+## Format Support
+
+| Feature | DOCX | ODT | PDF | TXT | DOC |
+|---|---|---|---|---|---|
+| Read | Full | Full | -- | Full | Text only |
+| Write | Full | Full | Export | Full | -- |
+| Round-trip | Yes | Yes | -- | Yes | -- |
+| Tables | Yes | Yes | Yes | Tab-separated | -- |
+| Images | Yes | Yes | Yes | -- | -- |
+| Lists | Yes | Yes | -- | -- | -- |
+| Styles | Yes | Yes | -- | -- | -- |
+| Headers/Footers | Yes | -- | Yes | -- | -- |
+| Hyperlinks | Yes | -- | Yes | -- | -- |
+| Comments | Yes | -- | -- | -- | -- |
+| Metadata | Yes | Yes | Yes | -- | -- |
 
 ## Documentation
 
-- [Overview](docs/OVERVIEW.md) — Vision, goals, non-goals
-- [Architecture](docs/ARCHITECTURE.md) — System design and decisions
-- [Specification](docs/SPECIFICATION.md) — Detailed technical spec
-- [Roadmap](docs/ROADMAP.md) — Development phases and milestones
-- [API Design](docs/API_DESIGN.md) — Public API surface and examples
-- [Dependencies](docs/DEPENDENCIES.md) — External libraries and rationale
+- [Architecture](docs/ARCHITECTURE.md) -- System design and decisions
+- [Specification](docs/SPECIFICATION.md) -- Detailed technical spec
+- [Roadmap](docs/ROADMAP.md) -- Development phases and milestones
+- [API Design](docs/API_DESIGN.md) -- Public API surface and examples
+- [Dependencies](docs/DEPENDENCIES.md) -- External libraries and rationale
 
 ## Building
 
 ```bash
-# Prerequisites
-rustup install stable
-# For PDF export (Phase 3+): HarfBuzz, FreeType, ICU system libraries
-
 # Build
 cargo build
 
 # Test
-cargo test
+cargo test --workspace
 
 # Lint
-cargo clippy -- -D warnings
+cargo clippy --workspace -- -D warnings
 
 # Format
-cargo fmt
+cargo fmt --check
 ```
+
+No system libraries required. All dependencies are pure Rust.
 
 ## Roadmap
 
-| Phase | Timeline | Focus |
+| Phase | Status | Focus |
 |---|---|---|
-| 1. Foundation | Months 1-3 | Document model, operations, TXT, basic DOCX |
-| 2. Rich Documents | Months 3-6 | Tables, images, lists, full DOCX, ODT |
-| 3. Layout & Export | Months 6-9 | Text shaping, page layout, PDF export |
-| 4. Collaboration | Months 9-14 | CRDT integration, conflict resolution |
-| 5. Production | Months 14-18 | WASM, C FFI, hardening, release |
+| 1. Foundation | Complete | Document model, operations, TXT, basic DOCX |
+| 2. Rich Documents | Complete | Tables, images, lists, full DOCX, ODT |
+| 3. Layout & Export | Complete | Text shaping, page layout, PDF export |
+| 4. Collaboration | Complete | Fugue CRDT, tree CRDT, awareness, serialization |
+| 5. Production | In Progress | WASM, C FFI, hardening, docs, release |
 
 See [ROADMAP.md](docs/ROADMAP.md) for detailed milestones.
 
@@ -183,7 +195,3 @@ Licensed under either of:
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 
 at your option.
-
-## Contributing
-
-s1engine is currently in early development. Contribution guidelines will be published with the first public release.

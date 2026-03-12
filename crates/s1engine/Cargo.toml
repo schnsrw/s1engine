@@ -33,3 +33,9 @@ doc-legacy = ["convert"]
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+zip = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "engine_bench"
+harness = false

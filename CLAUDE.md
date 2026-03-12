@@ -147,8 +147,8 @@ This eliminates all C/C++ dependencies while providing full Unicode support.
 
 > **This section MUST be updated after every significant change, milestone completion, or phase transition.**
 
-### Current Phase: Phase 4 — Collaboration (complete)
-### Status: s1-model (61), s1-ops (37), s1-format-txt (25), s1-format-docx (167), s1-format-odt (63), s1-format-pdf (8), s1-convert (15), s1-layout (30), s1-text (39), s1engine (46), s1-crdt (171). 662 total tests + 4 doc-tests.
+### Current Phase: Phase 5 — Production (in progress, hardening)
+### Status: s1-model (72), s1-ops (48), s1-format-txt (25), s1-format-docx (167), s1-format-odt (63), s1-format-pdf (21), s1-convert (15), s1-layout (38), s1-text (39), s1engine (46+11 integration), s1-crdt (172), s1engine-wasm (12), s1engine-c (10). 743 total tests + 4 doc-tests.
 
 ### Phase Completion Tracker
 
@@ -159,7 +159,7 @@ This eliminates all C/C++ dependencies while providing full Unicode support.
 | Phase 2: Rich Documents | COMPLETE | 2026-03-11 | 2026-03-12 | 6 milestones; tables, images, lists, sections, ODT, advanced DOCX |
 | Phase 3: Layout & Export | COMPLETE | 2026-03-12 | 2026-03-12 | Layout complete; PDF polish (images, hyperlinks, bookmarks) deferred to 3.6 |
 | Phase 4: Collaboration | COMPLETE | 2026-03-12 | 2026-03-12 | 4 milestones; Fugue text CRDT, tree CRDT, LWW attributes/metadata, CollabDocument API, awareness, serialization, compression; 171 tests |
-| Phase 5: Production | NOT STARTED | — | — | WASM, C FFI, hardening |
+| Phase 5: Production | COMPLETE | 2026-03-12 | 2026-03-12 | WASM bindings (12 tests), C FFI (10 tests), proptest (4 tests), security hardening (ZIP bomb limits, image dimension caps) |
 
 ### Milestone Tracker (Current Phase)
 
@@ -183,10 +183,10 @@ Phase 2 milestones:
 Phase 3 milestones:
 - [x] 3.1 Text Processing (`s1-text`) — Pure-Rust text shaping (rustybuzz), font parsing (ttf-parser), font discovery (fontdb), BiDi (unicode-bidi), line breaking (unicode-linebreak). 39 tests.
 - [x] 3.2 Layout Engine (`s1-layout`) — Style resolution, Knuth-Plass line breaking, block stacking, pagination, table layout, image placement, header/footer placement, widow/orphan control, page-number substitution. 30 tests.
-- [ ] 3.3 Incremental Layout — Dirty tracking, incremental re-layout (deferred)
+- [x] 3.3 Incremental Layout — Content-hash-based LayoutCache, cache hit/miss/invalidation. 8 tests.
 - [x] 3.4 PDF Export (`s1-format-pdf`) — Core: font embedding/subsetting, text rendering, table borders, metadata. 8 tests.
 - [x] 3.5 Format Conversion (`s1-convert`) — DOC reader (OLE2/CFB heuristic text extraction), cross-format conversion pipeline (DOC/DOCX/ODT → DOCX/ODT), format detection. 15 tests.
-- [ ] 3.6 PDF Polish — Image embedding in PDF, hyperlink annotations, bookmarks/outline (deferred until after Phase 4).
+- [x] 3.6 PDF Polish — Image embedding (JPEG/PNG), hyperlink annotations, bookmarks/outline. 13 tests.
 
 Phase 4 milestones:
 - [x] 4.1 Core CRDT Primitives — LamportClock, VectorClock, OpId, StateVector, CrdtOperation, CrdtError (25 tests)
@@ -194,21 +194,28 @@ Phase 4 milestones:
 - [x] 4.3 Collaboration API — CollabDocument, AwarenessState, binary serialization, operation compression (40 tests)
 - [x] 4.4 Collaboration Testing — 16 convergence tests (multi-replica, partition/heal, snapshot sync), 17 scenario tests (concurrent edits, deterministic ordering, undo). 33 integration tests.
 
+Phase 5 milestones:
+- [x] 5.1 WASM Bindings — WasmEngine, WasmDocument, WasmDocumentBuilder, WasmFontDatabase, detect_format. 12 tests.
+- [x] 5.2 C FFI Bindings — s1_engine/document/error/string/bytes opaque handles, null-safety, format roundtrip. 10 tests.
+- [x] 5.3 Performance & Hardening — Proptest for model tree invariants, ops inversion roundtrip, CRDT convergence (4 tests). ZIP bomb size limits (256MB/64MB). Image dimension caps (16384px). Security hardening in DOCX/ODT/PDF.
+
 ### Crate Implementation Status
 
 | Crate | Status | Tests | Notes |
 |---|---|---|---|
-| `s1-model` | **COMPLETE** | 61 passing | Core types, zero deps, all modules + numbering defs + sections |
-| `s1-ops` | **COMPLETE** | 37 passing | Operations, transactions, undo/redo, cursor/selection |
-| `s1-format-docx` | **Phase 2** | 167 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, sections, headers/footers, fields, hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments, round-trip |
-| `s1-format-odt` | **Phase 2** | 63 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, auto-styles, round-trip |
-| `s1-format-pdf` | **Phase 3** | 8 passing | PDF export from layout tree: font embedding/subsetting, text rendering, tables, metadata |
+| `s1-model` | **COMPLETE** | 72 passing | Core types, zero deps, all modules + numbering defs + sections + proptest tree invariants + Unicode text safety + cycle detection + is_descendant |
+| `s1-ops` | **COMPLETE** | 48 passing | Operations, transactions, undo/redo, cursor/selection + proptest inversion roundtrip + subtree undo + mixed attribute undo + Unicode text roundtrip |
+| `s1-format-docx` | **COMPLETE** | 167 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, sections, headers/footers, fields, hyperlinks, bookmarks, tab stops, paragraph borders/shading, character spacing, superscript/subscript, comments, round-trip. ZIP bomb protection. |
+| `s1-format-odt` | **COMPLETE** | 63 passing | Reader + writer: paragraphs, runs, formatting, styles, metadata, tables, images, lists, auto-styles, round-trip. ZIP bomb protection. |
+| `s1-format-pdf` | **COMPLETE** | 21 passing | PDF export: font embedding/subsetting, text rendering, tables, metadata, images (JPEG/PNG), hyperlinks, bookmarks. Image dimension caps. |
 | `s1-format-txt` | **COMPLETE** | 25 passing | Reader (UTF-8/UTF-16/Latin-1 detection), writer, round-trip |
-| `s1-convert` | **Phase 3** | 15 passing | DOC reader (OLE2/CFB heuristic), cross-format conversion (DOC/DOCX/ODT → DOCX/ODT), format detection |
-| `s1-layout` | **Phase 3** | 30 passing | Style resolution, Knuth-Plass line breaking, pagination, table layout, image placement, header/footer placement, widow/orphan control, page-number field substitution |
-| `s1-text` | **Phase 3** | 39 passing | Pure Rust: text shaping (rustybuzz), font parsing (ttf-parser), font discovery (fontdb), BiDi, line breaking |
-| `s1-crdt` | **Phase 4** | 171 passing | Fugue text CRDT, tree CRDT, LWW attr/metadata, resolver, CollabDocument, awareness, binary serialization, compression, tombstones; 16 convergence + 17 scenario integration tests |
-| `s1engine` | **Phase 4** | 46 passing | Engine, Document, Format, Error, DocumentBuilder, TableBuilder, list builder, section/header/footer builder, hyperlink/bookmark/superscript/subscript builder; open/create/export; undo/redo; ODT support; feature-gated CRDT re-exports + create_collab/open_collab |
+| `s1-convert` | **COMPLETE** | 15 passing | DOC reader (OLE2/CFB heuristic), cross-format conversion (DOC/DOCX/ODT → DOCX/ODT), format detection |
+| `s1-layout` | **COMPLETE** | 38 passing | Style resolution, Knuth-Plass line breaking, pagination, table layout, image placement, header/footer placement, widow/orphan control, page-number field substitution, incremental layout cache |
+| `s1-text` | **COMPLETE** | 39 passing | Pure Rust: text shaping (rustybuzz), font parsing (ttf-parser), font discovery (fontdb), BiDi, line breaking |
+| `s1-crdt` | **COMPLETE** | 172 passing | Fugue text CRDT, tree CRDT, LWW attr/metadata, resolver, CollabDocument, awareness, binary serialization, compression, tombstones; 16 convergence + 17 scenario + 1 proptest integration tests |
+| `s1engine` | **COMPLETE** | 46 passing | Engine, Document, Format, Error, DocumentBuilder, TableBuilder, list builder, section/header/footer builder, hyperlink/bookmark/superscript/subscript builder; open/create/export; undo/redo; ODT support; feature-gated CRDT re-exports + create_collab/open_collab |
+| `s1engine-wasm` | **COMPLETE** | 12 passing | WASM bindings: WasmEngine, WasmDocument, WasmDocumentBuilder, WasmFontDatabase, format detection |
+| `s1engine-c` | **COMPLETE** | 10 passing | C FFI: opaque handles, null-safety, error handling, format roundtrip |
 
 ### Recent Changes Log
 
@@ -238,6 +245,14 @@ Phase 4 milestones:
 | 2026-03-12 | Milestone 4.3 — CollabDocument (fork, snapshot, apply_local/remote, changes_since, undo/redo), AwarenessState, binary serialization, operation compression (40 tests) | crates/s1-crdt/src/* (collab.rs, awareness.rs, serialize.rs, compression.rs) |
 | 2026-03-12 | Milestone 4.4 — 16 convergence tests (2/3/5 replicas, partition/heal, snapshot sync, delayed delivery) + 17 scenario tests (concurrent inserts, attribute LWW, delete+modify, undo) | crates/s1-crdt/tests/* (convergence.rs, scenarios.rs) |
 | 2026-03-12 | Feature-gated CRDT integration into s1engine facade: crdt feature flag, create_collab/open_collab methods, conditional re-exports, CrdtError variant | Cargo.toml, crates/s1engine/src/* (lib.rs, engine.rs, error.rs) |
+| 2026-03-12 | Milestone 3.6: PDF Polish — image embedding (JPEG DCTDecode pass-through, PNG decode+FlateDecode), hyperlink annotations, PDF outline/bookmarks (13 tests) | crates/s1-layout/src/types.rs, engine.rs, crates/s1-format-pdf/src/writer.rs, Cargo.toml |
+| 2026-03-12 | Milestone 3.3: Incremental Layout — content-hash-based LayoutCache with FNV-1a, per-block caching, cache hit/miss/invalidation (8 tests) | crates/s1-layout/src/types.rs, engine.rs, lib.rs |
+| 2026-03-12 | Milestone 5.1: WASM Bindings — WasmEngine, WasmDocument, WasmDocumentBuilder, WasmFontDatabase, detect_format, wasm32 font guard (12 tests) | ffi/wasm/*, Cargo.toml, crates/s1-text/src/font_db.rs |
+| 2026-03-12 | Milestone 5.2: C FFI Bindings — opaque handles (S1Engine, S1Document, S1Error, S1Bytes, S1String), extern "C" functions, null-safety (10 tests) | ffi/c/* |
+| 2026-03-12 | Milestone 5.3: Hardening — proptest for model tree invariants, ops inversion roundtrip, CRDT convergence (4 tests). ZIP bomb limits in DOCX/ODT readers. Image dimension caps in PDF writer. | crates/s1-model/src/tree.rs, crates/s1-ops/src/operation.rs, crates/s1-crdt/tests/proptests.rs, crates/s1-format-docx/src/reader.rs, crates/s1-format-odt/src/reader.rs, crates/s1-format-pdf/src/writer.rs |
+| 2026-03-12 | P0 Correctness: Unicode-safe text ops (char_offset_to_byte helper, char-based validation), cycle detection (is_descendant + move_node guard), subtree undo (full DFS snapshot + restore_node), mixed attribute undo (remove added keys + restore overwritten values). 21 new regression tests. | crates/s1-model/src/tree.rs, crates/s1-ops/src/operation.rs |
+| 2026-03-12 | P1 Documentation truthfulness: Rewrote README.md (actual status, real API examples, format support matrix), API_DESIGN.md (examples matching real facade API), DEPENDENCIES.md (pure Rust stack, correct deps), ARCHITECTURE.md (correct file tree, no C++ FFI, Fugue CRDT). Added model_mut() escape hatch documentation. | README.md, docs/API_DESIGN.md, docs/DEPENDENCIES.md, docs/ARCHITECTURE.md, crates/s1engine/src/document.rs |
+| 2026-03-12 | P2 Hardening: 11 invariant integration tests (undo/redo reversibility, cross-format text preservation, builder output validity, Unicode roundtrip, tree integrity). CLI examples (convert, create_report). CHANGELOG.md. | crates/s1engine/tests/invariants.rs, crates/s1engine/examples/convert.rs, crates/s1engine/examples/create_report.rs, CHANGELOG.md |
 
 ---
 
