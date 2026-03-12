@@ -16,18 +16,28 @@ s1-format-docx = { workspace = true, optional = true }
 s1-format-odt = { workspace = true, optional = true }
 s1-format-pdf = { workspace = true, optional = true }
 s1-format-txt = { workspace = true, optional = true }
+s1-format-md = { workspace = true, optional = true }
 s1-convert = { workspace = true, optional = true }
+s1-crdt = { workspace = true, optional = true }
 s1-layout = { workspace = true, optional = true }
 s1-text = { workspace = true, optional = true }
 
 [features]
-default = ["docx", "odt", "txt"]
+default = ["docx", "odt", "txt", "md"]
 docx = ["dep:s1-format-docx"]
 odt = ["dep:s1-format-odt"]
 pdf = ["dep:s1-format-pdf", "dep:s1-layout", "dep:s1-text"]
 txt = ["dep:s1-format-txt"]
+md = ["dep:s1-format-md"]
 convert = ["dep:s1-convert"]
+crdt = ["dep:s1-crdt"]
 doc-legacy = ["convert"]
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+zip = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "engine_bench"
+harness = false

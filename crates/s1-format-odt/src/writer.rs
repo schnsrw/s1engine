@@ -243,4 +243,307 @@ mod tests {
     }
 
     use std::io::Read as _;
+
+    #[test]
+    fn roundtrip_page_layout() {
+        use s1_model::{PageOrientation, SectionProperties};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Hello"))
+            .unwrap();
+
+        let mut sect = SectionProperties::default();
+        sect.page_width = 595.276; // A4
+        sect.page_height = 841.89;
+        sect.orientation = PageOrientation::Portrait;
+        sect.margin_top = 72.0;
+        sect.margin_bottom = 72.0;
+        sect.margin_left = 90.0;
+        sect.margin_right = 90.0;
+        doc.sections_mut().push(sect);
+
+        let bytes = write(&doc).unwrap();
+        let doc2 = crate::reader::read(&bytes).unwrap();
+
+        assert_eq!(doc2.sections().len(), 1);
+        let s = &doc2.sections()[0];
+        assert!((s.page_width - 595.276).abs() < 1.0);
+        assert!((s.page_height - 841.89).abs() < 1.0);
+        assert!((s.margin_top - 72.0).abs() < 1.0);
+        assert!((s.margin_left - 90.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn roundtrip_header_footer() {
+        use s1_model::{HeaderFooterRef, HeaderFooterType, Node, SectionProperties};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Body"))
+            .unwrap();
+
+        // Create header
+        let hdr_id = doc.next_id();
+        let root_id = doc.root_id();
+        let idx = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        doc.insert_node(root_id, idx, Node::new(hdr_id, NodeType::Header))
+            .unwrap();
+
+        let hp_id = doc.next_id();
+        doc.insert_node(hdr_id, 0, Node::new(hp_id, NodeType::Paragraph))
+            .unwrap();
+        let hr_id = doc.next_id();
+        doc.insert_node(hp_id, 0, Node::new(hr_id, NodeType::Run))
+            .unwrap();
+        let ht_id = doc.next_id();
+        doc.insert_node(hr_id, 0, Node::text(ht_id, "Header Text"))
+            .unwrap();
+
+        // Create footer
+        let ftr_id = doc.next_id();
+        let idx = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        doc.insert_node(root_id, idx, Node::new(ftr_id, NodeType::Footer))
+            .unwrap();
+
+        let fp_id = doc.next_id();
+        doc.insert_node(ftr_id, 0, Node::new(fp_id, NodeType::Paragraph))
+            .unwrap();
+        let fr_id = doc.next_id();
+        doc.insert_node(fp_id, 0, Node::new(fr_id, NodeType::Run))
+            .unwrap();
+        let ft_id = doc.next_id();
+        doc.insert_node(fr_id, 0, Node::text(ft_id, "Footer Text"))
+            .unwrap();
+
+        // Set up section
+        let mut sect = SectionProperties::default();
+        sect.headers.push(HeaderFooterRef {
+            hf_type: HeaderFooterType::Default,
+            node_id: hdr_id,
+        });
+        sect.footers.push(HeaderFooterRef {
+            hf_type: HeaderFooterType::Default,
+            node_id: ftr_id,
+        });
+        doc.sections_mut().push(sect);
+
+        let bytes = write(&doc).unwrap();
+        let doc2 = crate::reader::read(&bytes).unwrap();
+
+        assert_eq!(doc2.sections().len(), 1);
+        let s = &doc2.sections()[0];
+        assert!(s.has_headers());
+        assert!(s.has_footers());
+
+        // Verify header text
+        let hdr_ref = s.header(HeaderFooterType::Default).unwrap();
+        let hdr = doc2.node(hdr_ref.node_id).unwrap();
+        assert_eq!(hdr.node_type, NodeType::Header);
+
+        // Walk to text
+        let para = doc2.node(hdr.children[0]).unwrap();
+        let run = doc2.node(para.children[0]).unwrap();
+        let text = doc2.node(run.children[0]).unwrap();
+        assert_eq!(text.text_content.as_deref(), Some("Header Text"));
+
+        // Verify footer text
+        let ftr_ref = s.footer(HeaderFooterType::Default).unwrap();
+        let ftr = doc2.node(ftr_ref.node_id).unwrap();
+        let para = doc2.node(ftr.children[0]).unwrap();
+        let run = doc2.node(para.children[0]).unwrap();
+        let text = doc2.node(run.children[0]).unwrap();
+        assert_eq!(text.text_content.as_deref(), Some("Footer Text"));
+    }
+
+    #[test]
+    fn roundtrip_first_page_header() {
+        use s1_model::{HeaderFooterRef, HeaderFooterType, Node, SectionProperties};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Content"))
+            .unwrap();
+
+        // Default header
+        let hdr_id = doc.next_id();
+        let root_id = doc.root_id();
+        let idx = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        doc.insert_node(root_id, idx, Node::new(hdr_id, NodeType::Header))
+            .unwrap();
+        let hp_id = doc.next_id();
+        doc.insert_node(hdr_id, 0, Node::new(hp_id, NodeType::Paragraph))
+            .unwrap();
+        let hr_id = doc.next_id();
+        doc.insert_node(hp_id, 0, Node::new(hr_id, NodeType::Run))
+            .unwrap();
+        let ht_id = doc.next_id();
+        doc.insert_node(hr_id, 0, Node::text(ht_id, "Default Hdr"))
+            .unwrap();
+
+        // First-page header
+        let first_id = doc.next_id();
+        let idx = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        doc.insert_node(root_id, idx, Node::new(first_id, NodeType::Header))
+            .unwrap();
+        let fp_id = doc.next_id();
+        doc.insert_node(first_id, 0, Node::new(fp_id, NodeType::Paragraph))
+            .unwrap();
+        let fr_id = doc.next_id();
+        doc.insert_node(fp_id, 0, Node::new(fr_id, NodeType::Run))
+            .unwrap();
+        let ft_id = doc.next_id();
+        doc.insert_node(fr_id, 0, Node::text(ft_id, "First Page"))
+            .unwrap();
+
+        let mut sect = SectionProperties::default();
+        sect.title_page = true;
+        sect.headers.push(HeaderFooterRef {
+            hf_type: HeaderFooterType::Default,
+            node_id: hdr_id,
+        });
+        sect.headers.push(HeaderFooterRef {
+            hf_type: HeaderFooterType::First,
+            node_id: first_id,
+        });
+        doc.sections_mut().push(sect);
+
+        let bytes = write(&doc).unwrap();
+        let doc2 = crate::reader::read(&bytes).unwrap();
+
+        let s = &doc2.sections()[0];
+        assert!(s.title_page);
+        assert_eq!(s.headers.len(), 2);
+
+        // Verify first-page header
+        let first_ref = s.header(HeaderFooterType::First).unwrap();
+        let first = doc2.node(first_ref.node_id).unwrap();
+        let para = doc2.node(first.children[0]).unwrap();
+        let run = doc2.node(para.children[0]).unwrap();
+        let text = doc2.node(run.children[0]).unwrap();
+        assert_eq!(text.text_content.as_deref(), Some("First Page"));
+    }
+
+    #[test]
+    fn roundtrip_footer_with_page_number() {
+        use s1_model::{
+            AttributeKey, AttributeValue, FieldType, HeaderFooterRef,
+            HeaderFooterType, Node, SectionProperties,
+        };
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Body"))
+            .unwrap();
+
+        // Footer: "Page {PAGE} of {NUMPAGES}"
+        let ftr_id = doc.next_id();
+        let root_id = doc.root_id();
+        let idx = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        doc.insert_node(root_id, idx, Node::new(ftr_id, NodeType::Footer))
+            .unwrap();
+
+        let fp_id = doc.next_id();
+        doc.insert_node(ftr_id, 0, Node::new(fp_id, NodeType::Paragraph))
+            .unwrap();
+
+        // "Page "
+        let r1 = doc.next_id();
+        doc.insert_node(fp_id, 0, Node::new(r1, NodeType::Run))
+            .unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Page ")).unwrap();
+
+        // PAGE field
+        let f1 = doc.next_id();
+        let mut field1 = Node::new(f1, NodeType::Field);
+        field1.attributes.set(
+            AttributeKey::FieldType,
+            AttributeValue::FieldType(FieldType::PageNumber),
+        );
+        doc.insert_node(fp_id, 1, field1).unwrap();
+
+        // " of "
+        let r2 = doc.next_id();
+        doc.insert_node(fp_id, 2, Node::new(r2, NodeType::Run))
+            .unwrap();
+        let t2 = doc.next_id();
+        doc.insert_node(r2, 0, Node::text(t2, " of ")).unwrap();
+
+        // NUMPAGES field
+        let f2 = doc.next_id();
+        let mut field2 = Node::new(f2, NodeType::Field);
+        field2.attributes.set(
+            AttributeKey::FieldType,
+            AttributeValue::FieldType(FieldType::PageCount),
+        );
+        doc.insert_node(fp_id, 3, field2).unwrap();
+
+        let mut sect = SectionProperties::default();
+        sect.footers.push(HeaderFooterRef {
+            hf_type: HeaderFooterType::Default,
+            node_id: ftr_id,
+        });
+        doc.sections_mut().push(sect);
+
+        let bytes = write(&doc).unwrap();
+        let doc2 = crate::reader::read(&bytes).unwrap();
+
+        let s = &doc2.sections()[0];
+        let ftr_ref = s.footer(HeaderFooterType::Default).unwrap();
+        let ftr = doc2.node(ftr_ref.node_id).unwrap();
+        let para = doc2.node(ftr.children[0]).unwrap();
+
+        // Should have: Run("Page "), Field(PageNumber), Run(" of "), Field(PageCount)
+        assert_eq!(para.children.len(), 4);
+
+        let child0 = doc2.node(para.children[0]).unwrap();
+        assert_eq!(child0.node_type, NodeType::Run);
+
+        let child1 = doc2.node(para.children[1]).unwrap();
+        assert_eq!(child1.node_type, NodeType::Field);
+        assert_eq!(
+            child1.attributes.get(&AttributeKey::FieldType),
+            Some(&AttributeValue::FieldType(FieldType::PageNumber))
+        );
+
+        let child3 = doc2.node(para.children[3]).unwrap();
+        assert_eq!(child3.node_type, NodeType::Field);
+        assert_eq!(
+            child3.attributes.get(&AttributeKey::FieldType),
+            Some(&AttributeValue::FieldType(FieldType::PageCount))
+        );
+    }
 }

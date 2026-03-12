@@ -42,6 +42,10 @@ pub enum NodeType {
     /// A tab character.
     Tab,
 
+    // Generated content
+    /// A Table of Contents block. Contains cached entry paragraphs.
+    TableOfContents,
+
     // Objects
     /// An inline or floating image.
     Image,
@@ -87,6 +91,7 @@ impl NodeType {
                 | NodeType::Header
                 | NodeType::Footer
                 | NodeType::CommentBody
+                | NodeType::TableOfContents
         )
     }
 
@@ -99,7 +104,10 @@ impl NodeType {
     pub fn is_block(&self) -> bool {
         matches!(
             self,
-            NodeType::Paragraph | NodeType::Table | NodeType::Section
+            NodeType::Paragraph
+                | NodeType::Table
+                | NodeType::Section
+                | NodeType::TableOfContents
         )
     }
 
@@ -132,8 +140,9 @@ impl NodeType {
                 NodeType::Footer,
                 NodeType::CommentBody,
             ],
-            NodeType::Body => &[NodeType::Section, NodeType::Paragraph, NodeType::Table],
-            NodeType::Section => &[NodeType::Paragraph, NodeType::Table],
+            NodeType::Body => &[NodeType::Section, NodeType::Paragraph, NodeType::Table, NodeType::Image, NodeType::TableOfContents],
+            NodeType::Section => &[NodeType::Paragraph, NodeType::Table, NodeType::Image, NodeType::TableOfContents],
+            NodeType::TableOfContents => &[NodeType::Paragraph],
             NodeType::Paragraph => &[
                 NodeType::Run,
                 NodeType::LineBreak,

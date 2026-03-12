@@ -126,6 +126,12 @@ pub fn read(input: &[u8]) -> Result<DocumentModel, DocxError> {
 }
 
 /// Read a file from the ZIP archive as a UTF-8 string.
+/// Maximum decompressed size for a single ZIP entry (256 MB).
+const MAX_ZIP_ENTRY_SIZE: u64 = 256 * 1024 * 1024;
+
+/// Maximum decompressed size for media files (64 MB).
+const MAX_MEDIA_ENTRY_SIZE: u64 = 64 * 1024 * 1024;
+
 fn read_zip_entry(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
     path: &str,
@@ -133,6 +139,13 @@ fn read_zip_entry(
     let mut file = archive
         .by_name(path)
         .map_err(|_| DocxError::MissingFile(path.to_string()))?;
+
+    if file.size() > MAX_ZIP_ENTRY_SIZE {
+        return Err(DocxError::InvalidStructure(format!(
+            "ZIP entry '{path}' too large: {} bytes (max {MAX_ZIP_ENTRY_SIZE})",
+            file.size()
+        )));
+    }
 
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
@@ -147,6 +160,13 @@ fn read_zip_entry_bytes(
     let mut file = archive
         .by_name(path)
         .map_err(|_| DocxError::MissingFile(path.to_string()))?;
+
+    if file.size() > MAX_MEDIA_ENTRY_SIZE {
+        return Err(DocxError::InvalidStructure(format!(
+            "ZIP entry '{path}' too large: {} bytes (max {MAX_MEDIA_ENTRY_SIZE})",
+            file.size()
+        )));
+    }
 
     let mut contents = Vec::new();
     file.read_to_end(&mut contents)?;

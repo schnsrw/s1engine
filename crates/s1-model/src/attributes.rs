@@ -309,6 +309,12 @@ pub enum AttributeKey {
     FieldType,
     FieldCode,
 
+    // TOC attributes
+    /// Maximum heading level included in the TOC (1-9, default 3).
+    TocMaxLevel,
+    /// Custom title for the TOC (e.g. "Table of Contents").
+    TocTitle,
+
     // Link / annotation attributes
     HyperlinkUrl,
     HyperlinkTooltip,

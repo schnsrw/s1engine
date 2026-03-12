@@ -263,6 +263,46 @@ impl DocumentBuilder {
             });
     }
 
+    /// Add a Table of Contents block.
+    ///
+    /// `max_level` controls the deepest heading level included (1-9).
+    /// The TOC node is created as a placeholder. Call [`Document::update_toc`]
+    /// or export to have entries generated from document headings.
+    pub fn table_of_contents(mut self, max_level: u8) -> Self {
+        let max_level = max_level.clamp(1, 9);
+        let body_id = self.model.body_id().unwrap();
+        let child_count = self.model.node(body_id).unwrap().children.len();
+
+        let toc_id = self.model.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes.set(
+            AttributeKey::TocMaxLevel,
+            AttributeValue::Int(max_level as i64),
+        );
+        self.model.insert_node(body_id, child_count, toc).unwrap();
+        self
+    }
+
+    /// Add a Table of Contents block with a custom title.
+    pub fn table_of_contents_with_title(mut self, max_level: u8, title: &str) -> Self {
+        let max_level = max_level.clamp(1, 9);
+        let body_id = self.model.body_id().unwrap();
+        let child_count = self.model.node(body_id).unwrap().children.len();
+
+        let toc_id = self.model.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes.set(
+            AttributeKey::TocMaxLevel,
+            AttributeValue::Int(max_level as i64),
+        );
+        toc.attributes.set(
+            AttributeKey::TocTitle,
+            AttributeValue::String(title.to_string()),
+        );
+        self.model.insert_node(body_id, child_count, toc).unwrap();
+        self
+    }
+
     /// Add a table built with a [`TableBuilder`].
     ///
     /// # Example
@@ -1094,6 +1134,92 @@ mod tests {
 
         let bk_end = doc.model().node(para.children[2]).unwrap();
         assert_eq!(bk_end.node_type, s1_model::NodeType::BookmarkEnd);
+    }
+
+    #[test]
+    fn build_table_of_contents() {
+        let doc = DocumentBuilder::new()
+            .table_of_contents(3)
+            .heading(1, "Introduction")
+            .heading(2, "Background")
+            .text("Some content")
+            .heading(1, "Conclusion")
+            .build();
+
+        // TOC node should exist
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+        assert_eq!(toc.node_type, NodeType::TableOfContents);
+        assert_eq!(
+            toc.attributes.get_i64(&AttributeKey::TocMaxLevel),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn build_toc_with_title() {
+        let doc = DocumentBuilder::new()
+            .table_of_contents_with_title(2, "Contents")
+            .heading(1, "Chapter 1")
+            .build();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+        assert_eq!(
+            toc.attributes.get_string(&AttributeKey::TocTitle),
+            Some("Contents")
+        );
+    }
+
+    #[test]
+    fn update_toc_generates_entries() {
+        let mut doc = DocumentBuilder::new()
+            .table_of_contents(3)
+            .heading(1, "First")
+            .heading(2, "Second")
+            .heading(3, "Third")
+            .heading(4, "Fourth") // beyond max_level=3, should be excluded
+            .build();
+
+        doc.update_toc();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+
+        // Should have 3 entries (headings 1-3, not heading 4)
+        assert_eq!(toc.children.len(), 3);
+
+        // First entry should be "First"
+        let entry1 = doc.node(toc.children[0]).unwrap();
+        assert_eq!(entry1.node_type, NodeType::Paragraph);
+    }
+
+    #[cfg(feature = "docx")]
+    #[test]
+    fn build_toc_docx_roundtrip() {
+        let mut doc = DocumentBuilder::new()
+            .table_of_contents(3)
+            .heading(1, "Chapter One")
+            .heading(2, "Section A")
+            .text("Content here")
+            .build();
+
+        doc.update_toc();
+
+        let bytes = doc.export(crate::Format::Docx).unwrap();
+        let engine = crate::Engine::new();
+        let doc2 = engine.open(&bytes).unwrap();
+
+        // TOC node should survive round-trip
+        let body_id = doc2.body_id().unwrap();
+        let body = doc2.node(body_id).unwrap();
+
+        // First child should be TOC
+        let first = doc2.node(body.children[0]).unwrap();
+        assert_eq!(first.node_type, NodeType::TableOfContents);
     }
 
     #[test]

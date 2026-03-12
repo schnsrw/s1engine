@@ -52,6 +52,16 @@ impl Engine {
                 let result = s1_format_txt::read(data)?;
                 result.document
             }
+            #[cfg(feature = "md")]
+            Format::Md => {
+                s1_format_md::read_bytes(data)
+                    .map_err(|e| Error::Format(e.to_string()))?
+            }
+            #[cfg(feature = "convert")]
+            Format::Doc => {
+                s1_convert::doc_reader::read_doc(data)
+                    .map_err(|e| Error::Format(e.to_string()))?
+            }
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(Error::UnsupportedFormat(format!(
@@ -71,6 +81,28 @@ impl Engine {
         let format = Format::from_path(path)?;
         let data = std::fs::read(path)?;
         self.open_as(&data, format)
+    }
+
+    /// Create a new empty collaborative document.
+    ///
+    /// Each collaborating user should have a unique `replica_id`.
+    #[cfg(feature = "crdt")]
+    pub fn create_collab(&self, replica_id: u64) -> s1_crdt::CollabDocument {
+        s1_crdt::CollabDocument::new(replica_id)
+    }
+
+    /// Open a document as a collaborative document from raw bytes.
+    #[cfg(feature = "crdt")]
+    pub fn open_collab(
+        &self,
+        data: &[u8],
+        replica_id: u64,
+    ) -> Result<s1_crdt::CollabDocument, Error> {
+        let doc = self.open(data)?;
+        Ok(s1_crdt::CollabDocument::from_model(
+            doc.into_model(),
+            replica_id,
+        ))
     }
 }
 

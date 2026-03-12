@@ -228,6 +228,22 @@ impl DocumentModel {
         result
     }
 
+    /// Check if `potential_descendant` is a descendant of `ancestor`.
+    pub fn is_descendant(&self, potential_descendant: NodeId, ancestor: NodeId) -> bool {
+        let mut current = potential_descendant;
+        while let Some(node) = self.node(current) {
+            if let Some(parent_id) = node.parent {
+                if parent_id == ancestor {
+                    return true;
+                }
+                current = parent_id;
+            } else {
+                break;
+            }
+        }
+        false
+    }
+
     /// Total number of nodes in the document.
     pub fn node_count(&self) -> usize {
         self.nodes.len()
@@ -286,6 +302,13 @@ impl DocumentModel {
         Ok(())
     }
 
+    /// Restore a node directly into storage without modifying any parent's
+    /// children list. Used for subtree undo where the snapshot already contains
+    /// correct parent/children references.
+    pub fn restore_node(&mut self, node: Node) {
+        self.nodes.insert(node.id, node);
+    }
+
     /// Remove a node and all its descendants from the tree.
     ///
     /// Returns the removed node (without its descendants).
@@ -329,6 +352,20 @@ impl DocumentModel {
     ) -> Result<(), ModelError> {
         if id == self.root {
             return Err(ModelError::CannotRemoveRoot);
+        }
+
+        // Prevent cycles: new_parent must not be a descendant of id
+        if id == new_parent_id || self.is_descendant(new_parent_id, id) {
+            return Err(ModelError::InvalidHierarchy {
+                parent_type: self
+                    .node(id)
+                    .map(|n| n.node_type)
+                    .unwrap_or(NodeType::Document),
+                child_type: self
+                    .node(new_parent_id)
+                    .map(|n| n.node_type)
+                    .unwrap_or(NodeType::Document),
+            });
         }
 
         let node = self.nodes.get(&id).ok_or(ModelError::NodeNotFound(id))?;
@@ -390,20 +427,25 @@ impl DocumentModel {
         }
 
         let content = node.text_content.get_or_insert_with(String::new);
+        let char_count = content.chars().count();
 
-        if offset > content.len() {
+        if offset > char_count {
             return Err(ModelError::TextOffsetOutOfBounds {
                 node_id,
                 offset,
-                text_len: content.len(),
+                text_len: char_count,
             });
         }
 
-        content.insert_str(offset, text);
+        // Convert char offset to byte offset
+        let byte_offset = char_offset_to_byte(content, offset);
+        content.insert_str(byte_offset, text);
         Ok(())
     }
 
     /// Delete text from a Text node.
+    ///
+    /// `offset` and `length` are in character (Unicode scalar value) units.
     pub fn delete_text(
         &mut self,
         node_id: NodeId,
@@ -420,18 +462,23 @@ impl DocumentModel {
         }
 
         let content = node.text_content.get_or_insert_with(String::new);
+        let char_count = content.chars().count();
 
         let end = offset + length;
-        if end > content.len() {
+        if end > char_count {
             return Err(ModelError::TextOffsetOutOfBounds {
                 node_id,
                 offset: end,
-                text_len: content.len(),
+                text_len: char_count,
             });
         }
 
-        let deleted: String = content[offset..end].to_string();
-        content.replace_range(offset..end, "");
+        // Convert char offsets to byte offsets
+        let byte_start = char_offset_to_byte(content, offset);
+        let byte_end = char_offset_to_byte(content, end);
+
+        let deleted: String = content[byte_start..byte_end].to_string();
+        content.replace_range(byte_start..byte_end, "");
         Ok(deleted)
     }
 
@@ -575,6 +622,74 @@ impl DocumentModel {
         result
     }
 
+    /// Collect all heading paragraphs in document order.
+    ///
+    /// Returns `(NodeId, heading_level, plain_text)` tuples for each heading
+    /// found in the body. Headings are identified by `StyleId` matching
+    /// `"Heading1"` through `"Heading9"`.
+    pub fn collect_headings(&self) -> Vec<(NodeId, u8, String)> {
+        let body_id = match self.body_id() {
+            Some(id) => id,
+            None => return Vec::new(),
+        };
+        let mut headings = Vec::new();
+        self.collect_headings_from(body_id, &mut headings);
+        headings
+    }
+
+    fn collect_headings_from(&self, container_id: NodeId, headings: &mut Vec<(NodeId, u8, String)>) {
+        let node = match self.node(container_id) {
+            Some(n) => n,
+            None => return,
+        };
+        let children: Vec<NodeId> = node.children.clone();
+        for child_id in children {
+            let child = match self.node(child_id) {
+                Some(n) => n,
+                None => continue,
+            };
+            match child.node_type {
+                NodeType::Paragraph => {
+                    if let Some(level) = child
+                        .attributes
+                        .get_string(&crate::AttributeKey::StyleId)
+                        .and_then(|s| s.strip_prefix("Heading"))
+                        .and_then(|l| l.parse::<u8>().ok())
+                    {
+                        let mut text = String::new();
+                        self.extract_inline_text(child_id, &mut text);
+                        headings.push((child_id, level, text));
+                    }
+                }
+                NodeType::Section | NodeType::Body | NodeType::TableOfContents => {
+                    self.collect_headings_from(child_id, headings);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract just the inline text content from a node (no paragraph separators).
+    fn extract_inline_text(&self, node_id: NodeId, out: &mut String) {
+        let node = match self.node(node_id) {
+            Some(n) => n,
+            None => return,
+        };
+        match node.node_type {
+            NodeType::Text => {
+                if let Some(text) = &node.text_content {
+                    out.push_str(text);
+                }
+            }
+            _ => {
+                let children: Vec<NodeId> = node.children.clone();
+                for child_id in children {
+                    self.extract_inline_text(child_id, out);
+                }
+            }
+        }
+    }
+
     fn extract_text(&self, node_id: NodeId, out: &mut String) {
         let node = match self.node(node_id) {
             Some(n) => n,
@@ -610,6 +725,16 @@ impl DocumentModel {
             }
         }
     }
+}
+
+/// Convert a character offset to a byte offset in a string.
+///
+/// Panics if `char_offset` is greater than the number of chars in `s`.
+fn char_offset_to_byte(s: &str, char_offset: usize) -> usize {
+    s.char_indices()
+        .nth(char_offset)
+        .map(|(byte_idx, _)| byte_idx)
+        .unwrap_or(s.len())
 }
 
 impl Default for DocumentModel {
@@ -954,5 +1079,227 @@ mod tests {
         let doc_b = DocumentModel::new_with_replica(2);
         assert_eq!(doc_a.replica_id(), 1);
         assert_eq!(doc_b.replica_id(), 2);
+    }
+
+    // ─── Unicode safety regression tests ────────────────────────────────
+
+    #[test]
+    fn insert_text_multibyte_characters() {
+        // Arabic, Hindi, emoji, accented — all survive insert at char offsets
+        let (mut doc, _p, _r, text_id) = doc_with_text("café");
+        // "café" has 4 chars but 5 bytes (é = 2 bytes)
+        doc.insert_text(text_id, 4, "!").unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("café!"));
+
+        doc.insert_text(text_id, 0, "\u{2603}").unwrap(); // snowman U+2603
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{2603}caf\u{00e9}!"));
+    }
+
+    #[test]
+    fn insert_text_multibyte_4byte_offset() {
+        // Use 4-byte chars: U+1F600 (grinning face) encoded as surrogate pairs
+        let (mut doc, _p, _r, text_id) = doc_with_text("\u{1F600}\u{1F601}");
+        // 2 chars, each 4 bytes
+        doc.insert_text(text_id, 1, "X").unwrap();
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("\u{1F600}X\u{1F601}"));
+    }
+
+    #[test]
+    fn delete_text_multibyte_characters() {
+        let (mut doc, _p, _r, text_id) = doc_with_text("h\u{00e9}llo");
+        // Delete the accented char (char offset 1, length 1)
+        let deleted = doc.delete_text(text_id, 1, 1).unwrap();
+        assert_eq!(deleted, "\u{00e9}");
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("hllo"));
+    }
+
+    #[test]
+    fn delete_text_4byte_char() {
+        let (mut doc, _p, _r, text_id) = doc_with_text("a\u{1F600}b\u{1F601}c");
+        // Delete char at offset 1 (the 4-byte char), length 1
+        let deleted = doc.delete_text(text_id, 1, 1).unwrap();
+        assert_eq!(deleted, "\u{1F600}");
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("ab\u{1F601}c"));
+    }
+
+    #[test]
+    fn insert_text_arabic() {
+        let (mut doc, _p, _r, text_id) = doc_with_text("مرحبا");
+        doc.insert_text(text_id, 2, "X").unwrap();
+        let content = doc.node(text_id).unwrap().text_content.clone().unwrap();
+        assert_eq!(content.chars().count(), 6); // 5 original + 1 inserted
+        assert_eq!(content.chars().nth(2), Some('X'));
+    }
+
+    #[test]
+    fn insert_text_mixed_script() {
+        let (mut doc, _p, _r, text_id) = doc_with_text("hello世界");
+        doc.insert_text(text_id, 5, "\u{2192}").unwrap(); // rightwards arrow
+        assert_eq!(doc.node(text_id).unwrap().text_content.as_deref(), Some("hello\u{2192}\u{4e16}\u{754c}"));
+    }
+
+    // ─── Cycle detection regression tests ────────────────────────────────
+
+    #[test]
+    fn move_node_rejects_self_parent() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+
+        // Moving a node under itself must fail
+        let result = doc.move_node(para_id, para_id, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn move_node_rejects_descendant_as_parent() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Build: body > para > run
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+
+        // Moving para under its own child (run) must fail — would create cycle
+        let result = doc.move_node(para_id, run_id, 0);
+        assert!(matches!(result, Err(ModelError::InvalidHierarchy { .. })));
+    }
+
+    #[test]
+    fn move_node_rejects_deep_descendant() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // body > table > row > cell > para
+        let tbl = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(tbl, NodeType::Table)).unwrap();
+        let row = doc.next_id();
+        doc.insert_node(tbl, 0, Node::new(row, NodeType::TableRow)).unwrap();
+        let cell = doc.next_id();
+        doc.insert_node(row, 0, Node::new(cell, NodeType::TableCell)).unwrap();
+        let para = doc.next_id();
+        doc.insert_node(cell, 0, Node::new(para, NodeType::Paragraph)).unwrap();
+
+        // Moving table under its deep descendant (para) must fail
+        let result = doc.move_node(tbl, para, 0);
+        assert!(matches!(result, Err(ModelError::InvalidHierarchy { .. })));
+    }
+
+    #[test]
+    fn is_descendant_basic() {
+        let (doc, para_id, run_id, text_id) = doc_with_text("Hello");
+        let body_id = doc.body_id().unwrap();
+
+        assert!(doc.is_descendant(text_id, run_id));
+        assert!(doc.is_descendant(text_id, para_id));
+        assert!(doc.is_descendant(text_id, body_id));
+        assert!(doc.is_descendant(run_id, para_id));
+        assert!(!doc.is_descendant(para_id, text_id)); // not a descendant
+        assert!(!doc.is_descendant(run_id, text_id));
+    }
+
+    // ─── Property-based tests ───────────────────────────────────────────
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Strategy to generate a sequence of valid tree operations.
+        /// Returns (operation_type, index_hint) pairs.
+        #[derive(Debug, Clone)]
+        enum TreeOp {
+            InsertParagraph(usize),
+            InsertRunInFirst,
+            InsertTextInFirstRun(String),
+            RemoveFirst,
+        }
+
+        fn tree_op_strategy() -> impl Strategy<Value = TreeOp> {
+            prop_oneof![
+                (0..10usize).prop_map(TreeOp::InsertParagraph),
+                Just(TreeOp::InsertRunInFirst),
+                "[a-zA-Z0-9 ]{0,20}".prop_map(TreeOp::InsertTextInFirstRun),
+                Just(TreeOp::RemoveFirst),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn tree_operations_never_produce_invalid_state(
+                ops in proptest::collection::vec(tree_op_strategy(), 1..30)
+            ) {
+                let mut doc = DocumentModel::new();
+                let body_id = doc.body_id().unwrap();
+
+                for op in ops {
+                    match op {
+                        TreeOp::InsertParagraph(idx_hint) => {
+                            let body = doc.node(body_id).unwrap();
+                            let idx = if body.children.is_empty() { 0 } else { idx_hint % (body.children.len() + 1) };
+                            let para_id = doc.next_id();
+                            let _ = doc.insert_node(body_id, idx, Node::new(para_id, NodeType::Paragraph));
+                        }
+                        TreeOp::InsertRunInFirst => {
+                            let body = doc.node(body_id).unwrap();
+                            if let Some(&para_id) = body.children.first() {
+                                if doc.node(para_id).unwrap().node_type == NodeType::Paragraph {
+                                    let run_id = doc.next_id();
+                                    let _ = doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run));
+                                }
+                            }
+                        }
+                        TreeOp::InsertTextInFirstRun(text) => {
+                            // Find first text node and insert
+                            let body = doc.node(body_id).unwrap();
+                            if let Some(&para_id) = body.children.first() {
+                                let para = doc.node(para_id).unwrap();
+                                if let Some(&run_id) = para.children.first() {
+                                    let run = doc.node(run_id).unwrap();
+                                    if let Some(&text_id) = run.children.first() {
+                                        if doc.node(text_id).unwrap().node_type == NodeType::Text {
+                                            let _ = doc.insert_text(text_id, 0, &text);
+                                        }
+                                    } else {
+                                        // Insert a text node
+                                        let text_id = doc.next_id();
+                                        let _ = doc.insert_node(run_id, 0, Node::text(text_id, &text));
+                                    }
+                                }
+                            }
+                        }
+                        TreeOp::RemoveFirst => {
+                            let body = doc.node(body_id).unwrap();
+                            if let Some(&para_id) = body.children.first() {
+                                let _ = doc.remove_node(para_id);
+                            }
+                        }
+                    }
+
+                    // Invariant 1: root always exists
+                    assert!(doc.node(NodeId::ROOT).is_some());
+
+                    // Invariant 2: body always exists (we never remove it)
+                    assert!(doc.body_id().is_some());
+
+                    // Invariant 3: every child's parent points back correctly
+                    let all_ids: Vec<NodeId> = doc.nodes.keys().copied().collect();
+                    for id in &all_ids {
+                        let node = doc.node(*id).unwrap();
+                        for &child_id in &node.children {
+                            if let Some(child) = doc.node(child_id) {
+                                assert_eq!(child.parent, Some(*id),
+                                    "child {child_id} parent mismatch");
+                            }
+                        }
+                    }
+
+                    // Invariant 4: node count matches actual nodes in map
+                    assert_eq!(doc.node_count(), doc.nodes.len());
+                }
+            }
+        }
     }
 }

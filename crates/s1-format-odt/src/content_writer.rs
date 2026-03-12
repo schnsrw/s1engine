@@ -157,6 +157,10 @@ fn write_body(
                 close_list_stack(&mut list_stack, &mut xml);
                 write_table(doc, child_id, &mut xml, auto_styles, counter, images);
             }
+            NodeType::TableOfContents => {
+                close_list_stack(&mut list_stack, &mut xml);
+                write_toc_odt(doc, child_id, &mut xml, auto_styles, counter, images);
+            }
             _ => {}
         }
     }
@@ -250,6 +254,8 @@ fn write_paragraph_children(
         None => return,
     };
 
+    let mut current_hyperlink_url: Option<String> = None;
+
     for &child_id in &para.children {
         let child = match doc.node(child_id) {
             Some(n) => n,
@@ -258,22 +264,165 @@ fn write_paragraph_children(
 
         match child.node_type {
             NodeType::Run => {
+                let child_url = child.attributes.get_string(&AttributeKey::HyperlinkUrl).map(|s| s.to_string());
+
+                // Close hyperlink if URL changed
+                if current_hyperlink_url.is_some() && current_hyperlink_url != child_url {
+                    xml.push_str("</text:a>");
+                    current_hyperlink_url = None;
+                }
+
+                // Open hyperlink if needed
+                if let Some(ref url) = child_url {
+                    if current_hyperlink_url.is_none() {
+                        xml.push_str(&format!(
+                            r#"<text:a xlink:href="{}" xlink:type="simple">"#,
+                            escape_xml(url)
+                        ));
+                        current_hyperlink_url = Some(url.clone());
+                    }
+                }
+
                 write_run(doc, child_id, xml, auto_styles, counter);
             }
             NodeType::LineBreak => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
                 xml.push_str("<text:line-break/>");
             }
             NodeType::Tab => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
                 xml.push_str("<text:tab/>");
             }
             NodeType::Field => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
                 write_field(child, xml);
             }
             NodeType::Image => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
                 write_image(doc, child, xml, images);
+            }
+            NodeType::BookmarkStart => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
+                if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
+                    xml.push_str(&format!(
+                        r#"<text:bookmark-start text:name="{}"/>"#,
+                        escape_xml(name)
+                    ));
+                }
+            }
+            NodeType::BookmarkEnd => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
+                if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
+                    xml.push_str(&format!(
+                        r#"<text:bookmark-end text:name="{}"/>"#,
+                        escape_xml(name)
+                    ));
+                }
+            }
+            NodeType::CommentStart => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
+                if let Some(comment_id) = child.attributes.get_string(&AttributeKey::CommentId) {
+                    write_annotation(doc, comment_id, xml);
+                }
+            }
+            NodeType::CommentEnd => {
+                close_hyperlink(&mut current_hyperlink_url, xml);
+                if let Some(comment_id) = child.attributes.get_string(&AttributeKey::CommentId) {
+                    xml.push_str(&format!(
+                        r#"<office:annotation-end office:name="{}"/>"#,
+                        escape_xml(comment_id)
+                    ));
+                }
             }
             _ => {}
         }
+    }
+
+    // Close any remaining hyperlink
+    close_hyperlink(&mut current_hyperlink_url, xml);
+}
+
+/// Close a `<text:a>` hyperlink element if one is open.
+fn close_hyperlink(current_url: &mut Option<String>, xml: &mut String) {
+    if current_url.is_some() {
+        xml.push_str("</text:a>");
+        *current_url = None;
+    }
+}
+
+/// Write an `<office:annotation>` element for a comment.
+///
+/// Finds the CommentBody node by matching CommentId and writes its content.
+fn write_annotation(doc: &DocumentModel, comment_id: &str, xml: &mut String) {
+    // Find the CommentBody node with matching CommentId
+    let root_id = doc.root_id();
+    let root = match doc.node(root_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    let mut body_node = None;
+    for &child_id in &root.children {
+        let child = match doc.node(child_id) {
+            Some(n) => n,
+            None => continue,
+        };
+        if child.node_type == NodeType::CommentBody
+            && child.attributes.get_string(&AttributeKey::CommentId) == Some(comment_id)
+        {
+            body_node = Some(child);
+            break;
+        }
+    }
+
+    xml.push_str(&format!(
+        r#"<office:annotation office:name="{}">"#,
+        escape_xml(comment_id)
+    ));
+
+    if let Some(body) = body_node {
+        if let Some(author) = body.attributes.get_string(&AttributeKey::CommentAuthor) {
+            xml.push_str(&format!("<dc:creator>{}</dc:creator>", escape_xml(author)));
+        }
+        if let Some(date) = body.attributes.get_string(&AttributeKey::CommentDate) {
+            xml.push_str(&format!("<dc:date>{}</dc:date>", escape_xml(date)));
+        }
+
+        // Write annotation body paragraphs
+        for &para_id in &body.children {
+            let para = match doc.node(para_id) {
+                Some(n) if n.node_type == NodeType::Paragraph => n,
+                _ => continue,
+            };
+            xml.push_str("<text:p>");
+            for &run_id in &para.children {
+                write_annotation_inline(doc, run_id, xml);
+            }
+            xml.push_str("</text:p>");
+        }
+    }
+
+    xml.push_str("</office:annotation>");
+}
+
+/// Write inline content inside an annotation paragraph.
+fn write_annotation_inline(doc: &DocumentModel, node_id: s1_model::NodeId, xml: &mut String) {
+    let node = match doc.node(node_id) {
+        Some(n) => n,
+        None => return,
+    };
+    match node.node_type {
+        NodeType::Run => {
+            for &child_id in &node.children {
+                write_annotation_inline(doc, child_id, xml);
+            }
+        }
+        NodeType::Text => {
+            if let Some(text) = &node.text_content {
+                xml.push_str(&escape_xml(text));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -394,6 +543,69 @@ fn write_image(
         escape_xml(&href),
     ));
     xml.push_str("</draw:frame>");
+}
+
+/// Write a Table of Contents as `<text:table-of-content>`.
+fn write_toc_odt(
+    doc: &DocumentModel,
+    toc_id: s1_model::NodeId,
+    xml: &mut String,
+    auto_styles: &mut HashMap<AutoStyleKey, String>,
+    counter: &mut u32,
+    images: &mut Vec<ImageEntry>,
+) {
+    let toc = match doc.node(toc_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    let max_level = toc
+        .attributes
+        .get(&AttributeKey::TocMaxLevel)
+        .and_then(|v| match v {
+            AttributeValue::Int(n) => Some(*n),
+            _ => None,
+        })
+        .unwrap_or(3);
+
+    let title = toc
+        .attributes
+        .get_string(&AttributeKey::TocTitle)
+        .unwrap_or("Table of Contents");
+
+    xml.push_str(
+        r#"<text:table-of-content text:name="TOC" text:protected="false">"#,
+    );
+    xml.push_str(&format!(
+        r#"<text:table-of-content-source text:outline-level="{}">"#,
+        max_level
+    ));
+    xml.push_str(&format!(
+        "<text:index-title-template>{}</text:index-title-template>",
+        escape_xml(title)
+    ));
+    xml.push_str("</text:table-of-content-source>");
+
+    xml.push_str("<text:index-body>");
+    // Title
+    xml.push_str("<text:index-title>");
+    xml.push_str(&format!(
+        "<text:p text:style-name=\"Contents_20_Heading\">{}</text:p>",
+        escape_xml(title)
+    ));
+    xml.push_str("</text:index-title>");
+
+    // Cached entry paragraphs
+    for &child_id in &toc.children {
+        if let Some(child) = doc.node(child_id) {
+            if child.node_type == s1_model::NodeType::Paragraph {
+                write_paragraph(doc, child_id, xml, auto_styles, counter, images);
+            }
+        }
+    }
+
+    xml.push_str("</text:index-body>");
+    xml.push_str("</text:table-of-content>");
 }
 
 /// Write a table as `<table:table>`.
@@ -644,5 +856,358 @@ mod tests {
         assert!(xml.contains("<table:table-row>"));
         assert!(xml.contains("<table:table-cell>"));
         assert!(xml.contains("Cell"));
+    }
+
+    #[test]
+    fn write_toc_odt() {
+        use s1_model::{AttributeKey, AttributeValue};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let toc_id = doc.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes.set(AttributeKey::TocMaxLevel, AttributeValue::Int(2));
+        toc.attributes.set(
+            AttributeKey::TocTitle,
+            AttributeValue::String("Contents".into()),
+        );
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        // Add a cached entry paragraph
+        let p_id = doc.next_id();
+        doc.insert_node(toc_id, 0, Node::new(p_id, NodeType::Paragraph))
+            .unwrap();
+        let r_id = doc.next_id();
+        doc.insert_node(p_id, 0, Node::new(r_id, NodeType::Run))
+            .unwrap();
+        let t_id = doc.next_id();
+        doc.insert_node(r_id, 0, Node::text(t_id, "Chapter One"))
+            .unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+
+        assert!(xml.contains("text:table-of-content"));
+        assert!(xml.contains(r#"text:outline-level="2""#));
+        assert!(xml.contains("text:index-body"));
+        assert!(xml.contains("Contents")); // title
+        assert!(xml.contains("Chapter One")); // cached entry
+    }
+
+    #[test]
+    fn write_hyperlink_external() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let run_id = doc.next_id();
+        let mut run = Node::new(run_id, NodeType::Run);
+        run.attributes.set(
+            AttributeKey::HyperlinkUrl,
+            AttributeValue::String("https://example.com".into()),
+        );
+        doc.insert_node(para_id, 0, run).unwrap();
+
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Click me"))
+            .unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+        assert!(xml.contains(r#"<text:a xlink:href="https://example.com" xlink:type="simple">"#));
+        assert!(xml.contains("Click me"));
+        assert!(xml.contains("</text:a>"));
+    }
+
+    #[test]
+    fn write_bookmark_start_end() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let bs_id = doc.next_id();
+        let mut bs = Node::new(bs_id, NodeType::BookmarkStart);
+        bs.attributes.set(
+            AttributeKey::BookmarkName,
+            AttributeValue::String("bm1".into()),
+        );
+        doc.insert_node(para_id, 0, bs).unwrap();
+
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Bookmarked"))
+            .unwrap();
+
+        let be_id = doc.next_id();
+        let mut be_node = Node::new(be_id, NodeType::BookmarkEnd);
+        be_node.attributes.set(
+            AttributeKey::BookmarkName,
+            AttributeValue::String("bm1".into()),
+        );
+        doc.insert_node(para_id, 2, be_node).unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+        assert!(xml.contains(r#"<text:bookmark-start text:name="bm1"/>"#));
+        assert!(xml.contains("Bookmarked"));
+        assert!(xml.contains(r#"<text:bookmark-end text:name="bm1"/>"#));
+    }
+
+    #[test]
+    fn roundtrip_hyperlink() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let run_id = doc.next_id();
+        let mut run = Node::new(run_id, NodeType::Run);
+        run.attributes.set(
+            AttributeKey::HyperlinkUrl,
+            AttributeValue::String("https://rust-lang.org".into()),
+        );
+        doc.insert_node(para_id, 0, run).unwrap();
+
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Rust"))
+            .unwrap();
+
+        // Write
+        let odt_bytes = crate::write(&doc).unwrap();
+
+        // Read back
+        let doc2 = crate::read(&odt_bytes).unwrap();
+        let body2 = doc2.body_id().unwrap();
+        let body_node = doc2.node(body2).unwrap();
+        let para = doc2.node(body_node.children[0]).unwrap();
+
+        // Find hyperlink run
+        let mut found = false;
+        for &cid in &para.children {
+            let child = doc2.node(cid).unwrap();
+            if let Some(url) = child.attributes.get_string(&AttributeKey::HyperlinkUrl) {
+                assert_eq!(url, "https://rust-lang.org");
+                found = true;
+            }
+        }
+        assert!(found, "Hyperlink URL not preserved in round-trip");
+    }
+
+    #[test]
+    fn roundtrip_bookmarks() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let bs_id = doc.next_id();
+        let mut bs = Node::new(bs_id, NodeType::BookmarkStart);
+        bs.attributes.set(
+            AttributeKey::BookmarkName,
+            AttributeValue::String("mark1".into()),
+        );
+        doc.insert_node(para_id, 0, bs).unwrap();
+
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "content"))
+            .unwrap();
+
+        let be_id = doc.next_id();
+        let mut be_node = Node::new(be_id, NodeType::BookmarkEnd);
+        be_node.attributes.set(
+            AttributeKey::BookmarkName,
+            AttributeValue::String("mark1".into()),
+        );
+        doc.insert_node(para_id, 2, be_node).unwrap();
+
+        // Write
+        let odt_bytes = crate::write(&doc).unwrap();
+
+        // Read back
+        let doc2 = crate::read(&odt_bytes).unwrap();
+        let body2 = doc2.body_id().unwrap();
+        let body_node = doc2.node(body2).unwrap();
+        let para = doc2.node(body_node.children[0]).unwrap();
+
+        let mut found_start = false;
+        let mut found_end = false;
+        for &cid in &para.children {
+            let child = doc2.node(cid).unwrap();
+            if child.node_type == NodeType::BookmarkStart {
+                assert_eq!(
+                    child.attributes.get_string(&AttributeKey::BookmarkName),
+                    Some("mark1")
+                );
+                found_start = true;
+            }
+            if child.node_type == NodeType::BookmarkEnd {
+                assert_eq!(
+                    child.attributes.get_string(&AttributeKey::BookmarkName),
+                    Some("mark1")
+                );
+                found_end = true;
+            }
+        }
+        assert!(found_start, "BookmarkStart not preserved");
+        assert!(found_end, "BookmarkEnd not preserved");
+    }
+
+    #[test]
+    fn write_annotation() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Create CommentBody on root
+        let root_id = doc.root_id();
+        let root_children = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        let cb_id = doc.next_id();
+        let mut cb = Node::new(cb_id, NodeType::CommentBody);
+        cb.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cb.attributes.set(AttributeKey::CommentAuthor, AttributeValue::String("Alice".into()));
+        cb.attributes.set(AttributeKey::CommentDate, AttributeValue::String("2024-01-15".into()));
+        doc.insert_node(root_id, root_children, cb).unwrap();
+
+        let cp_id = doc.next_id();
+        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph)).unwrap();
+        let cr_id = doc.next_id();
+        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run)).unwrap();
+        let ct_id = doc.next_id();
+        doc.insert_node(cr_id, 0, Node::text(ct_id, "Nice!")).unwrap();
+
+        // Create paragraph with CommentStart/End
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+
+        let cs_id = doc.next_id();
+        let mut cs = Node::new(cs_id, NodeType::CommentStart);
+        cs.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        doc.insert_node(para_id, 0, cs).unwrap();
+
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run)).unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "annotated")).unwrap();
+
+        let ce_id = doc.next_id();
+        let mut ce = Node::new(ce_id, NodeType::CommentEnd);
+        ce.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        doc.insert_node(para_id, 2, ce).unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+        assert!(xml.contains(r#"office:annotation office:name="c1""#));
+        assert!(xml.contains("<dc:creator>Alice</dc:creator>"));
+        assert!(xml.contains("<dc:date>2024-01-15</dc:date>"));
+        assert!(xml.contains("Nice!"));
+        assert!(xml.contains(r#"office:annotation-end office:name="c1""#));
+    }
+
+    #[test]
+    fn write_no_comments() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run)).unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "plain")).unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+        assert!(!xml.contains("office:annotation"));
+    }
+
+    #[test]
+    fn roundtrip_annotation() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Create CommentBody on root
+        let root_id = doc.root_id();
+        let root_children = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        let cb_id = doc.next_id();
+        let mut cb = Node::new(cb_id, NodeType::CommentBody);
+        cb.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        cb.attributes.set(AttributeKey::CommentAuthor, AttributeValue::String("Bob".into()));
+        doc.insert_node(root_id, root_children, cb).unwrap();
+
+        let cp_id = doc.next_id();
+        doc.insert_node(cb_id, 0, Node::new(cp_id, NodeType::Paragraph)).unwrap();
+        let cr_id = doc.next_id();
+        doc.insert_node(cp_id, 0, Node::new(cr_id, NodeType::Run)).unwrap();
+        let ct_id = doc.next_id();
+        doc.insert_node(cr_id, 0, Node::text(ct_id, "Feedback")).unwrap();
+
+        // Create paragraph
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+
+        let cs_id = doc.next_id();
+        let mut cs = Node::new(cs_id, NodeType::CommentStart);
+        cs.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        doc.insert_node(para_id, 0, cs).unwrap();
+
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 1, Node::new(run_id, NodeType::Run)).unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "text")).unwrap();
+
+        let ce_id = doc.next_id();
+        let mut ce = Node::new(ce_id, NodeType::CommentEnd);
+        ce.attributes.set(AttributeKey::CommentId, AttributeValue::String("c1".into()));
+        doc.insert_node(para_id, 2, ce).unwrap();
+
+        // Write
+        let odt_bytes = crate::write(&doc).unwrap();
+
+        // Read back
+        let doc2 = crate::read(&odt_bytes).unwrap();
+        let body2 = doc2.body_id().unwrap();
+        let body_node = doc2.node(body2).unwrap();
+        let para = doc2.node(body_node.children[0]).unwrap();
+
+        // Verify CommentStart and CommentEnd exist
+        let mut found_cs = false;
+        let mut found_ce = false;
+        for &cid in &para.children {
+            let child = doc2.node(cid).unwrap();
+            if child.node_type == NodeType::CommentStart {
+                found_cs = true;
+            }
+            if child.node_type == NodeType::CommentEnd {
+                found_ce = true;
+            }
+        }
+        assert!(found_cs, "CommentStart not preserved in round-trip");
+        assert!(found_ce, "CommentEnd not preserved in round-trip");
+
+        // Verify CommentBody exists
+        let root2 = doc2.root_id();
+        let root_node = doc2.node(root2).unwrap();
+        let mut found_body = false;
+        for &cid in &root_node.children {
+            let child = doc2.node(cid).unwrap();
+            if child.node_type == NodeType::CommentBody {
+                assert_eq!(
+                    child.attributes.get_string(&AttributeKey::CommentAuthor),
+                    Some("Bob")
+                );
+                found_body = true;
+            }
+        }
+        assert!(found_body, "CommentBody not preserved in round-trip");
     }
 }

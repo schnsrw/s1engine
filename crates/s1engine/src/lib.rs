@@ -60,6 +60,13 @@ pub use s1_ops::{
 pub use s1_model as model;
 pub use s1_ops as ops;
 
+// CRDT / collaboration support (feature-gated).
+#[cfg(feature = "crdt")]
+pub use s1_crdt as crdt;
+
+#[cfg(feature = "crdt")]
+pub use s1_crdt::{CollabDocument, CrdtError, CrdtOperation, OpId, StateVector};
+
 #[cfg(test)]
 mod tests {
     use super::*;

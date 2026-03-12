@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 pdf-writer = "0.14"
 subsetter = "0.2"
 miniz_oxide = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

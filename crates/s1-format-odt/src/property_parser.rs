@@ -2,8 +2,12 @@
 
 use quick_xml::events::BytesStart;
 use s1_model::{
-    Alignment, AttributeKey, AttributeMap, AttributeValue, Color, LineSpacing, UnderlineStyle,
+    Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders,
+    Color, LineSpacing, TabAlignment, TabLeader, TabStop, UnderlineStyle,
 };
+
+use quick_xml::events::Event;
+use quick_xml::Reader;
 
 use crate::xml_util::{get_attr, parse_length, parse_percentage};
 
@@ -73,6 +77,34 @@ pub fn parse_text_properties(e: &BytesStart<'_>) -> AttributeMap {
         if bg != "transparent" {
             if let Some(color) = Color::from_hex(bg.trim_start_matches('#')) {
                 attrs.set(AttributeKey::HighlightColor, AttributeValue::Color(color));
+            }
+        }
+    }
+
+    // Superscript/Subscript: style:text-position="super 58%" or "sub 58%" or "33% 58%"
+    if let Some(tp) = get_attr(e, b"text-position") {
+        let tp = tp.to_lowercase();
+        if tp.starts_with("super") {
+            attrs.set(AttributeKey::Superscript, AttributeValue::Bool(true));
+        } else if tp.starts_with("sub") {
+            attrs.set(AttributeKey::Subscript, AttributeValue::Bool(true));
+        } else if let Some(pct_str) = tp.split_whitespace().next() {
+            // Positive percentage = superscript, negative = subscript
+            if let Ok(pct) = pct_str.trim_end_matches('%').parse::<f64>() {
+                if pct > 0.0 {
+                    attrs.set(AttributeKey::Superscript, AttributeValue::Bool(true));
+                } else if pct < 0.0 {
+                    attrs.set(AttributeKey::Subscript, AttributeValue::Bool(true));
+                }
+            }
+        }
+    }
+
+    // Character spacing: fo:letter-spacing="0.1cm"
+    if let Some(ls) = get_attr(e, b"letter-spacing") {
+        if ls != "normal" {
+            if let Some(pts) = parse_length(&ls) {
+                attrs.set(AttributeKey::FontSpacing, AttributeValue::Float(pts));
             }
         }
     }
@@ -160,7 +192,146 @@ pub fn parse_paragraph_properties(e: &BytesStart<'_>) -> AttributeMap {
         }
     }
 
+    // Keep lines together: fo:keep-together="always"
+    if let Some(kt) = get_attr(e, b"keep-together") {
+        if kt == "always" {
+            attrs.set(
+                AttributeKey::KeepLinesTogether,
+                AttributeValue::Bool(true),
+            );
+        }
+    }
+
+    // Paragraph background/shading: fo:background-color="#..."
+    if let Some(bg) = get_attr(e, b"background-color") {
+        if bg != "transparent" {
+            if let Some(color) = Color::from_hex(bg.trim_start_matches('#')) {
+                attrs.set(AttributeKey::Background, AttributeValue::Color(color));
+            }
+        }
+    }
+
+    // Paragraph borders: fo:border-top, fo:border-bottom, fo:border-left, fo:border-right
+    // Also fo:border (shorthand for all sides)
+    let top = get_attr(e, b"border-top").and_then(|v| parse_border_value(&v));
+    let bottom = get_attr(e, b"border-bottom").and_then(|v| parse_border_value(&v));
+    let left = get_attr(e, b"border-left").and_then(|v| parse_border_value(&v));
+    let right = get_attr(e, b"border-right").and_then(|v| parse_border_value(&v));
+
+    // Shorthand: fo:border applies to all sides
+    let all = get_attr(e, b"border").and_then(|v| parse_border_value(&v));
+
+    let borders = Borders {
+        top: top.or_else(|| all.clone()),
+        bottom: bottom.or_else(|| all.clone()),
+        left: left.or_else(|| all.clone()),
+        right: right.or(all),
+    };
+
+    if borders.top.is_some() || borders.bottom.is_some() || borders.left.is_some() || borders.right.is_some() {
+        attrs.set(
+            AttributeKey::ParagraphBorders,
+            AttributeValue::Borders(borders),
+        );
+    }
+
     attrs
+}
+
+/// Parse an ODF border value like "0.06pt solid #000000" → BorderSide.
+fn parse_border_value(s: &str) -> Option<BorderSide> {
+    if s == "none" || s.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let width = parse_length(parts[0]).unwrap_or(1.0);
+    let style = match parts[1] {
+        "solid" => BorderStyle::Single,
+        "double" => BorderStyle::Double,
+        "dashed" => BorderStyle::Dashed,
+        "dotted" => BorderStyle::Dotted,
+        "none" => BorderStyle::None,
+        _ => BorderStyle::Single,
+    };
+    let color = Color::from_hex(parts[2].trim_start_matches('#')).unwrap_or(Color { r: 0, g: 0, b: 0, a: 255 });
+
+    Some(BorderSide {
+        style,
+        width,
+        color,
+        spacing: 0.0,
+    })
+}
+
+/// Parse children of `<style:paragraph-properties>` for tab stops.
+///
+/// Call this after `parse_paragraph_properties` when the element was `Event::Start`
+/// (not self-closing). Reads up to the closing `</style:paragraph-properties>`.
+pub fn parse_paragraph_properties_children(
+    reader: &mut Reader<&[u8]>,
+    attrs: &mut AttributeMap,
+) {
+    let mut tab_stops: Vec<TabStop> = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"tab-stops" => {
+                // Parse tab-stop children
+                loop {
+                    match reader.read_event() {
+                        Ok(Event::Empty(ref te)) if te.local_name().as_ref() == b"tab-stop" => {
+                            if let Some(ts) = parse_tab_stop_element(te) {
+                                tab_stops.push(ts);
+                            }
+                        }
+                        Ok(Event::End(ref ee)) if ee.local_name().as_ref() == b"tab-stops" => break,
+                        Ok(Event::Eof) => break,
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"paragraph-properties" => break,
+            Ok(Event::Eof) => break,
+            _ => {}
+        }
+    }
+
+    if !tab_stops.is_empty() {
+        attrs.set(
+            AttributeKey::TabStops,
+            AttributeValue::TabStops(tab_stops),
+        );
+    }
+}
+
+/// Parse a single `<style:tab-stop>` element.
+fn parse_tab_stop_element(e: &BytesStart<'_>) -> Option<TabStop> {
+    let position = get_attr(e, b"position").and_then(|v| parse_length(&v))?;
+    let alignment = get_attr(e, b"type").map(|v| match v.as_str() {
+        "center" => TabAlignment::Center,
+        "right" => TabAlignment::Right,
+        "char" => TabAlignment::Decimal,
+        _ => TabAlignment::Left,
+    }).unwrap_or(TabAlignment::Left);
+    let leader = get_attr(e, b"leader-text").map(|v| match v.as_str() {
+        "." => TabLeader::Dot,
+        "-" => TabLeader::Dash,
+        "_" => TabLeader::Underscore,
+        _ => TabLeader::None,
+    }).unwrap_or_else(|| {
+        // Also check style:leader-style
+        get_attr(e, b"leader-style").map(|v| match v.as_str() {
+            "dotted" => TabLeader::Dot,
+            "dash" => TabLeader::Dash,
+            "solid" => TabLeader::Underscore,
+            _ => TabLeader::None,
+        }).unwrap_or(TabLeader::None)
+    });
+
+    Some(TabStop { position, alignment, leader })
 }
 
 /// Parse a font size string (e.g. "12pt", "16px", "1cm") to points.
@@ -309,6 +480,176 @@ mod tests {
                 assert!((*m - 1.5).abs() < 0.001);
             }
             other => panic!("Expected LineSpacing::Multiple, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_superscript() {
+        let attrs = parse_text_attrs(
+            r#"<style:text-properties style:text-position="super 58%"/>"#,
+        );
+        assert_eq!(attrs.get_bool(&AttributeKey::Superscript), Some(true));
+        assert_eq!(attrs.get_bool(&AttributeKey::Subscript), None);
+    }
+
+    #[test]
+    fn parse_subscript() {
+        let attrs = parse_text_attrs(
+            r#"<style:text-properties style:text-position="sub 58%"/>"#,
+        );
+        assert_eq!(attrs.get_bool(&AttributeKey::Subscript), Some(true));
+        assert_eq!(attrs.get_bool(&AttributeKey::Superscript), None);
+    }
+
+    #[test]
+    fn parse_character_spacing() {
+        let attrs = parse_text_attrs(
+            r#"<style:text-properties fo:letter-spacing="0.1cm"/>"#,
+        );
+        let pts = attrs.get_f64(&AttributeKey::FontSpacing).unwrap();
+        assert!((pts - 2.835).abs() < 0.01); // 0.1cm ≈ 2.835pt
+    }
+
+    #[test]
+    fn parse_paragraph_shading() {
+        let attrs = parse_para_attrs(
+            r##"<style:paragraph-properties fo:background-color="#FFFF00"/>"##,
+        );
+        match attrs.get(&AttributeKey::Background) {
+            Some(AttributeValue::Color(c)) => {
+                assert_eq!(c.r, 255);
+                assert_eq!(c.g, 255);
+                assert_eq!(c.b, 0);
+            }
+            other => panic!("Expected Color, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_keep_lines_together() {
+        let attrs = parse_para_attrs(
+            r#"<style:paragraph-properties fo:keep-together="always"/>"#,
+        );
+        assert_eq!(attrs.get_bool(&AttributeKey::KeepLinesTogether), Some(true));
+    }
+
+    #[test]
+    fn parse_paragraph_border_all() {
+        let attrs = parse_para_attrs(
+            r#"<style:paragraph-properties fo:border="0.06pt solid #000000"/>"#,
+        );
+        match attrs.get(&AttributeKey::ParagraphBorders) {
+            Some(AttributeValue::Borders(borders)) => {
+                assert!(borders.top.is_some());
+                assert!(borders.bottom.is_some());
+                assert!(borders.left.is_some());
+                assert!(borders.right.is_some());
+                let top = borders.top.as_ref().unwrap();
+                assert_eq!(top.style, s1_model::BorderStyle::Single);
+                assert_eq!(top.color.r, 0);
+            }
+            other => panic!("Expected Borders, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_paragraph_border_partial() {
+        let attrs = parse_para_attrs(
+            r#"<style:paragraph-properties fo:border-top="1pt solid #FF0000" fo:border-bottom="0.5pt dashed #0000FF"/>"#,
+        );
+        match attrs.get(&AttributeKey::ParagraphBorders) {
+            Some(AttributeValue::Borders(borders)) => {
+                assert!(borders.top.is_some());
+                assert!(borders.bottom.is_some());
+                assert!(borders.left.is_none());
+                let top = borders.top.as_ref().unwrap();
+                assert!((top.width - 1.0).abs() < 0.01);
+                assert_eq!(top.color.r, 255);
+                let bottom = borders.bottom.as_ref().unwrap();
+                assert_eq!(bottom.style, s1_model::BorderStyle::Dashed);
+            }
+            other => panic!("Expected Borders, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_tab_stop_left() {
+        use s1_model::TabAlignment;
+        let xml = r#"<root xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position="2.54cm" style:type="left"/></style:tab-stops></style:paragraph-properties></root>"#;
+        let mut reader = Reader::from_str(xml);
+        let mut attrs = AttributeMap::new();
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"paragraph-properties" => {
+                    attrs = parse_paragraph_properties(e);
+                    parse_paragraph_properties_children(&mut reader, &mut attrs);
+                    break;
+                }
+                Ok(Event::Eof) => break,
+                _ => {}
+            }
+        }
+        match attrs.get(&AttributeKey::TabStops) {
+            Some(AttributeValue::TabStops(tabs)) => {
+                assert_eq!(tabs.len(), 1);
+                assert!((tabs[0].position - 72.0).abs() < 0.1); // 2.54cm = 1 inch = 72pt
+                assert_eq!(tabs[0].alignment, TabAlignment::Left);
+            }
+            other => panic!("Expected TabStops, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_tab_stop_center_right() {
+        use s1_model::TabAlignment;
+        let xml = r#"<root xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position="5cm" style:type="center"/><style:tab-stop style:position="10cm" style:type="right"/></style:tab-stops></style:paragraph-properties></root>"#;
+        let mut reader = Reader::from_str(xml);
+        let mut attrs = AttributeMap::new();
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"paragraph-properties" => {
+                    attrs = parse_paragraph_properties(e);
+                    parse_paragraph_properties_children(&mut reader, &mut attrs);
+                    break;
+                }
+                Ok(Event::Eof) => break,
+                _ => {}
+            }
+        }
+        match attrs.get(&AttributeKey::TabStops) {
+            Some(AttributeValue::TabStops(tabs)) => {
+                assert_eq!(tabs.len(), 2);
+                assert_eq!(tabs[0].alignment, TabAlignment::Center);
+                assert_eq!(tabs[1].alignment, TabAlignment::Right);
+            }
+            other => panic!("Expected TabStops, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_tab_stop_with_leader() {
+        use s1_model::{TabAlignment, TabLeader};
+        let xml = r#"<root xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"><style:paragraph-properties><style:tab-stops><style:tab-stop style:position="5cm" style:type="right" style:leader-text="."/></style:tab-stops></style:paragraph-properties></root>"#;
+        let mut reader = Reader::from_str(xml);
+        let mut attrs = AttributeMap::new();
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"paragraph-properties" => {
+                    attrs = parse_paragraph_properties(e);
+                    parse_paragraph_properties_children(&mut reader, &mut attrs);
+                    break;
+                }
+                Ok(Event::Eof) => break,
+                _ => {}
+            }
+        }
+        match attrs.get(&AttributeKey::TabStops) {
+            Some(AttributeValue::TabStops(tabs)) => {
+                assert_eq!(tabs.len(), 1);
+                assert_eq!(tabs[0].alignment, TabAlignment::Right);
+                assert_eq!(tabs[0].leader, TabLeader::Dot);
+            }
+            other => panic!("Expected TabStops, got {:?}", other),
         }
     }
 }

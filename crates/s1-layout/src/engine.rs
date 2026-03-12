@@ -39,6 +39,7 @@ pub struct LayoutEngine<'a> {
     doc: &'a DocumentModel,
     font_db: &'a FontDatabase,
     config: LayoutConfig,
+    cache: Option<&'a mut LayoutCache>,
 }
 
 impl<'a> LayoutEngine<'a> {
@@ -52,15 +53,37 @@ impl<'a> LayoutEngine<'a> {
             doc,
             font_db,
             config,
+            cache: None,
+        }
+    }
+
+    /// Create a new layout engine with an incremental layout cache.
+    ///
+    /// Cached block layouts are reused when the content hash matches,
+    /// avoiding expensive text shaping and line breaking for unchanged content.
+    pub fn new_with_cache(
+        doc: &'a DocumentModel,
+        font_db: &'a FontDatabase,
+        config: LayoutConfig,
+        cache: &'a mut LayoutCache,
+    ) -> Self {
+        Self {
+            doc,
+            font_db,
+            config,
+            cache: Some(cache),
         }
     }
 
     /// Perform full document layout, returning a `LayoutDocument`.
     ///
+    /// If a `LayoutCache` was provided via `new_with_cache`, cached block
+    /// layouts are reused for unchanged content (same content hash).
+    ///
     /// # Errors
     ///
     /// Returns `LayoutError` if fonts cannot be found or text shaping fails.
-    pub fn layout(&self) -> Result<LayoutDocument, LayoutError> {
+    pub fn layout(&mut self) -> Result<LayoutDocument, LayoutError> {
         let page_layout = self.resolve_page_layout();
         let content_rect = page_layout.content_rect();
 
@@ -92,8 +115,12 @@ impl<'a> LayoutEngine<'a> {
                     // Add spacing before
                     current_y += para_style.space_before;
 
-                    let block =
-                        self.layout_paragraph(*node_id, &para_style, content_rect, current_y)?;
+                    let block = self.layout_paragraph_cached(
+                        *node_id,
+                        &para_style,
+                        content_rect,
+                        current_y,
+                    )?;
 
                     let block_height = block.bounds.height;
 
@@ -110,7 +137,7 @@ impl<'a> LayoutEngine<'a> {
                         current_y = content_rect.y + para_style.space_before;
 
                         // Re-layout at top of new page
-                        let block = self.layout_paragraph(
+                        let block = self.layout_paragraph_cached(
                             *node_id,
                             &para_style,
                             content_rect,
@@ -125,7 +152,7 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
                 NodeType::Table => {
-                    let block = self.layout_table(*node_id, content_rect, current_y)?;
+                    let block = self.layout_table_cached(*node_id, content_rect, current_y)?;
                     let block_height = block.bounds.height;
 
                     if current_y + block_height > content_rect.bottom()
@@ -140,7 +167,7 @@ impl<'a> LayoutEngine<'a> {
                         current_y = content_rect.y;
 
                         let block =
-                            self.layout_table(*node_id, content_rect, current_y)?;
+                            self.layout_table_cached(*node_id, content_rect, current_y)?;
                         let block_height = block.bounds.height;
                         page_blocks.push(block);
                         current_y += block_height;
@@ -204,7 +231,10 @@ impl<'a> LayoutEngine<'a> {
             self.layout_header_footer(page, total_pages)?;
         }
 
-        Ok(LayoutDocument { pages })
+        // Collect bookmarks from pages
+        let bookmarks = self.collect_bookmarks(&pages);
+
+        Ok(LayoutDocument { pages, bookmarks })
     }
 
     /// Resolve page layout from section properties or use default.
@@ -251,11 +281,81 @@ impl<'a> LayoutEngine<'a> {
                         NodeType::Paragraph | NodeType::Table | NodeType::Image => {
                             blocks.push((child_id, child.node_type));
                         }
+                        NodeType::TableOfContents => {
+                            // Expand TOC child paragraphs inline
+                            for &toc_child_id in &child.children {
+                                if let Some(toc_child) = self.doc.node(toc_child_id) {
+                                    if toc_child.node_type == NodeType::Paragraph {
+                                        blocks.push((toc_child_id, NodeType::Paragraph));
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
         }
+    }
+
+    /// Layout a paragraph with cache support.
+    fn layout_paragraph_cached(
+        &mut self,
+        para_id: NodeId,
+        para_style: &ResolvedParagraphStyle,
+        content_rect: Rect,
+        y_pos: f64,
+    ) -> Result<LayoutBlock, LayoutError> {
+        let hash = content_hash(self.doc, para_id);
+
+        // Check cache
+        if let Some(ref cache) = self.cache {
+            if let Some(cached) = cache.get(para_id, hash) {
+                let mut block = cached.clone();
+                block.bounds.y = y_pos;
+                block.bounds.x = content_rect.x + para_style.indent_left;
+                return Ok(block);
+            }
+        }
+
+        // Cache miss — do full layout
+        let block = self.layout_paragraph(para_id, para_style, content_rect, y_pos)?;
+
+        // Store in cache
+        if let Some(ref mut cache) = self.cache {
+            cache.insert(para_id, hash, block.clone());
+        }
+
+        Ok(block)
+    }
+
+    /// Layout a table with cache support.
+    fn layout_table_cached(
+        &mut self,
+        table_id: NodeId,
+        content_rect: Rect,
+        y_pos: f64,
+    ) -> Result<LayoutBlock, LayoutError> {
+        let hash = content_hash(self.doc, table_id);
+
+        // Check cache
+        if let Some(ref cache) = self.cache {
+            if let Some(cached) = cache.get(table_id, hash) {
+                let mut block = cached.clone();
+                block.bounds.y = y_pos;
+                return Ok(block);
+            }
+        }
+
+        // Cache miss
+        let block = self.layout_table(table_id, content_rect, y_pos)?;
+
+        // Store in cache
+        if let Some(ref mut cache) = self.cache {
+            cache.insert(table_id, hash, block.clone());
+        }
+
+        Ok(block)
     }
 
     /// Layout a paragraph — shape text, break into lines.
@@ -300,6 +400,7 @@ impl<'a> LayoutEngine<'a> {
                             glyphs: Vec::new(),
                             is_line_break: true,
                             metrics: None,
+                            hyperlink_url: None,
                         });
                     }
                     NodeType::Tab => {
@@ -319,6 +420,7 @@ impl<'a> LayoutEngine<'a> {
                             }],
                             is_line_break: false,
                             metrics: None,
+                            hyperlink_url: None,
                         });
                     }
                     _ => {}
@@ -397,6 +499,20 @@ impl<'a> LayoutEngine<'a> {
             (synthesize_glyphs(&text, run_style.font_size), None)
         };
 
+        // Check for hyperlink URL on the run or its parent
+        let hyperlink_url = self.doc.node(run_id).and_then(|run_node| {
+            // Check run's own attributes first
+            if let Some(url) = run_node.attributes.get_string(&AttributeKey::HyperlinkUrl) {
+                return Some(url.to_string());
+            }
+            // Check parent node (could be a Hyperlink container via HyperlinkUrl attribute)
+            run_node.parent.and_then(|parent_id| {
+                self.doc.node(parent_id).and_then(|parent| {
+                    parent.attributes.get_string(&AttributeKey::HyperlinkUrl).map(|s| s.to_string())
+                })
+            })
+        });
+
         Ok(ShapedRunInfo {
             source_id: run_id,
             font_id,
@@ -405,6 +521,7 @@ impl<'a> LayoutEngine<'a> {
             glyphs,
             is_line_break: false,
             metrics,
+            hyperlink_url,
         })
     }
 
@@ -463,6 +580,7 @@ impl<'a> LayoutEngine<'a> {
                             x_offset: current_x,
                             glyphs: run_info.glyphs.clone(),
                             width: *width,
+                            hyperlink_url: run_info.hyperlink_url.clone(),
                         });
                         current_x += width;
                         if *height > max_height {
@@ -688,22 +806,43 @@ impl<'a> LayoutEngine<'a> {
         let final_w = width * scale;
         let final_h = height * scale;
 
-        let media_id = node
-            .and_then(|n| {
-                if let Some(AttributeValue::MediaId(mid)) = n.attributes.get(&AttributeKey::ImageMediaId) {
-                    Some(format!("{}", mid.0))
-                } else {
+        let media_id_val = node.and_then(|n| {
+            if let Some(AttributeValue::MediaId(mid)) = n.attributes.get(&AttributeKey::ImageMediaId) {
+                Some(mid.0)
+            } else {
+                None
+            }
+        });
+
+        let media_id_str = media_id_val
+            .map(|id| format!("{id}"))
+            .or_else(|| {
+                node.and_then(|n| {
                     n.attributes.get_string(&AttributeKey::ImageMediaId).map(|s| s.to_string())
-                }
+                })
             })
             .unwrap_or_default();
+
+        // Fetch actual image data from the media store
+        let (image_data, content_type) = if let Some(mid) = media_id_val {
+            let media_id_key = s1_model::MediaId(mid);
+            if let Some(item) = self.doc.media().get(media_id_key) {
+                (Some(item.data.clone()), Some(item.content_type.clone()))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
 
         Ok(LayoutBlock {
             source_id: image_id,
             bounds: Rect::new(content_rect.x, y_pos, final_w, final_h),
             kind: LayoutBlockKind::Image {
-                media_id,
+                media_id: media_id_str,
                 bounds: Rect::new(0.0, 0.0, final_w, final_h),
+                image_data,
+                content_type,
             },
         })
     }
@@ -899,6 +1038,7 @@ impl<'a> LayoutEngine<'a> {
                                     x_offset,
                                     glyphs,
                                     width,
+                                    hyperlink_url: None,
                                 });
                             }
                         }
@@ -995,6 +1135,34 @@ impl<'a> LayoutEngine<'a> {
         Ok(())
     }
 
+    /// Collect bookmarks from laid-out pages by scanning for BookmarkStart nodes.
+    fn collect_bookmarks(&self, pages: &[LayoutPage]) -> Vec<LayoutBookmark> {
+        let mut bookmarks = Vec::new();
+
+        for page in pages {
+            for block in &page.blocks {
+                // Check if the source paragraph has BookmarkStart children
+                if let Some(para_node) = self.doc.node(block.source_id) {
+                    for &child_id in &para_node.children {
+                        if let Some(child) = self.doc.node(child_id) {
+                            if child.node_type == NodeType::BookmarkStart {
+                                if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
+                                    bookmarks.push(LayoutBookmark {
+                                        name: name.to_string(),
+                                        page_index: page.index,
+                                        y_position: block.bounds.y,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        bookmarks
+    }
+
     fn make_page(
         &self,
         index: usize,
@@ -1022,6 +1190,84 @@ struct ShapedRunInfo {
     glyphs: Vec<ShapedGlyph>,
     is_line_break: bool,
     metrics: Option<FontMetrics>,
+    hyperlink_url: Option<String>,
+}
+
+/// Compute a content hash for a node and its descendants.
+///
+/// The hash includes the node's attributes, text content of all descendants,
+/// and style information. Used for cache invalidation in incremental layout.
+fn content_hash(doc: &DocumentModel, node_id: NodeId) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+    hash_node(doc, node_id, &mut hash);
+    hash
+}
+
+fn hash_node(doc: &DocumentModel, node_id: NodeId, hash: &mut u64) {
+    if let Some(node) = doc.node(node_id) {
+        // Hash node type
+        *hash ^= node.node_type as u64;
+        *hash = hash.wrapping_mul(0x100000001b3);
+
+        // Hash text content
+        if let Some(ref text) = node.text_content {
+            for byte in text.bytes() {
+                *hash ^= byte as u64;
+                *hash = hash.wrapping_mul(0x100000001b3);
+            }
+        }
+
+        // Hash key attributes that affect layout
+        for (key, val) in node.attributes.iter() {
+            // Hash the key using its debug representation
+            use std::hash::{Hash, Hasher};
+            struct FnvHasher(u64);
+            impl Hasher for FnvHasher {
+                fn finish(&self) -> u64 { self.0 }
+                fn write(&mut self, bytes: &[u8]) {
+                    for &b in bytes {
+                        self.0 ^= b as u64;
+                        self.0 = self.0.wrapping_mul(0x100000001b3);
+                    }
+                }
+            }
+            let mut key_hasher = FnvHasher(*hash);
+            std::mem::discriminant(key).hash(&mut key_hasher);
+            *hash = key_hasher.finish();
+
+            // Hash the value
+            match val {
+                AttributeValue::Bool(b) => {
+                    *hash ^= *b as u64;
+                    *hash = hash.wrapping_mul(0x100000001b3);
+                }
+                AttributeValue::Float(f) => {
+                    *hash ^= f.to_bits();
+                    *hash = hash.wrapping_mul(0x100000001b3);
+                }
+                AttributeValue::Int(i) => {
+                    *hash ^= *i as u64;
+                    *hash = hash.wrapping_mul(0x100000001b3);
+                }
+                AttributeValue::String(s) => {
+                    for byte in s.bytes() {
+                        *hash ^= byte as u64;
+                        *hash = hash.wrapping_mul(0x100000001b3);
+                    }
+                }
+                _ => {
+                    // For complex types, just hash a sentinel
+                    *hash ^= 0xDEADBEEF;
+                    *hash = hash.wrapping_mul(0x100000001b3);
+                }
+            }
+        }
+
+        // Recurse into children
+        for &child_id in &node.children {
+            hash_node(doc, child_id, hash);
+        }
+    }
 }
 
 /// Synthesize glyphs when no font is available (fallback for headless testing).
@@ -1363,7 +1609,7 @@ mod tests {
     fn layout_empty_document() {
         let doc = DocumentModel::new();
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages.len(), 1);
         assert!(result.pages[0].blocks.is_empty());
@@ -1373,7 +1619,7 @@ mod tests {
     fn layout_single_paragraph() {
         let doc = make_simple_doc("Hello World");
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages.len(), 1);
         assert_eq!(result.pages[0].blocks.len(), 1);
@@ -1390,7 +1636,7 @@ mod tests {
     fn layout_multiple_paragraphs() {
         let doc = make_multi_para_doc(&["First", "Second", "Third"]);
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages.len(), 1);
         assert_eq!(result.pages[0].blocks.len(), 3);
@@ -1400,7 +1646,7 @@ mod tests {
     fn layout_page_dimensions() {
         let doc = make_simple_doc("Hello");
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         let page = &result.pages[0];
         assert_eq!(page.width, 612.0);
@@ -1412,7 +1658,7 @@ mod tests {
     fn layout_paragraph_has_correct_position() {
         let doc = make_simple_doc("Hello");
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         let block = &result.pages[0].blocks[0];
         // Should start at content area origin
@@ -1426,7 +1672,7 @@ mod tests {
         let texts: Vec<&str> = (0..100).map(|_| "Lorem ipsum dolor sit amet").collect();
         let doc = make_multi_para_doc(&texts);
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert!(
             result.pages.len() > 1,
@@ -1448,7 +1694,7 @@ mod tests {
         // No runs — empty paragraph
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages[0].blocks.len(), 1);
         match &result.pages[0].blocks[0].kind {
@@ -1480,7 +1726,7 @@ mod tests {
             .unwrap();
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages[0].blocks.len(), 1);
     }
@@ -1523,7 +1769,7 @@ mod tests {
         }
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages[0].blocks.len(), 1);
         match &result.pages[0].blocks[0].kind {
@@ -1543,7 +1789,7 @@ mod tests {
             default_page_layout: PageLayout::a4(),
             ..Default::default()
         };
-        let engine = LayoutEngine::new(&doc, &font_db, config);
+        let mut engine = LayoutEngine::new(&doc, &font_db, config);
         let result = engine.layout().unwrap();
         assert!((result.pages[0].width - 595.28).abs() < 0.01);
     }
@@ -1609,7 +1855,7 @@ mod tests {
             .unwrap();
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert_eq!(result.pages.len(), 2);
     }
@@ -1716,7 +1962,7 @@ mod tests {
         doc.sections_mut().push(sp);
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
         assert!((result.pages[0].width - 841.89).abs() < 0.01);
         assert!((result.pages[0].height - 595.28).abs() < 0.01);
@@ -1784,7 +2030,7 @@ mod tests {
         doc.sections_mut().push(sp);
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
 
         let page = &result.pages[0];
@@ -1849,7 +2095,7 @@ mod tests {
         doc.sections_mut().push(sp);
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
 
         assert!(result.pages.len() >= 2, "should have at least 2 pages");
@@ -1873,7 +2119,7 @@ mod tests {
         let texts: Vec<&str> = (0..100).map(|_| "Lorem ipsum dolor sit amet").collect();
         let doc = make_multi_para_doc(&texts);
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, config);
+        let mut engine = LayoutEngine::new(&doc, &font_db, config);
         let result = engine.layout().unwrap();
 
         // All pages should have proper page indices
@@ -1946,7 +2192,7 @@ mod tests {
         doc.sections_mut().push(sp);
 
         let font_db = FontDatabase::new();
-        let engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
 
         // First page should have a header (the First type)
@@ -1954,5 +2200,262 @@ mod tests {
         // The header source should be the first-page header node
         let header = result.pages[0].header.as_ref().unwrap();
         assert_eq!(header.source_id, first_hdr_id);
+    }
+
+    // --- Milestone 3.3: Incremental Layout Tests ---
+
+    #[test]
+    fn incremental_cache_hit() {
+        let doc = make_simple_doc("Hello World");
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout — populates cache
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result1 = engine.layout().unwrap();
+        assert!(!cache.is_empty(), "Cache should be populated after layout");
+
+        // Second layout with same doc — should use cache
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+
+        // Results should be equivalent
+        assert_eq!(result1.pages.len(), result2.pages.len());
+        assert_eq!(
+            result1.pages[0].blocks.len(),
+            result2.pages[0].blocks.len()
+        );
+    }
+
+    #[test]
+    fn incremental_cache_miss_on_text_change() {
+        let mut doc = make_simple_doc("Hello");
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let _result1 = engine.layout().unwrap();
+        let cache_len_after_first = cache.len();
+        assert!(cache_len_after_first > 0);
+
+        // Modify the text content (change the Text node)
+        let root = doc.root_id();
+        let body_id = doc.node(root).unwrap().children[0];
+        let para_id = doc.node(body_id).unwrap().children[0];
+        let run_id = doc.node(para_id).unwrap().children[0];
+        let text_id = doc.node(run_id).unwrap().children[0];
+        doc.node_mut(text_id).unwrap().text_content = Some("Changed text".to_string());
+
+        // Second layout should miss cache for the changed paragraph
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+        assert!(!result2.pages.is_empty());
+    }
+
+    #[test]
+    fn incremental_cache_miss_on_style_change() {
+        let mut doc = make_simple_doc("Hello");
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let _result1 = engine.layout().unwrap();
+
+        // Change run attributes (font size)
+        let root = doc.root_id();
+        let body_id = doc.node(root).unwrap().children[0];
+        let para_id = doc.node(body_id).unwrap().children[0];
+        let run_id = doc.node(para_id).unwrap().children[0];
+        doc.node_mut(run_id).unwrap().attributes.set(
+            s1_model::AttributeKey::FontSize,
+            s1_model::AttributeValue::Float(24.0),
+        );
+
+        // Second layout should detect the change
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+        assert!(!result2.pages.is_empty());
+    }
+
+    #[test]
+    fn incremental_pagination_still_correct() {
+        // Ensure that even with cache, pagination produces correct results
+        let mut doc = DocumentModel::new();
+        let root = doc.root_id();
+        let body_id = doc.next_id();
+        doc.insert_node(root, 0, Node::new(body_id, NodeType::Body))
+            .unwrap();
+
+        for i in 0..80 {
+            let para_id = doc.next_id();
+            doc.insert_node(body_id, i, Node::new(para_id, NodeType::Paragraph))
+                .unwrap();
+            let run_id = doc.next_id();
+            doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+                .unwrap();
+            let text_id = doc.next_id();
+            doc.insert_node(run_id, 0, Node::text(text_id, "Lorem ipsum dolor sit amet"))
+                .unwrap();
+        }
+
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result1 = engine.layout().unwrap();
+        let page_count_1 = result1.pages.len();
+        assert!(page_count_1 > 1, "Should be multi-page");
+
+        // Second layout with cache — pagination should match
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+        assert_eq!(result2.pages.len(), page_count_1);
+    }
+
+    #[test]
+    fn incremental_table_cache() {
+        let mut doc = DocumentModel::new();
+        let root = doc.root_id();
+        let body_id = doc.next_id();
+        doc.insert_node(root, 0, Node::new(body_id, NodeType::Body))
+            .unwrap();
+
+        let table_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(table_id, NodeType::Table))
+            .unwrap();
+
+        for row_idx in 0..2 {
+            let row_id = doc.next_id();
+            doc.insert_node(table_id, row_idx, Node::new(row_id, NodeType::TableRow))
+                .unwrap();
+            for col_idx in 0..2 {
+                let cell_id = doc.next_id();
+                doc.insert_node(row_id, col_idx, Node::new(cell_id, NodeType::TableCell))
+                    .unwrap();
+                let para_id = doc.next_id();
+                doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph))
+                    .unwrap();
+                let run_id = doc.next_id();
+                doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+                    .unwrap();
+                let text_id = doc.next_id();
+                doc.insert_node(run_id, 0, Node::text(text_id, "Cell"))
+                    .unwrap();
+            }
+        }
+
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout populates cache
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result1 = engine.layout().unwrap();
+        assert!(!cache.is_empty());
+
+        // Second layout should use cached table
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+        assert_eq!(result1.pages[0].blocks.len(), result2.pages[0].blocks.len());
+    }
+
+    #[test]
+    fn incremental_empty_cache() {
+        // Layout without cache should work the same
+        let doc = make_simple_doc("Test");
+        let font_db = FontDatabase::new();
+
+        let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
+        let result = engine.layout().unwrap();
+        assert!(!result.pages.is_empty());
+    }
+
+    #[test]
+    fn incremental_cache_invalidation_on_insert() {
+        let mut doc = make_simple_doc("Hello");
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First layout
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result1 = engine.layout().unwrap();
+        let block_count_1 = result1.pages[0].blocks.len();
+        assert_eq!(block_count_1, 1);
+
+        // Add a second paragraph
+        let root = doc.root_id();
+        let body_id = doc.node(root).unwrap().children[0];
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 1, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "New paragraph"))
+            .unwrap();
+
+        // Second layout should see both paragraphs
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+        assert_eq!(result2.pages[0].blocks.len(), 2);
+    }
+
+    #[test]
+    fn incremental_performance() {
+        // Verify that cached layout produces the same output faster
+        // (just a sanity check, not a strict timing test)
+        let mut doc = DocumentModel::new();
+        let root = doc.root_id();
+        let body_id = doc.next_id();
+        doc.insert_node(root, 0, Node::new(body_id, NodeType::Body))
+            .unwrap();
+
+        for i in 0..50 {
+            let para_id = doc.next_id();
+            doc.insert_node(body_id, i, Node::new(para_id, NodeType::Paragraph))
+                .unwrap();
+            let run_id = doc.next_id();
+            doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+                .unwrap();
+            let text_id = doc.next_id();
+            doc.insert_node(
+                run_id,
+                0,
+                Node::text(text_id, "Performance test paragraph"),
+            )
+            .unwrap();
+        }
+
+        let font_db = FontDatabase::new();
+        let mut cache = LayoutCache::new();
+
+        // First pass populates cache
+        let mut engine =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result1 = engine.layout().unwrap();
+
+        // Second pass should use cache for all paragraphs
+        let mut engine2 =
+            LayoutEngine::new_with_cache(&doc, &font_db, LayoutConfig::default(), &mut cache);
+        let result2 = engine2.layout().unwrap();
+
+        assert_eq!(result1.pages.len(), result2.pages.len());
+        // Cache should have entries for each paragraph
+        assert!(cache.len() >= 50, "Cache should have entries for all paragraphs");
     }
 }

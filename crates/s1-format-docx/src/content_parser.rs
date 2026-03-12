@@ -104,6 +104,11 @@ fn parse_body(
                         parse_table(reader, doc, body_id, child_index, ctx)?;
                         child_index += 1;
                     }
+                    b"sdt" => {
+                        if parse_sdt_toc(reader, doc, body_id, child_index, ctx)? {
+                            child_index += 1;
+                        }
+                    }
                     b"sectPr" => {
                         // Final section (direct child of body)
                         let raw = parse_section_properties(reader)?;
@@ -1117,6 +1122,210 @@ fn resolve_list_info(attrs: &mut AttributeMap, numbering: &NumberingDefinitions)
     }
 }
 
+/// Try to parse an `<w:sdt>` as a Table of Contents.
+///
+/// If the SDT contains a `docPartGallery` with value "Table of Contents",
+/// creates a `NodeType::TableOfContents` node with cached entry paragraphs.
+/// Returns `true` if a TOC node was created, `false` if the SDT was skipped.
+fn parse_sdt_toc(
+    reader: &mut Reader<&[u8]>,
+    doc: &mut DocumentModel,
+    parent_id: NodeId,
+    child_index: usize,
+    ctx: &ParseContext,
+) -> Result<bool, DocxError> {
+    let mut is_toc = false;
+    let mut in_sdt_pr = false;
+    let mut in_sdt_content = false;
+    let mut toc_id: Option<NodeId> = None;
+    let mut toc_child_index = 0;
+    let mut in_field = false; // track fldChar begin/separate/end
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let name = e.local_name().as_ref().to_vec();
+                match name.as_slice() {
+                    b"sdtPr" => {
+                        in_sdt_pr = true;
+                    }
+                    b"docPartGallery" if in_sdt_pr => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.local_name().as_ref() == b"val" {
+                                let val = String::from_utf8_lossy(&attr.value);
+                                if val.contains("Table of Contents") {
+                                    is_toc = true;
+                                }
+                            }
+                        }
+                        skip_element(reader)?;
+                    }
+                    b"docPartObj" if in_sdt_pr => {
+                        // Don't skip — descend into it to find docPartGallery
+                    }
+                    b"sdtContent" => {
+                        in_sdt_content = true;
+                        if is_toc {
+                            // Create the TOC node
+                            let id = doc.next_id();
+                            let mut toc = Node::new(id, NodeType::TableOfContents);
+                            toc.attributes.set(
+                                AttributeKey::TocMaxLevel,
+                                AttributeValue::Int(3), // default; may be updated from field code
+                            );
+                            let _ = doc.insert_node(parent_id, child_index, toc);
+                            toc_id = Some(id);
+                        }
+                    }
+                    b"p" if in_sdt_content && is_toc => {
+                        if let Some(tid) = toc_id {
+                            // Parse paragraph; check for fldChar to detect field code
+                            // vs cached entries — skip field-code paragraphs
+                            parse_sdt_toc_paragraph(
+                                reader,
+                                doc,
+                                tid,
+                                &mut toc_child_index,
+                                &mut in_field,
+                                ctx,
+                            )?;
+                        } else {
+                            skip_element(reader)?;
+                        }
+                    }
+                    b"p" if in_sdt_content && !is_toc => {
+                        // Non-TOC SDT: parse content paragraphs as regular body content
+                        let _ = parse_paragraph(reader, doc, parent_id, child_index, ctx)?;
+                    }
+                    _ if in_sdt_pr => {
+                        skip_element(reader)?;
+                    }
+                    _ if in_sdt_content => {
+                        skip_element(reader)?;
+                    }
+                    _ => {
+                        skip_element(reader)?;
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                let local = e.local_name();
+                let name = local.as_ref();
+                match name {
+                    b"sdtPr" => {
+                        in_sdt_pr = false;
+                    }
+                    b"sdtContent" => {
+                        in_sdt_content = false;
+                    }
+                    b"sdt" => break,
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let name = e.local_name().as_ref().to_vec();
+                if name == b"docPartGallery" && in_sdt_pr {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"val" {
+                            let val = String::from_utf8_lossy(&attr.value);
+                            if val.contains("Table of Contents") {
+                                is_toc = true;
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+
+    Ok(toc_id.is_some())
+}
+
+/// Parse a paragraph inside an SDT TOC.
+///
+/// Field-code paragraphs (containing fldChar begin/separate/end) are consumed
+/// but not added to the TOC node. Only cached entry paragraphs are kept.
+fn parse_sdt_toc_paragraph(
+    reader: &mut Reader<&[u8]>,
+    doc: &mut DocumentModel,
+    toc_id: NodeId,
+    toc_child_index: &mut usize,
+    _in_field: &mut bool,
+    ctx: &ParseContext,
+) -> Result<(), DocxError> {
+    // We'll collect the paragraph XML events and check for field chars
+    // Simple approach: parse as normal paragraph, then check if it contains field chars
+    // Parse paragraph normally into the TOC, then remove field-code-only paragraphs
+    let _inline_sect = parse_paragraph(reader, doc, toc_id, *toc_child_index, ctx)?;
+
+    // Check if this paragraph is a field-code-only paragraph (fldChar begin/separate/end)
+    // by inspecting the paragraph's children for Field nodes
+    let para_id = doc
+        .node(toc_id)
+        .and_then(|n| n.children.get(*toc_child_index).copied());
+
+    let _is_field_para = if let Some(pid) = para_id {
+        // Check for field markers in the raw paragraph
+        let para_node = doc.node(pid);
+        if let Some(pn) = para_node {
+            // If this paragraph has only runs with no meaningful text, and we're in a field,
+            // skip it. Simple heuristic: check if paragraph text is empty
+            let mut text = String::new();
+            collect_para_text(doc, pid, &mut text);
+
+            // Detect field begin/end via instrText content
+            let has_instr = pn.children.iter().any(|&cid| {
+                doc.node(cid)
+                    .map(|n| n.node_type == NodeType::Field)
+                    .unwrap_or(false)
+            });
+
+            if text.trim().is_empty() && pn.children.is_empty() {
+                true // empty paragraph (likely field-only)
+            } else {
+                has_instr && text.trim().is_empty()
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Field begin/separate/end paragraphs get parsed but we check if they're empty
+    // For simplicity: if the paragraph was parsed and has text, keep it
+    if let Some(pid) = para_id {
+        let mut text = String::new();
+        collect_para_text(doc, pid, &mut text);
+
+        // Keep paragraphs that have actual text content (TOC entries)
+        // Remove field-only or empty paragraphs
+        if text.trim().is_empty() {
+            let _ = doc.remove_node(pid);
+        } else {
+            *toc_child_index += 1;
+        }
+    }
+
+    Ok(())
+}
+
+/// Collect plain text from a paragraph (helper).
+fn collect_para_text(doc: &DocumentModel, node_id: NodeId, out: &mut String) {
+    if let Some(node) = doc.node(node_id) {
+        if let Some(text) = &node.text_content {
+            out.push_str(text);
+        }
+        let children: Vec<NodeId> = node.children.clone();
+        for child_id in children {
+            collect_para_text(doc, child_id, out);
+        }
+    }
+}
+
 /// Skip an element and all its children.
 fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), DocxError> {
     let mut depth = 1u32;
@@ -2041,5 +2250,93 @@ mod tests {
             ce.attributes.get_string(&AttributeKey::CommentId),
             Some("0")
         );
+    }
+
+    #[test]
+    fn parse_toc_sdt() {
+        let xml = wrap_doc(
+            r#"<w:sdt>
+                <w:sdtPr>
+                    <w:docPartObj>
+                        <w:docPartGallery w:val="Table of Contents"/>
+                        <w:docPartUnique/>
+                    </w:docPartObj>
+                </w:sdtPr>
+                <w:sdtContent>
+                    <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r></w:p>
+                    <w:p><w:r><w:t>Chapter One</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Section A</w:t></w:r></w:p>
+                    <w:p><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+                </w:sdtContent>
+            </w:sdt>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        assert!(!body.children.is_empty());
+
+        // First child should be a TableOfContents node
+        let toc = doc.node(body.children[0]).unwrap();
+        assert_eq!(toc.node_type, NodeType::TableOfContents);
+
+        // Should have the cached entry paragraphs (field-only paragraphs removed)
+        assert!(toc.children.len() >= 2, "Expected at least 2 cached entries, got {}", toc.children.len());
+
+        // Verify entry text
+        let entry1 = doc.node(toc.children[0]).unwrap();
+        assert_eq!(entry1.node_type, NodeType::Paragraph);
+    }
+
+    #[test]
+    fn parse_toc_with_empty_gallery() {
+        // docPartGallery as an empty/self-closing element (the writer produces this form)
+        let xml = wrap_doc(
+            r#"<w:sdt>
+                <w:sdtPr>
+                    <w:docPartObj>
+                        <w:docPartGallery w:val="Table of Contents"/>
+                    </w:docPartObj>
+                </w:sdtPr>
+                <w:sdtContent>
+                    <w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:p>
+                    <w:p><w:r><w:t>Entry Text</w:t></w:r></w:p>
+                    <w:p><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+                </w:sdtContent>
+            </w:sdt>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body = doc.node(doc.body_id().unwrap()).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+        assert_eq!(toc.node_type, NodeType::TableOfContents);
+        assert!(!toc.children.is_empty(), "Should have cached entry");
+    }
+
+    #[test]
+    fn parse_non_toc_sdt_passes_through() {
+        // An SDT that is NOT a Table of Contents should parse its paragraphs normally
+        let xml = wrap_doc(
+            r#"<w:sdt>
+                <w:sdtPr>
+                    <w:alias w:val="Some Control"/>
+                </w:sdtPr>
+                <w:sdtContent>
+                    <w:p><w:r><w:t>Normal text</w:t></w:r></w:p>
+                </w:sdtContent>
+            </w:sdt>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+
+        // Should have a paragraph (not a TOC node)
+        let first = doc.node(body.children[0]).unwrap();
+        assert_eq!(first.node_type, NodeType::Paragraph);
+        assert_eq!(doc.to_plain_text(), "Normal text");
     }
 }

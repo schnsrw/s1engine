@@ -1,0 +1,15 @@
+[package]
+name = "s1-crdt"
+description = "CRDT algorithms for collaborative editing in s1engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+s1-model = { workspace = true }
+s1-ops = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+pretty_assertions = { workspace = true }

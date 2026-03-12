@@ -10,7 +10,11 @@ members = [
     "crates/s1-convert",
     "crates/s1-layout",
     "crates/s1-text",
+    "crates/s1-crdt",
+    "crates/s1-format-md",
     "crates/s1engine",
+    "ffi/wasm",
+    "ffi/c",
 ]
 
 [workspace.package]
@@ -28,9 +32,11 @@ s1-format-docx = { path = "crates/s1-format-docx" }
 s1-format-odt = { path = "crates/s1-format-odt" }
 s1-format-pdf = { path = "crates/s1-format-pdf" }
 s1-format-txt = { path = "crates/s1-format-txt" }
+s1-format-md = { path = "crates/s1-format-md" }
 s1-convert = { path = "crates/s1-convert" }
 s1-layout = { path = "crates/s1-layout" }
 s1-text = { path = "crates/s1-text" }
+s1-crdt = { path = "crates/s1-crdt" }
 s1engine = { path = "crates/s1engine" }
 
 # External dependencies
@@ -39,7 +45,9 @@ quick-xml = "0.37"
 zip = "2"
 base64 = "0.22"
 encoding_rs = "0.8"
+pulldown-cmark = "0.12"
 
 # Dev dependencies
 proptest = "1"
 pretty_assertions = "1"
+criterion = { version = "0.5", features = ["html_reports"] }

@@ -13,6 +13,9 @@ pub enum Error {
     Io(std::io::Error),
     /// The requested format is not supported or not enabled via feature flags.
     UnsupportedFormat(String),
+    /// Error from the CRDT collaboration subsystem.
+    #[cfg(feature = "crdt")]
+    Crdt(s1_crdt::CrdtError),
 }
 
 impl fmt::Display for Error {
@@ -24,6 +27,8 @@ impl fmt::Display for Error {
             Self::UnsupportedFormat(fmt_name) => {
                 write!(f, "Unsupported format: {fmt_name}")
             }
+            #[cfg(feature = "crdt")]
+            Self::Crdt(e) => write!(f, "CRDT error: {e}"),
         }
     }
 }
@@ -33,6 +38,8 @@ impl std::error::Error for Error {
         match self {
             Self::Operation(e) => Some(e),
             Self::Io(e) => Some(e),
+            #[cfg(feature = "crdt")]
+            Self::Crdt(e) => Some(e),
             _ => None,
         }
     }
@@ -68,5 +75,12 @@ impl From<s1_format_odt::OdtError> for Error {
 impl From<s1_format_txt::TxtError> for Error {
     fn from(e: s1_format_txt::TxtError) -> Self {
         Self::Format(e.to_string())
+    }
+}
+
+#[cfg(feature = "crdt")]
+impl From<s1_crdt::CrdtError> for Error {
+    fn from(e: s1_crdt::CrdtError) -> Self {
+        Self::Crdt(e)
     }
 }

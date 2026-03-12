@@ -4,7 +4,7 @@
 //! is stripped. Paragraphs are separated by newlines. Tables are rendered
 //! as tab-separated columns.
 
-use s1_model::{DocumentModel, NodeId, NodeType};
+use s1_model::{AttributeKey, AttributeValue, DocumentModel, ListFormat, NodeId, NodeType};
 
 /// Write a document model to plain text bytes (UTF-8).
 pub fn write(doc: &DocumentModel) -> Vec<u8> {
@@ -40,7 +40,34 @@ fn collect_blocks(doc: &DocumentModel, container_id: NodeId, blocks: &mut Vec<St
 
         match child.node_type {
             NodeType::Paragraph => {
+                // Page break before → thematic break marker
+                if child.attributes.get_bool(&AttributeKey::PageBreakBefore) == Some(true) {
+                    blocks.push("---".to_string());
+                }
+
                 let mut text = String::new();
+
+                // Check for heading marker (StyleId = "HeadingN")
+                if let Some(level) = heading_level_from_attrs(&child.attributes) {
+                    let hashes = "#".repeat(level as usize);
+                    text.push_str(&hashes);
+                    text.push(' ');
+                }
+
+                // Check for list marker (ListInfo attribute)
+                if let Some(AttributeValue::ListInfo(ref li)) = child.attributes.get(&AttributeKey::ListInfo) {
+                    let indent = "  ".repeat(li.level as usize);
+                    text.push_str(&indent);
+                    match li.num_format {
+                        ListFormat::Bullet => text.push_str("- "),
+                        ListFormat::Decimal | ListFormat::LowerAlpha | ListFormat::UpperAlpha
+                        | ListFormat::LowerRoman | ListFormat::UpperRoman => {
+                            let start = li.start.unwrap_or(1);
+                            text.push_str(&format!("{}. ", start));
+                        }
+                    }
+                }
+
                 let para_children: Vec<NodeId> = child.children.clone();
                 for inline_id in para_children {
                     write_inline(doc, inline_id, &mut text);
@@ -50,6 +77,11 @@ fn collect_blocks(doc: &DocumentModel, container_id: NodeId, blocks: &mut Vec<St
 
             NodeType::Table => {
                 write_table(doc, child_id, blocks);
+            }
+
+            NodeType::TableOfContents => {
+                // Output cached entry paragraphs, or generate from headings
+                write_toc(doc, child_id, blocks);
             }
 
             // Sections and other containers: recurse
@@ -76,6 +108,13 @@ fn collect_blocks(doc: &DocumentModel, container_id: NodeId, blocks: &mut Vec<St
             }
         }
     }
+}
+
+/// Extract heading level from a paragraph's attributes.
+/// Returns `Some(level)` if `StyleId` is "HeadingN" (1–6).
+fn heading_level_from_attrs(attrs: &s1_model::AttributeMap) -> Option<u8> {
+    let style_id = attrs.get_string(&AttributeKey::StyleId)?;
+    style_id.strip_prefix("Heading")?.parse::<u8>().ok().filter(|&l| (1..=6).contains(&l))
 }
 
 /// Write inline content (runs, text, breaks) into a string.
@@ -166,6 +205,49 @@ fn write_cell_content(doc: &DocumentModel, node_id: NodeId, out: &mut String) {
             let children: Vec<NodeId> = node.children.clone();
             for child_id in children {
                 write_cell_content(doc, child_id, out);
+            }
+        }
+    }
+}
+
+/// Write a Table of Contents as plain text.
+fn write_toc(doc: &DocumentModel, toc_id: NodeId, blocks: &mut Vec<String>) {
+    let toc = match doc.node(toc_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    // If the TOC has cached entry paragraphs, output them
+    if !toc.children.is_empty() {
+        for &child_id in &toc.children {
+            let child = match doc.node(child_id) {
+                Some(n) => n,
+                None => continue,
+            };
+            if child.node_type == NodeType::Paragraph {
+                let mut text = String::new();
+                let para_children: Vec<NodeId> = child.children.clone();
+                for inline_id in para_children {
+                    write_inline(doc, inline_id, &mut text);
+                }
+                blocks.push(text);
+            }
+        }
+    } else {
+        // Generate from headings if no cached entries
+        let max_level = toc
+            .attributes
+            .get(&s1_model::AttributeKey::TocMaxLevel)
+            .and_then(|v| match v {
+                s1_model::AttributeValue::Int(n) => Some(*n as u8),
+                _ => None,
+            })
+            .unwrap_or(3);
+        let headings = doc.collect_headings();
+        for (_, level, text) in headings {
+            if level <= max_level {
+                let indent = "  ".repeat((level - 1) as usize);
+                blocks.push(format!("{}{}", indent, text));
             }
         }
     }
@@ -296,9 +378,281 @@ mod tests {
     }
 
     #[test]
+    fn write_toc_from_headings() {
+        // Create a doc with a TOC and headings but no cached entries
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Add TOC node
+        let toc_id = doc.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes.set(
+            s1_model::AttributeKey::TocMaxLevel,
+            s1_model::AttributeValue::Int(2),
+        );
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        // Add H1
+        let p1 = doc.next_id();
+        let mut para1 = Node::new(p1, NodeType::Paragraph);
+        para1.attributes.set(
+            s1_model::AttributeKey::StyleId,
+            s1_model::AttributeValue::String("Heading1".into()),
+        );
+        doc.insert_node(body_id, 1, para1).unwrap();
+        let r1 = doc.next_id();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Chapter One")).unwrap();
+
+        // Add H2
+        let p2 = doc.next_id();
+        let mut para2 = Node::new(p2, NodeType::Paragraph);
+        para2.attributes.set(
+            s1_model::AttributeKey::StyleId,
+            s1_model::AttributeValue::String("Heading2".into()),
+        );
+        doc.insert_node(body_id, 2, para2).unwrap();
+        let r2 = doc.next_id();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        let t2 = doc.next_id();
+        doc.insert_node(r2, 0, Node::text(t2, "Section A")).unwrap();
+
+        let text = write_string(&doc);
+        assert!(text.contains("Chapter One"));
+        assert!(text.contains("  Section A")); // indented H2
+    }
+
+    #[test]
+    fn write_toc_with_cached_entries() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Add TOC node with a cached entry paragraph
+        let toc_id = doc.next_id();
+        let toc = Node::new(toc_id, NodeType::TableOfContents);
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        let p1 = doc.next_id();
+        doc.insert_node(toc_id, 0, Node::new(p1, NodeType::Paragraph)).unwrap();
+        let r1 = doc.next_id();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Cached Entry")).unwrap();
+
+        let text = write_string(&doc);
+        assert_eq!(text, "Cached Entry");
+    }
+
+    #[test]
     fn write_unicode() {
         let doc = make_para_doc(&["こんにちは", "café"]);
         let text = write_string(&doc);
         assert_eq!(text, "こんにちは\ncafé");
+    }
+
+    #[test]
+    fn write_heading_markers() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        for (i, (level, text)) in [(1, "Title"), (2, "Subtitle"), (3, "Section")].iter().enumerate() {
+            let p = doc.next_id();
+            let mut para = Node::new(p, NodeType::Paragraph);
+            para.attributes.set(
+                s1_model::AttributeKey::StyleId,
+                s1_model::AttributeValue::String(format!("Heading{}", level)),
+            );
+            doc.insert_node(body_id, i, para).unwrap();
+            let r = doc.next_id();
+            doc.insert_node(p, 0, Node::new(r, NodeType::Run)).unwrap();
+            let t = doc.next_id();
+            doc.insert_node(r, 0, Node::text(t, *text)).unwrap();
+        }
+
+        let text = write_string(&doc);
+        assert_eq!(text, "# Title\n## Subtitle\n### Section");
+    }
+
+    #[test]
+    fn write_bullet_list_markers() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        for (i, item) in ["Apple", "Banana", "Cherry"].iter().enumerate() {
+            let p = doc.next_id();
+            let mut para = Node::new(p, NodeType::Paragraph);
+            para.attributes.set(
+                s1_model::AttributeKey::ListInfo,
+                s1_model::AttributeValue::ListInfo(s1_model::ListInfo {
+                    level: 0,
+                    num_format: s1_model::ListFormat::Bullet,
+                    num_id: 1,
+                    start: Some(1),
+                }),
+            );
+            doc.insert_node(body_id, i, para).unwrap();
+            let r = doc.next_id();
+            doc.insert_node(p, 0, Node::new(r, NodeType::Run)).unwrap();
+            let t = doc.next_id();
+            doc.insert_node(r, 0, Node::text(t, *item)).unwrap();
+        }
+
+        let text = write_string(&doc);
+        assert_eq!(text, "- Apple\n- Banana\n- Cherry");
+    }
+
+    #[test]
+    fn write_numbered_list_markers() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        for (i, (num, item)) in [(1, "First"), (2, "Second"), (3, "Third")].iter().enumerate() {
+            let p = doc.next_id();
+            let mut para = Node::new(p, NodeType::Paragraph);
+            para.attributes.set(
+                s1_model::AttributeKey::ListInfo,
+                s1_model::AttributeValue::ListInfo(s1_model::ListInfo {
+                    level: 0,
+                    num_format: s1_model::ListFormat::Decimal,
+                    num_id: 1,
+                    start: Some(*num),
+                }),
+            );
+            doc.insert_node(body_id, i, para).unwrap();
+            let r = doc.next_id();
+            doc.insert_node(p, 0, Node::new(r, NodeType::Run)).unwrap();
+            let t = doc.next_id();
+            doc.insert_node(r, 0, Node::text(t, *item)).unwrap();
+        }
+
+        let text = write_string(&doc);
+        assert_eq!(text, "1. First\n2. Second\n3. Third");
+    }
+
+    #[test]
+    fn write_nested_list_indent() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Level 0 bullet
+        let p0 = doc.next_id();
+        let mut para0 = Node::new(p0, NodeType::Paragraph);
+        para0.attributes.set(
+            s1_model::AttributeKey::ListInfo,
+            s1_model::AttributeValue::ListInfo(s1_model::ListInfo {
+                level: 0,
+                num_format: s1_model::ListFormat::Bullet,
+                num_id: 1,
+                start: Some(1),
+            }),
+        );
+        doc.insert_node(body_id, 0, para0).unwrap();
+        let r0 = doc.next_id();
+        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run)).unwrap();
+        let t0 = doc.next_id();
+        doc.insert_node(r0, 0, Node::text(t0, "Top")).unwrap();
+
+        // Level 1 bullet
+        let p1 = doc.next_id();
+        let mut para1 = Node::new(p1, NodeType::Paragraph);
+        para1.attributes.set(
+            s1_model::AttributeKey::ListInfo,
+            s1_model::AttributeValue::ListInfo(s1_model::ListInfo {
+                level: 1,
+                num_format: s1_model::ListFormat::Bullet,
+                num_id: 1,
+                start: Some(1),
+            }),
+        );
+        doc.insert_node(body_id, 1, para1).unwrap();
+        let r1 = doc.next_id();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Nested")).unwrap();
+
+        let text = write_string(&doc);
+        assert_eq!(text, "- Top\n  - Nested");
+    }
+
+    #[test]
+    fn write_horizontal_rule() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Paragraph before
+        let p1 = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(p1, NodeType::Paragraph)).unwrap();
+        let r1 = doc.next_id();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Before")).unwrap();
+
+        // Paragraph with PageBreakBefore (renders as ---)
+        let p2 = doc.next_id();
+        let mut para2 = Node::new(p2, NodeType::Paragraph);
+        para2.attributes.set(
+            s1_model::AttributeKey::PageBreakBefore,
+            s1_model::AttributeValue::Bool(true),
+        );
+        doc.insert_node(body_id, 1, para2).unwrap();
+        let r2 = doc.next_id();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        let t2 = doc.next_id();
+        doc.insert_node(r2, 0, Node::text(t2, "After")).unwrap();
+
+        let text = write_string(&doc);
+        assert_eq!(text, "Before\n---\nAfter");
+    }
+
+    #[test]
+    fn write_mixed_structure() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+        let mut idx = 0;
+
+        // Heading
+        let p0 = doc.next_id();
+        let mut para0 = Node::new(p0, NodeType::Paragraph);
+        para0.attributes.set(
+            s1_model::AttributeKey::StyleId,
+            s1_model::AttributeValue::String("Heading1".into()),
+        );
+        doc.insert_node(body_id, idx, para0).unwrap();
+        let r0 = doc.next_id();
+        doc.insert_node(p0, 0, Node::new(r0, NodeType::Run)).unwrap();
+        let t0 = doc.next_id();
+        doc.insert_node(r0, 0, Node::text(t0, "Title")).unwrap();
+        idx += 1;
+
+        // Normal paragraph
+        let p1 = doc.next_id();
+        doc.insert_node(body_id, idx, Node::new(p1, NodeType::Paragraph)).unwrap();
+        let r1 = doc.next_id();
+        doc.insert_node(p1, 0, Node::new(r1, NodeType::Run)).unwrap();
+        let t1 = doc.next_id();
+        doc.insert_node(r1, 0, Node::text(t1, "Some text.")).unwrap();
+        idx += 1;
+
+        // Bullet item
+        let p2 = doc.next_id();
+        let mut para2 = Node::new(p2, NodeType::Paragraph);
+        para2.attributes.set(
+            s1_model::AttributeKey::ListInfo,
+            s1_model::AttributeValue::ListInfo(s1_model::ListInfo {
+                level: 0,
+                num_format: s1_model::ListFormat::Bullet,
+                num_id: 1,
+                start: Some(1),
+            }),
+        );
+        doc.insert_node(body_id, idx, para2).unwrap();
+        let r2 = doc.next_id();
+        doc.insert_node(p2, 0, Node::new(r2, NodeType::Run)).unwrap();
+        let t2 = doc.next_id();
+        doc.insert_node(r2, 0, Node::text(t2, "Item")).unwrap();
+
+        let text = write_string(&doc);
+        assert_eq!(text, "# Title\nSome text.\n- Item");
     }
 }

@@ -80,9 +80,64 @@ fn write_body_children(
                 write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
             }
             NodeType::Table => write_table(doc, child_id, xml, image_rels, hyperlink_rels),
+            NodeType::TableOfContents => {
+                write_toc(doc, child_id, xml, image_rels, hyperlink_rels);
+            }
             _ => {}
         }
     }
+}
+
+/// Write a `<w:sdt>` Table of Contents element.
+fn write_toc(
+    doc: &DocumentModel,
+    toc_id: NodeId,
+    xml: &mut String,
+    image_rels: &mut Vec<ImageRelEntry>,
+    hyperlink_rels: &mut Vec<HyperlinkRelEntry>,
+) {
+    let toc = match doc.node(toc_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    let max_level = toc
+        .attributes
+        .get(&AttributeKey::TocMaxLevel)
+        .and_then(|v| match v {
+            AttributeValue::Int(n) => Some(*n),
+            _ => None,
+        })
+        .unwrap_or(3);
+
+    let field_code = format!(r#"TOC \o "1-{}" \h \z \u"#, max_level);
+
+    // SDT wrapper
+    xml.push_str("<w:sdt>");
+    xml.push_str("<w:sdtPr>");
+    xml.push_str(r#"<w:docPartObj><w:docPartGallery w:val="Table of Contents"/><w:docPartUnique/></w:docPartObj>"#);
+    xml.push_str("</w:sdtPr>");
+    xml.push_str("<w:sdtContent>");
+
+    // Field begin paragraph
+    xml.push_str(r#"<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> "#);
+    xml.push_str(&escape_xml(&field_code));
+    xml.push_str(r#" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r></w:p>"#);
+
+    // Cached entry paragraphs (children of the TOC node)
+    for &child_id in &toc.children {
+        if let Some(child) = doc.node(child_id) {
+            if child.node_type == NodeType::Paragraph {
+                write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
+            }
+        }
+    }
+
+    // Field end paragraph
+    xml.push_str(r#"<w:p><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>"#);
+
+    xml.push_str("</w:sdtContent>");
+    xml.push_str("</w:sdt>");
 }
 
 /// Write a `<w:p>` element.
@@ -1744,5 +1799,62 @@ mod tests {
         assert!(xml.contains(r#"<w:commentRangeStart w:id="42"/>"#));
         assert!(xml.contains(r#"<w:commentRangeEnd w:id="42"/>"#));
         assert!(xml.contains(r#"<w:commentReference w:id="42"/>"#));
+    }
+
+    #[test]
+    fn write_toc_sdt() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        // Create TOC node with max level 2
+        let toc_id = doc.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes.set(
+            AttributeKey::TocMaxLevel,
+            AttributeValue::Int(2),
+        );
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        // Add a cached entry paragraph
+        let p_id = doc.next_id();
+        doc.insert_node(toc_id, 0, Node::new(p_id, NodeType::Paragraph))
+            .unwrap();
+        let r_id = doc.next_id();
+        doc.insert_node(p_id, 0, Node::new(r_id, NodeType::Run))
+            .unwrap();
+        let t_id = doc.next_id();
+        doc.insert_node(r_id, 0, Node::text(t_id, "Chapter One"))
+            .unwrap();
+
+        let (xml, _rels, _hyp_rels) = write_document_xml(&doc);
+
+        // Should produce SDT wrapper
+        assert!(xml.contains("<w:sdt>"));
+        assert!(xml.contains(r#"<w:docPartGallery w:val="Table of Contents"/>"#));
+        assert!(xml.contains("</w:sdtContent>"));
+        assert!(xml.contains("</w:sdt>"));
+
+        // Field code should reflect max level (quotes are XML-escaped)
+        assert!(xml.contains(r#"TOC \o &quot;1-2&quot; \h \z \u"#));
+
+        // Cached entry text should appear
+        assert!(xml.contains("Chapter One"));
+    }
+
+    #[test]
+    fn write_toc_empty_no_entries() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let toc_id = doc.next_id();
+        let toc = Node::new(toc_id, NodeType::TableOfContents);
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        let (xml, _rels, _hyp_rels) = write_document_xml(&doc);
+
+        // SDT should still be written even with no entries
+        assert!(xml.contains("<w:sdt>"));
+        assert!(xml.contains(r#"fldCharType="begin"#));
+        assert!(xml.contains(r#"fldCharType="end"#));
     }
 }
