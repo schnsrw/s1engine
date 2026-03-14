@@ -12,7 +12,8 @@ pub fn write_manifest_xml(image_paths: &[&str], has_metadata: bool) -> String {
 <manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
 <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.text"/>
 <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
-<manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>"#,
+<manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>"#,
     );
 
     if has_metadata {
@@ -46,6 +47,7 @@ mod tests {
         assert!(xml.contains("manifest:full-path=\"/\""));
         assert!(xml.contains("content.xml"));
         assert!(xml.contains("styles.xml"));
+        assert!(xml.contains("settings.xml"));
         assert!(xml.contains("meta.xml"));
     }
 
@@ -54,6 +56,7 @@ mod tests {
         let xml = write_manifest_xml(&[], false);
         assert!(xml.contains("content.xml"));
         assert!(xml.contains("styles.xml"));
+        assert!(xml.contains("settings.xml"));
         assert!(!xml.contains("meta.xml"));
     }
 

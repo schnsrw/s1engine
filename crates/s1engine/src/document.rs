@@ -588,6 +588,30 @@ impl Document {
         Ok(bytes)
     }
 
+    /// Export the document as PDF/A (archival-compliant PDF).
+    ///
+    /// PDF/A-1b includes an ICC color profile, XMP metadata, and output intent
+    /// for long-term archival compliance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if layout or PDF generation fails.
+    #[cfg(feature = "pdf")]
+    pub fn export_pdf_a(
+        &self,
+        font_db: &s1_text::FontDatabase,
+        conformance: s1_format_pdf::PdfAConformance,
+    ) -> Result<Vec<u8>, Error> {
+        let layout = self.layout(font_db)?;
+        let bytes = s1_format_pdf::write_pdf_a(
+            &layout,
+            font_db,
+            Some(self.model.metadata()),
+            conformance,
+        )?;
+        Ok(bytes)
+    }
+
     /// Export the document as a string (useful for TXT and Markdown formats).
     pub fn export_string(&self, format: Format) -> Result<String, Error> {
         match format {

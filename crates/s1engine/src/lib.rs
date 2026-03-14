@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(result.pages.len(), 1);
         assert_eq!(result.pages[0].blocks.len(), 1);
         match &result.pages[0].blocks[0].kind {
-            LayoutBlockKind::Paragraph { lines } => {
+            LayoutBlockKind::Paragraph { lines, .. } => {
                 assert!(!lines.is_empty(), "paragraph should have at least one line");
             }
             _ => panic!("expected a paragraph block"),

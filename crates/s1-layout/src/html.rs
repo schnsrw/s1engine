@@ -6,6 +6,7 @@
 //! rather than Canvas rendering.
 
 use crate::types::*;
+use s1_model::Color;
 
 /// Options for HTML rendering.
 #[derive(Debug, Clone)]
@@ -66,16 +67,8 @@ pub fn layout_to_html_with_options(doc: &LayoutDocument, options: &HtmlOptions) 
         html.push_str("<div class=\"s1-document\" style=\"display:flex;flex-direction:column;align-items:center;\">");
     }
 
-    // Emit bookmark anchors at the document level (before pages)
-    for bookmark in &doc.bookmarks {
-        html.push_str(&format!(
-            "<a id=\"{}\"></a>",
-            escape_attr(&bookmark.name)
-        ));
-    }
-
     for page in &doc.pages {
-        render_page(&mut html, page, options);
+        render_page(&mut html, page, options, &doc.bookmarks);
     }
 
     if options.wrap_in_container {
@@ -86,7 +79,7 @@ pub fn layout_to_html_with_options(doc: &LayoutDocument, options: &HtmlOptions) 
 }
 
 /// Render a single page.
-fn render_page(html: &mut String, page: &LayoutPage, options: &HtmlOptions) {
+fn render_page(html: &mut String, page: &LayoutPage, options: &HtmlOptions, bookmarks: &[LayoutBookmark]) {
     let shadow = if options.page_shadows {
         "box-shadow:0 2px 8px rgba(0,0,0,0.3);"
     } else {
@@ -100,6 +93,17 @@ fn render_page(html: &mut String, page: &LayoutPage, options: &HtmlOptions) {
         h = fmt_pt(page.height),
         bg = escape_attr(&options.page_background),
     ));
+
+    // Render bookmark anchors that belong to this page at their correct Y position
+    for bookmark in bookmarks {
+        if bookmark.page_index == page.index {
+            html.push_str(&format!(
+                "<a id=\"{}\" style=\"position:absolute;top:{}pt\"></a>",
+                escape_attr(&bookmark.name),
+                fmt_pt(bookmark.y_position),
+            ));
+        }
+    }
 
     // Render header if present
     if let Some(header) = &page.header {
@@ -122,8 +126,8 @@ fn render_page(html: &mut String, page: &LayoutPage, options: &HtmlOptions) {
 /// Render a layout block (paragraph, table, or image).
 fn render_block(html: &mut String, block: &LayoutBlock) {
     match &block.kind {
-        LayoutBlockKind::Paragraph { lines } => {
-            render_paragraph(html, block, lines);
+        LayoutBlockKind::Paragraph { lines, text_align, background_color, border } => {
+            render_paragraph(html, block, lines, text_align.as_deref(), background_color.as_ref(), border.as_deref());
         }
         LayoutBlockKind::Table { rows, .. } => {
             render_table(html, block, rows);
@@ -141,13 +145,24 @@ fn render_block(html: &mut String, block: &LayoutBlock) {
 }
 
 /// Render a paragraph block with lines and glyph runs.
-fn render_paragraph(html: &mut String, block: &LayoutBlock, lines: &[LayoutLine]) {
+fn render_paragraph(html: &mut String, block: &LayoutBlock, lines: &[LayoutLine], text_align: Option<&str>, background_color: Option<&Color>, border: Option<&str>) {
     let b = &block.bounds;
+    let mut extra_style = String::new();
+    if let Some(align) = text_align {
+        extra_style.push_str(&format!(";text-align:{align}"));
+    }
+    if let Some(bg) = background_color {
+        extra_style.push_str(&format!(";background-color:#{:02x}{:02x}{:02x}", bg.r, bg.g, bg.b));
+    }
+    if let Some(bdr) = border {
+        extra_style.push_str(&format!(";border:{bdr}"));
+    }
     html.push_str(&format!(
-        "<div class=\"s1-block\" style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt\">",
+        "<div class=\"s1-block\" style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt{extra}\">",
         x = fmt_pt(b.x),
         y = fmt_pt(b.y),
         w = fmt_pt(b.width),
+        extra = extra_style,
     ));
 
     for line in lines {
@@ -207,10 +222,56 @@ fn render_glyph_run(html: &mut String, run: &GlyphRun) {
         (false, false) => {}
     }
 
+    // Superscript / subscript
+    if run.superscript {
+        style.push_str(";vertical-align:super;font-size:0.65em");
+    } else if run.subscript {
+        style.push_str(";vertical-align:sub;font-size:0.65em");
+    }
+
+    // Highlight / background color
+    if let Some(hl) = &run.highlight_color {
+        style.push_str(&format!(
+            ";background-color:#{:02x}{:02x}{:02x}",
+            hl.r, hl.g, hl.b
+        ));
+    }
+
+    // Character spacing
+    if run.character_spacing.abs() > 0.01 {
+        style.push_str(&format!(";letter-spacing:{:.1}pt", run.character_spacing));
+    }
+
     let escaped_text = escape_html(&run.text);
+
+    // Determine track change wrapper tag
+    let (tc_open, tc_close) = match run.revision_type.as_deref() {
+        Some("insertion") => {
+            let title = run.revision_author.as_deref().unwrap_or("");
+            (
+                format!(
+                    "<ins style=\"text-decoration:underline;color:green\" title=\"{}\">",
+                    escape_attr(title)
+                ),
+                "</ins>".to_string(),
+            )
+        }
+        Some("deletion") => {
+            let title = run.revision_author.as_deref().unwrap_or("");
+            (
+                format!(
+                    "<del style=\"text-decoration:line-through;color:red\" title=\"{}\">",
+                    escape_attr(title)
+                ),
+                "</del>".to_string(),
+            )
+        }
+        _ => (String::new(), String::new()),
+    };
 
     // Wrap in hyperlink if URL is present
     if let Some(url) = &run.hyperlink_url {
+        html.push_str(&tc_open);
         html.push_str(&format!(
             "<a href=\"{}\" style=\"{}\"><span style=\"{}\">{}</span></a>",
             escape_attr(url),
@@ -218,11 +279,14 @@ fn render_glyph_run(html: &mut String, run: &GlyphRun) {
             style,
             escaped_text,
         ));
+        html.push_str(&tc_close);
     } else {
+        html.push_str(&tc_open);
         html.push_str(&format!(
             "<span style=\"{}\">{}</span>",
             style, escaped_text,
         ));
+        html.push_str(&tc_close);
     }
 }
 
@@ -243,11 +307,32 @@ fn render_table(html: &mut String, block: &LayoutBlock, rows: &[LayoutTableRow])
         ));
 
         for cell in &row.cells {
-            html.push_str(&format!(
-                "<div class=\"s1-table-cell\" style=\"position:absolute;left:{x}pt;top:0pt;width:{w}pt;height:{h}pt;border:1px solid #ccc;overflow:hidden\">",
+            let mut cell_style = format!(
+                "position:absolute;left:{x}pt;top:0pt;width:{w}pt;height:{h}pt;overflow:hidden",
                 x = fmt_pt(cell.bounds.x),
                 w = fmt_pt(cell.bounds.width),
                 h = fmt_pt(cell.bounds.height),
+            );
+
+            // Cell borders (use originals or fallback to 1px solid #ccc)
+            let bt = cell.border_top.as_deref().unwrap_or("1px solid #ccc");
+            let bb = cell.border_bottom.as_deref().unwrap_or("1px solid #ccc");
+            let bl = cell.border_left.as_deref().unwrap_or("1px solid #ccc");
+            let br = cell.border_right.as_deref().unwrap_or("1px solid #ccc");
+            cell_style.push_str(&format!(
+                ";border-top:{bt};border-bottom:{bb};border-left:{bl};border-right:{br}"
+            ));
+
+            // Cell background color
+            if let Some(bg) = &cell.background_color {
+                cell_style.push_str(&format!(
+                    ";background-color:#{:02x}{:02x}{:02x}",
+                    bg.r, bg.g, bg.b
+                ));
+            }
+
+            html.push_str(&format!(
+                "<div class=\"s1-table-cell\" style=\"{cell_style}\">",
             ));
 
             // Render cell content blocks (recursively)
@@ -385,6 +470,12 @@ mod tests {
             italic: false,
             underline: false,
             strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
         };
 
         let line = LayoutLine {
@@ -396,7 +487,7 @@ mod tests {
         let block = LayoutBlock {
             source_id: dummy_node_id(),
             bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
-            kind: LayoutBlockKind::Paragraph { lines: vec![line] },
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
         };
 
         let page = LayoutPage {
@@ -491,6 +582,12 @@ mod tests {
             italic: true,
             underline: false,
             strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
         };
 
         let line = LayoutLine {
@@ -502,7 +599,7 @@ mod tests {
         let block = LayoutBlock {
             source_id: dummy_node_id(),
             bounds: Rect::new(72.0, 72.0, 468.0, 16.8),
-            kind: LayoutBlockKind::Paragraph { lines: vec![line] },
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
         };
 
         let page = LayoutPage {
@@ -533,6 +630,9 @@ mod tests {
             source_id: dummy_node_id(),
             bounds: Rect::new(0.0, 0.0, 200.0, 14.4),
             kind: LayoutBlockKind::Paragraph {
+                text_align: None,
+                background_color: None,
+                border: None,
                 lines: vec![LayoutLine {
                     baseline_y: 10.0,
                     height: 14.4,
@@ -550,6 +650,12 @@ mod tests {
                         italic: false,
                         underline: false,
                         strikethrough: false,
+                        superscript: false,
+                        subscript: false,
+                        highlight_color: None,
+                        character_spacing: 0.0,
+                        revision_type: None,
+                        revision_author: None,
                     }],
                 }],
             },
@@ -558,6 +664,11 @@ mod tests {
         let cell = LayoutTableCell {
             bounds: Rect::new(0.0, 0.0, 200.0, 20.0),
             blocks: vec![cell_block],
+            background_color: None,
+            border_top: None,
+            border_bottom: None,
+            border_left: None,
+            border_right: None,
         };
 
         let row = LayoutTableRow {
@@ -646,6 +757,12 @@ mod tests {
             italic: false,
             underline: false,
             strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
         };
 
         let footer_run = GlyphRun {
@@ -662,6 +779,12 @@ mod tests {
             italic: false,
             underline: false,
             strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
         };
 
         let header_block = LayoutBlock {
@@ -673,6 +796,9 @@ mod tests {
                     height: 12.0,
                     runs: vec![header_run],
                 }],
+                text_align: None,
+                background_color: None,
+                border: None,
             },
         };
 
@@ -685,6 +811,9 @@ mod tests {
                     height: 12.0,
                     runs: vec![footer_run],
                 }],
+                text_align: None,
+                background_color: None,
+                border: None,
             },
         };
 
@@ -728,6 +857,12 @@ mod tests {
             italic: false,
             underline: true,
             strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
         };
 
         let line = LayoutLine {
@@ -739,7 +874,7 @@ mod tests {
         let block = LayoutBlock {
             source_id: dummy_node_id(),
             bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
-            kind: LayoutBlockKind::Paragraph { lines: vec![line] },
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
         };
 
         let page = LayoutPage {
@@ -805,5 +940,251 @@ mod tests {
         );
         // Must NOT contain raw angle brackets in text
         assert!(!html.contains("<World>"), "raw angle brackets in output: {html}");
+    }
+
+    #[test]
+    fn html_superscript() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 20.0,
+            hyperlink_url: None,
+            text: "2".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: true,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("vertical-align:super"), "missing superscript: {html}");
+    }
+
+    #[test]
+    fn html_subscript() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 20.0,
+            hyperlink_url: None,
+            text: "2".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: true,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("vertical-align:sub"), "missing subscript: {html}");
+    }
+
+    #[test]
+    fn html_highlight_color() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 50.0,
+            hyperlink_url: None,
+            text: "Highlighted".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: Some(Color::new(255, 255, 0)),
+            character_spacing: 0.0,
+            revision_type: None,
+            revision_author: None,
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("background-color:#ffff00"), "missing highlight: {html}");
+    }
+
+    #[test]
+    fn html_track_changes_insertion() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 50.0,
+            hyperlink_url: None,
+            text: "inserted text".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: Some("insertion".to_string()),
+            revision_author: Some("Author A".to_string()),
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("<ins"), "missing <ins> tag: {html}");
+        assert!(html.contains("color:green"), "missing green color: {html}");
+        assert!(html.contains("Author A"), "missing author: {html}");
+        assert!(html.contains("inserted text"), "missing text: {html}");
+    }
+
+    #[test]
+    fn html_track_changes_deletion() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 50.0,
+            hyperlink_url: None,
+            text: "deleted text".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 0.0,
+            revision_type: Some("deletion".to_string()),
+            revision_author: Some("Author B".to_string()),
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("<del"), "missing <del> tag: {html}");
+        assert!(html.contains("color:red"), "missing red color: {html}");
+        assert!(html.contains("Author B"), "missing author: {html}");
+        assert!(html.contains("deleted text"), "missing text: {html}");
+    }
+
+    #[test]
+    fn html_character_spacing() {
+        let run = GlyphRun {
+            source_id: dummy_node_id(),
+            font_id: dummy_font_id(),
+            font_size: 12.0,
+            color: Color::new(0, 0, 0),
+            x_offset: 0.0,
+            glyphs: Vec::new(),
+            width: 50.0,
+            hyperlink_url: None,
+            text: "Spaced".to_string(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            superscript: false,
+            subscript: false,
+            highlight_color: None,
+            character_spacing: 2.5,
+            revision_type: None,
+            revision_author: None,
+        };
+
+        let line = LayoutLine { baseline_y: 10.0, height: 14.4, runs: vec![run] };
+        let block = LayoutBlock {
+            source_id: dummy_node_id(),
+            bounds: Rect::new(72.0, 72.0, 468.0, 14.4),
+            kind: LayoutBlockKind::Paragraph { lines: vec![line], text_align: None, background_color: None, border: None },
+        };
+        let page = LayoutPage {
+            index: 0, width: 612.0, height: 792.0,
+            content_area: Rect::new(72.0, 72.0, 468.0, 648.0),
+            blocks: vec![block], header: None, footer: None,
+        };
+        let doc = LayoutDocument { pages: vec![page], bookmarks: Vec::new() };
+        let html = layout_to_html(&doc);
+        assert!(html.contains("letter-spacing:2.5pt"), "missing letter-spacing: {html}");
     }
 }

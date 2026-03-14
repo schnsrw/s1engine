@@ -13,4 +13,4 @@ pub mod error;
 pub mod writer;
 
 pub use error::PdfError;
-pub use writer::write_pdf;
+pub use writer::{write_pdf, write_pdf_a, PdfAConformance};

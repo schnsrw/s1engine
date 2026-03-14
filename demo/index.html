@@ -1,985 +1,1974 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>s1engine Demo</title>
-<style>
-  :root {
-    --bg: #0a0a0a;
-    --surface: #141414;
-    --border: #2a2a2a;
-    --text: #e0e0e0;
-    --text-muted: #888;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --success: #22c55e;
-    --error: #ef4444;
-  }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Folio — Document Editor</title>
+    <style>
+        *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+        html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8f9fa;color:#202124}
+        .app{display:flex;flex-direction:column;height:100vh}
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* ─── Menu Bar ─── */
+        .menubar{height:48px;background:#fff;border-bottom:1px solid #dadce0;display:flex;align-items:center;padding:0 16px;gap:8px;flex-shrink:0;z-index:100}
+        .logo{font-size:18px;font-weight:700;letter-spacing:-.02em;color:#202124;user-select:none}
+        .logo span{color:#1a73e8}
+        .doc-name{font-size:14px;color:#5f6368;padding:4px 8px;border:1px solid transparent;border-radius:4px;outline:none;min-width:120px;background:transparent}
+        .doc-name:hover,.doc-name:focus{border-color:#dadce0;background:#fff}
+        .sep{width:1px;height:24px;background:#dadce0;margin:0 4px}
+        .menu-btn{padding:6px 14px;font-size:13px;font-weight:500;border:none;background:transparent;border-radius:4px;cursor:pointer;color:#444;transition:background .15s}
+        .menu-btn:hover{background:#e8eaed}
+        .wasm-dot{width:8px;height:8px;border-radius:50%;background:#fbbc04;flex-shrink:0;transition:background .3s}
+        .wasm-dot.ready{background:#34a853}
+        .wasm-dot.error{background:#ea4335}
+        .wasm-label{font-size:11px;color:#80868b;font-family:monospace}
+        .spacer{flex:1}
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-  }
+        /* ─── Dropdown ─── */
+        .dropdown{position:relative;display:inline-block}
+        .dropdown-menu{display:none;position:absolute;top:100%;right:0;background:#fff;border:1px solid #dadce0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:160px;z-index:200;overflow:hidden;margin-top:4px}
+        .dropdown-menu.show{display:block}
+        .dropdown-item{display:block;width:100%;padding:8px 16px;font-size:13px;border:none;background:none;text-align:left;cursor:pointer;color:#202124}
+        .dropdown-item:hover{background:#f1f3f4}
 
-  header {
-    border-bottom: 1px solid var(--border);
-    padding: 1rem 2rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
+        /* ─── Toolbar ─── */
+        .toolbar{height:40px;background:#f1f3f4;border-bottom:1px solid #dadce0;display:none;align-items:center;padding:0 12px;gap:2px;flex-shrink:0;overflow-x:auto}
+        .toolbar.show{display:flex}
+        .tb-select{padding:2px 6px;font-size:12px;border:1px solid transparent;border-radius:4px;background:transparent;cursor:pointer;outline:none;color:#202124}
+        .tb-select:hover{border-color:#dadce0;background:#fff}
+        .tb-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;border-radius:4px;cursor:pointer;font-size:14px;color:#444;font-weight:600;transition:background .12s}
+        .tb-btn:hover{background:#e0e0e0}
+        .tb-btn.active{background:#d3e3fd;color:#1a73e8}
+        .tb-btn:disabled{opacity:.35;cursor:default}
+        .tb-btn:disabled:hover{background:transparent}
+        .tb-sep{width:1px;height:24px;background:#dadce0;margin:0 4px}
+        .tb-input{width:42px;padding:2px 4px;font-size:12px;border:1px solid transparent;border-radius:4px;text-align:center;outline:none;background:transparent}
+        .tb-input:hover,.tb-input:focus{border-color:#dadce0;background:#fff}
+        .color-btn{position:relative;cursor:pointer}
+        .color-btn input[type=color]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+        .color-swatch{width:16px;height:4px;border-radius:1px;margin-top:2px}
 
-  header h1 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
+        /* ─── Tab Bar ─── */
+        .tabbar{height:36px;background:#fff;border-bottom:1px solid #dadce0;display:none;align-items:stretch;padding:0 16px;flex-shrink:0}
+        .tabbar.show{display:flex}
+        .tab{padding:0 20px;font-size:13px;font-weight:500;color:#5f6368;border:none;background:none;cursor:pointer;position:relative;transition:color .15s}
+        .tab:hover{color:#202124}
+        .tab.active{color:#1a73e8}
+        .tab.active::after{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:#1a73e8;border-radius:3px 3px 0 0}
 
-  header h1 span { color: var(--accent); }
+        /* ─── Track Changes Bar ─── */
+        .tc-bar{display:none;height:36px;background:#fef7e0;border-bottom:1px solid #f0e6c2;align-items:center;padding:0 16px;gap:8px;font-size:13px;flex-shrink:0}
+        .tc-bar.show{display:flex}
+        .tc-btn{padding:4px 12px;border:1px solid #dadce0;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;font-weight:500}
+        .tc-btn.accept{color:#137333;border-color:#137333}
+        .tc-btn.accept:hover{background:#e6f4ea}
+        .tc-btn.reject{color:#c5221f;border-color:#c5221f}
+        .tc-btn.reject:hover{background:#fce8e6}
 
-  header .badge {
-    font-size: 0.7rem;
-    background: var(--accent);
-    color: white;
-    padding: 0.15rem 0.5rem;
-    border-radius: 9999px;
-    font-weight: 500;
-  }
+        /* ─── Welcome Screen ─── */
+        .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;text-align:center;color:#5f6368;gap:20px}
+        .welcome h2{font-size:22px;font-weight:600;color:#202124}
+        .welcome p{font-size:14px;max-width:400px}
+        .welcome .actions{display:flex;gap:12px;margin-top:8px}
+        .welcome .big-btn{padding:10px 24px;font-size:14px;font-weight:500;border-radius:6px;border:1px solid #dadce0;background:#fff;cursor:pointer;transition:all .15s}
+        .welcome .big-btn:hover{background:#f1f3f4;border-color:#c0c0c0}
+        .welcome .big-btn.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
+        .welcome .big-btn.primary:hover{background:#1557b0}
+        .drop-zone{border:2px dashed #dadce0;border-radius:12px;padding:40px 60px;margin-top:8px;transition:all .2s}
+        .drop-zone.drag-over{border-color:#1a73e8;background:rgba(26,115,232,.04)}
 
-  .status-bar {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    padding: 0.5rem 2rem;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    gap: 2rem;
-  }
+        /* ─── Editor Canvas ─── */
+        .canvas{flex:1;overflow-y:auto;background:#f8f9fa;display:none;position:relative}
+        .canvas.show{display:block}
+        .doc-page{
+            background:#fff;width:816px;min-height:1056px;
+            padding:96px 72px;margin:24px auto 48px;
+            box-shadow:0 1px 3px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.24);
+            font-family:'Times New Roman',Georgia,serif;font-size:11pt;line-height:1.6;color:#202124;
+            outline:none;word-wrap:break-word;position:relative;
+            display:flex;flex-direction:column;
+        }
+        .doc-page:empty::before{content:"Start typing...";color:#bbb;pointer-events:none}
+        .doc-page h1{font-size:24pt;font-weight:700;margin:0 0 12px;line-height:1.3}
+        .doc-page h2{font-size:18pt;font-weight:700;margin:24px 0 8px;line-height:1.3}
+        .doc-page h3{font-size:14pt;font-weight:700;margin:18px 0 6px;line-height:1.3}
+        .doc-page h4{font-size:12pt;font-weight:700;margin:14px 0 4px;line-height:1.4}
+        .doc-page h5{font-size:11pt;font-weight:700;margin:12px 0 4px}
+        .doc-page h6{font-size:10pt;font-weight:700;margin:10px 0 4px}
+        .doc-page p{margin:0 0 8px}
+        .doc-page table{border-collapse:collapse;width:100%;margin:12px 0}
+        .doc-page td,.doc-page th{border:1px solid #dadce0;padding:6px 10px;vertical-align:top}
+        .doc-page a{color:#1a73e8;text-decoration:underline}
+        .doc-page header{border-bottom:1px solid #dadce0;padding:8px 0;margin-bottom:16px;color:#5f6368;font-size:9pt}
+        .doc-page footer{border-top:1px solid #dadce0;padding:8px 0;margin-top:16px;color:#5f6368;font-size:9pt}
+        .doc-page sup{font-size:.7em;vertical-align:super}
+        .doc-page sub{font-size:.7em;vertical-align:sub}
 
-  .status-bar .dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-right: 0.4rem;
-    vertical-align: middle;
-  }
+        /* ─── Page break indicators in editor ─── */
+        .page-break-indicator{
+            content-editable:false;pointer-events:none;user-select:none;
+            position:relative;margin:0 -72px;padding:0;
+            height:120px;background:#f0f0f0;
+            border-top:1px solid #c0c0c0;border-bottom:1px solid #c0c0c0;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+        }
+        .page-break-indicator .page-footer-area{
+            width:100%;padding:4px 72px;font-size:9pt;color:#80868b;
+            display:flex;justify-content:center;align-items:center;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        }
+        .page-break-indicator .page-gap{height:24px;width:100%;background:#e0e0e0}
+        .page-break-indicator .page-header-area{
+            width:100%;padding:4px 72px;font-size:9pt;color:#80868b;
+            display:flex;justify-content:center;align-items:center;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        }
+        .page-number-badge{
+            position:absolute;right:16px;top:50%;transform:translateY(-50%);
+            background:#fff;border:1px solid #dadce0;border-radius:4px;
+            padding:2px 8px;font-size:11px;color:#5f6368;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        }
+        .editor-footer{
+            margin:0 -72px;padding:8px 72px;border-top:1px solid #dadce0;
+            color:#80868b;font-size:9pt;text-align:center;margin-top:auto;
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        }
 
-  .dot.green { background: var(--success); }
-  .dot.yellow { background: #eab308; }
+        /* ─── Images in editor ─── */
+        .doc-page img{max-width:100%;height:auto;margin:8px 0;cursor:pointer;transition:outline .1s}
+        .doc-page img.img-selected{outline:2px solid #1a73e8;outline-offset:2px}
+        .img-resize-wrap{position:relative;display:inline-block}
+        .img-resize-wrap .img-handle{position:absolute;width:10px;height:10px;background:#1a73e8;border:1px solid #fff;border-radius:2px;z-index:5}
+        .img-resize-wrap .img-handle.tl{top:-5px;left:-5px;cursor:nwse-resize}
+        .img-resize-wrap .img-handle.tr{top:-5px;right:-5px;cursor:nesw-resize}
+        .img-resize-wrap .img-handle.bl{bottom:-5px;left:-5px;cursor:nesw-resize}
+        .img-resize-wrap .img-handle.br{bottom:-5px;right:-5px;cursor:nwse-resize}
+        .img-resize-wrap .img-handle.ml{top:50%;left:-5px;transform:translateY(-50%);cursor:ew-resize}
+        .img-resize-wrap .img-handle.mr{top:50%;right:-5px;transform:translateY(-50%);cursor:ew-resize}
 
-  main {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    height: calc(100vh - 5.5rem);
-  }
+        /* ─── Track changes in editor ─── */
+        .doc-page ins{color:#137333;text-decoration:underline}
+        .doc-page del{color:#c5221f;text-decoration:line-through}
 
-  .sidebar {
-    border-right: 1px solid var(--border);
-    padding: 1.5rem;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-  }
+        /* ─── Pages View ─── */
+        .pages-view{flex:1;overflow-y:auto;background:#525659;padding:0;display:none}
+        .pages-view.show{display:block}
+        .pages-nav{display:flex;align-items:center;gap:12px;justify-content:center;padding:12px 16px;background:#3c4043;position:sticky;top:0;z-index:10}
+        .pages-nav button{padding:6px 16px;border:1px solid #5f6368;border-radius:4px;background:#3c4043;font-size:13px;cursor:pointer;color:#e8eaed}
+        .pages-nav button:hover{background:#5f6368}
+        .pages-nav button:disabled{opacity:.3;cursor:default}
+        .pages-nav span{font-size:13px;color:#e8eaed}
+        .pages-container{display:flex;flex-direction:column;align-items:center;gap:24px;padding:24px}
+        .pages-view .s1-document{display:flex;flex-direction:column;align-items:center;gap:24px;padding:24px 0}
+        .pages-view .s1-page{background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.4);margin:0 auto;overflow:hidden}
+        .pages-view .s1-page img{max-width:100%;height:auto}
+        .pages-view .s1-page table{border-collapse:collapse}
+        .pages-view .s1-page td,.pages-view .s1-page th{border:1px solid #dadce0;padding:4px 8px}
 
-  .sidebar h2 {
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-  }
+        /* ─── Text View ─── */
+        .text-view{flex:1;overflow-y:auto;background:#fff;padding:32px;display:none}
+        .text-view.show{display:block}
+        .text-view pre{font-family:'Courier New',Courier,monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;color:#333;max-width:700px;margin:0 auto}
 
-  .action-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
+        /* ─── Status Bar ─── */
+        .statusbar{height:28px;background:#f1f3f4;border-top:1px solid #dadce0;display:none;align-items:center;padding:0 16px;font-size:12px;color:#5f6368;flex-shrink:0;gap:12px}
+        .statusbar.show{display:flex}
 
-  button {
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 0.6rem 1rem;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: left;
-  }
+        /* ─── Modal ─── */
+        .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300;align-items:center;justify-content:center}
+        .modal-overlay.show{display:flex}
+        .modal{background:#fff;border-radius:12px;padding:24px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+        .modal h3{margin-bottom:16px;font-size:16px}
+        .modal label{display:block;margin-bottom:8px;font-size:13px;color:#5f6368}
+        .modal input[type=number]{width:60px;padding:4px 8px;border:1px solid #dadce0;border-radius:4px;font-size:13px}
+        .modal .modal-actions{display:flex;gap:8px;margin-top:20px;justify-content:flex-end}
+        .modal .modal-actions button{padding:8px 20px;border-radius:6px;border:1px solid #dadce0;background:#fff;cursor:pointer;font-size:13px}
+        .modal .modal-actions button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
 
-  button:hover {
-    border-color: var(--accent);
-    background: #1a1a2e;
-  }
+        /* ─── Find & Replace Bar ─── */
+        .find-bar{display:none;position:absolute;top:8px;right:24px;background:#fff;border:1px solid #dadce0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:12px 16px;z-index:50;min-width:380px}
+        .find-bar.show{display:block}
+        .find-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+        .find-row:last-child{margin-bottom:0}
+        .find-input{flex:1;padding:6px 10px;border:1px solid #dadce0;border-radius:4px;font-size:13px;outline:none}
+        .find-input:focus{border-color:#1a73e8}
+        .find-btn{padding:4px 10px;border:1px solid #dadce0;border-radius:4px;background:#fff;font-size:12px;cursor:pointer}
+        .find-btn:hover{background:#f1f3f4}
+        .find-btn.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
+        .find-close{width:24px;height:24px;border:none;background:none;font-size:16px;cursor:pointer;color:#5f6368;display:flex;align-items:center;justify-content:center;border-radius:4px}
+        .find-close:hover{background:#e8eaed}
+        .find-count{font-size:12px;color:#5f6368;min-width:60px;text-align:right}
+        .find-match{background:#fef08a}
 
-  button:active { transform: scale(0.98); }
+        /* ─── Table Context Menu ─── */
+        .context-menu{display:none;position:fixed;background:#fff;border:1px solid #dadce0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:180px;z-index:400;overflow:hidden;padding:4px 0}
+        .context-menu.show{display:block}
+        .context-item{display:block;width:100%;padding:8px 16px;font-size:13px;border:none;background:none;text-align:left;cursor:pointer;color:#202124}
+        .context-item:hover{background:#f1f3f4}
+        .context-sep{height:1px;background:#dadce0;margin:4px 0}
 
-  button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-    font-weight: 500;
-    text-align: center;
-  }
-
-  button.primary:hover { background: var(--accent-hover); }
-
-  .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .drop-zone:hover, .drop-zone.drag-over {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(59, 130, 246, 0.05);
-  }
-
-  .drop-zone input { display: none; }
-
-  .content-area {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-    padding: 0 1rem;
-  }
-
-  .tab {
-    padding: 0.6rem 1rem;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
-    background: none;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-    border-radius: 0;
-  }
-
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-  .tab-content {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .tab-panel {
-    display: none;
-    padding: 1.5rem;
-    overflow-y: auto;
-    flex: 1;
-  }
-  .tab-panel.active { display: block; }
-
-  #tab-pages { padding: 0; }
-  #tab-pages.active { display: flex; flex-direction: column; overflow: hidden; }
-
-  #text-output {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    font-size: 0.85rem;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    color: var(--text);
-    min-height: 200px;
-  }
-
-  #text-output:empty::before {
-    content: 'Document text will appear here...';
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  #rich-output h1, #rich-output h2, #rich-output h3,
-  #rich-output h4, #rich-output h5, #rich-output h6 {
-    margin: 0.8em 0 0.4em;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  }
-  #rich-output h1 { font-size: 1.8rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
-  #rich-output h2 { font-size: 1.4rem; }
-  #rich-output h3 { font-size: 1.15rem; }
-  #rich-output p { margin: 0.5em 0; }
-  #rich-output table { border-collapse: collapse; margin: 1em 0; }
-  #rich-output td, #rich-output th { border: 1px solid var(--border); padding: 6px 10px; }
-  #rich-output img { max-width: 100%; border-radius: 4px; margin: 8px 0; }
-  #rich-output a { color: #58a6ff; }
-
-  .meta-grid {
-    display: grid;
-    grid-template-columns: 120px 1fr;
-    gap: 0.5rem 1rem;
-    font-size: 0.85rem;
-  }
-
-  .meta-grid .label {
-    color: var(--text-muted);
-    font-weight: 500;
-  }
-
-  .meta-grid .value {
-    color: var(--text);
-  }
-
-  .export-buttons {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .log {
-    font-family: monospace;
-    font-size: 0.8rem;
-    line-height: 1.6;
-    color: var(--text-muted);
-  }
-
-  .log .entry { margin-bottom: 0.25rem; }
-  .log .time { color: #555; }
-  .log .ok { color: var(--success); }
-  .log .err { color: var(--error); }
-
-  .empty-state {
-    text-align: center;
-    padding: 4rem 2rem;
-    color: var(--text-muted);
-  }
-
-  .empty-state h3 {
-    font-size: 1rem;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-    color: var(--text);
-  }
-
-  .empty-state p { font-size: 0.85rem; }
-
-  select {
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 0.4rem 0.6rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-  }
-
-  /* Pages tab: paginated viewer */
-  .pages-container {
-    background: #2a2a2e;
-    padding: 20px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 20px;
-    min-height: 200px;
-    flex: 1;
-  }
-
-  .pages-container .s1-document {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 20px;
-  }
-
-  .pages-container .s1-page {
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-    color: #000;
-  }
-
-  .page-nav {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.5rem 1rem;
-    border-bottom: 1px solid var(--border);
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    background: var(--surface);
-  }
-
-  .page-nav button {
-    padding: 0.3rem 0.7rem;
-    font-size: 0.75rem;
-    border-radius: 4px;
-  }
-
-  .page-nav .page-indicator {
-    min-width: 100px;
-    text-align: center;
-  }
-
-  .page-nav .page-size-info {
-    margin-left: auto;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-  }
-
-  .pages-fallback {
-    text-align: center;
-    padding: 3rem 2rem;
-    color: var(--text-muted);
-  }
-
-  .pages-fallback h3 {
-    font-size: 1rem;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-    color: var(--text);
-  }
-
-  .pages-fallback p {
-    font-size: 0.85rem;
-    max-width: 400px;
-    margin: 0 auto;
-    line-height: 1.5;
-  }
-
-  @media (max-width: 768px) {
-    main { grid-template-columns: 1fr; }
-    .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
-  }
-</style>
+        /* ─── Insert Dropdown ─── */
+        .insert-dropdown{position:relative;display:inline-block}
+        .insert-menu{display:none;position:absolute;top:100%;left:0;background:#fff;border:1px solid #dadce0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:180px;z-index:200;overflow:hidden;margin-top:4px;padding:4px 0}
+        .insert-menu.show{display:block}
+    </style>
 </head>
 <body>
+<div class="app" id="app">
+    <!-- Menu Bar -->
+    <div class="menubar">
+        <div class="logo">Folio<span>.</span></div>
+        <div class="sep"></div>
+        <input class="doc-name" id="docName" value="Untitled Document" spellcheck="false">
+        <div class="spacer"></div>
+        <button class="menu-btn" id="btnNew" title="New Document">New</button>
+        <button class="menu-btn" id="btnOpen" title="Open File">Open</button>
+        <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc" hidden>
+        <input type="file" id="imageInput" accept="image/*" hidden>
+        <div class="dropdown">
+            <button class="menu-btn" id="btnExport">Export &#9662;</button>
+            <div class="dropdown-menu" id="exportMenu">
+                <button class="dropdown-item" data-fmt="docx">DOCX (Word)</button>
+                <button class="dropdown-item" data-fmt="odt">ODT (OpenDocument)</button>
+                <button class="dropdown-item" data-fmt="txt">Plain Text</button>
+                <button class="dropdown-item" data-fmt="md">Markdown</button>
+                <button class="dropdown-item" data-fmt="pdf">PDF</button>
+            </div>
+        </div>
+        <div class="sep"></div>
+        <div class="wasm-dot" id="wasmDot" title="WASM status"></div>
+        <span class="wasm-label" id="wasmLabel">loading...</span>
+    </div>
 
-<header>
-  <h1><span>s1</span>engine</h1>
-  <span class="badge">v1.0.0</span>
-</header>
+    <!-- Toolbar -->
+    <div class="toolbar" id="toolbar">
+        <!-- Block type -->
+        <select class="tb-select" id="blockType" title="Block type" style="min-width:100px">
+            <option value="0">Normal</option>
+            <option value="1">Heading 1</option>
+            <option value="2">Heading 2</option>
+            <option value="3">Heading 3</option>
+            <option value="4">Heading 4</option>
+        </select>
+        <div class="tb-sep"></div>
+        <!-- Font family -->
+        <select class="tb-select" id="fontFamily" title="Font" style="min-width:130px;font-size:12px">
+            <option value="">Default</option>
+            <option value="Arial" style="font-family:Arial">Arial</option>
+            <option value="Times New Roman" style="font-family:'Times New Roman'">Times New Roman</option>
+            <option value="Georgia" style="font-family:Georgia">Georgia</option>
+            <option value="Courier New" style="font-family:'Courier New'">Courier New</option>
+            <option value="Verdana" style="font-family:Verdana">Verdana</option>
+            <option value="Trebuchet MS" style="font-family:'Trebuchet MS'">Trebuchet MS</option>
+            <option value="Garamond" style="font-family:Garamond">Garamond</option>
+            <option value="Comic Sans MS" style="font-family:'Comic Sans MS'">Comic Sans MS</option>
+            <option value="Impact" style="font-family:Impact">Impact</option>
+            <option value="Palatino" style="font-family:Palatino">Palatino</option>
+        </select>
+        <!-- Font size -->
+        <input class="tb-input" id="fontSize" type="number" min="6" max="96" value="11" title="Font size (pt)">
+        <div class="tb-sep"></div>
+        <!-- Formatting -->
+        <button class="tb-btn" id="btnBold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button class="tb-btn" id="btnItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button class="tb-btn" id="btnUnderline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <button class="tb-btn" id="btnStrike" title="Strikethrough" style="text-decoration:line-through">S</button>
+        <button class="tb-btn" id="btnSuperscript" title="Superscript" style="font-size:11px">X<sup style="font-size:8px">2</sup></button>
+        <button class="tb-btn" id="btnSubscript" title="Subscript" style="font-size:11px">X<sub style="font-size:8px">2</sub></button>
+        <div class="tb-sep"></div>
+        <!-- Color -->
+        <div class="color-btn tb-btn" title="Text color">
+            A
+            <div class="color-swatch" id="colorSwatch" style="background:#202124"></div>
+            <input type="color" id="colorPicker" value="#202124">
+        </div>
+        <div class="color-btn tb-btn" title="Highlight color">
+            <span style="background:#fef08a;padding:0 3px;font-size:12px">A</span>
+            <input type="color" id="highlightPicker" value="#fef08a">
+        </div>
+        <div class="tb-sep"></div>
+        <!-- Alignment -->
+        <button class="tb-btn" id="btnAlignL" title="Align left">&#9776;</button>
+        <button class="tb-btn" id="btnAlignC" title="Align center">&#8801;</button>
+        <button class="tb-btn" id="btnAlignR" title="Align right">&#9776;</button>
+        <button class="tb-btn" id="btnAlignJ" title="Justify">&#9783;</button>
+        <div class="tb-sep"></div>
+        <!-- Lists -->
+        <button class="tb-btn" id="btnBulletList" title="Bullet list" style="font-size:16px">&#8226;</button>
+        <button class="tb-btn" id="btnNumberList" title="Numbered list" style="font-size:11px">1.</button>
+        <div class="tb-sep"></div>
+        <!-- Insert dropdown -->
+        <div class="insert-dropdown">
+            <button class="tb-btn" id="btnInsertMenu" title="Insert" style="font-size:12px;width:auto;padding:0 8px">Insert &#9662;</button>
+            <div class="insert-menu" id="insertMenu">
+                <button class="context-item" id="miTable">Table...</button>
+                <button class="context-item" id="miImage">Image...</button>
+                <button class="context-item" id="miLink">Hyperlink...</button>
+                <div class="context-sep"></div>
+                <button class="context-item" id="miHR">Horizontal Rule</button>
+                <button class="context-item" id="miPageBreak">Page Break</button>
+            </div>
+        </div>
+        <div class="tb-sep"></div>
+        <!-- Find -->
+        <button class="tb-btn" id="btnFind" title="Find & Replace (Ctrl+F)" style="font-size:12px">&#128269;</button>
+        <div class="tb-sep"></div>
+        <!-- Undo/Redo -->
+        <button class="tb-btn" id="btnUndo" title="Undo (Ctrl+Z)" disabled>&#8630;</button>
+        <button class="tb-btn" id="btnRedo" title="Redo (Ctrl+Shift+Z)" disabled>&#8631;</button>
+    </div>
 
-<div class="status-bar">
-  <span id="wasm-status"><span class="dot yellow"></span>Loading WASM...</span>
-  <span id="doc-status"><span class="dot yellow"></span>No document</span>
-  <span id="size-info"></span>
+    <!-- Tab Bar -->
+    <div class="tabbar" id="tabbar">
+        <button class="tab active" data-view="editor">Editor</button>
+        <button class="tab" data-view="pages">Pages</button>
+        <button class="tab" data-view="text">Text</button>
+    </div>
+
+    <!-- Track Changes Bar -->
+    <div class="tc-bar" id="tcBar">
+        <span id="tcCount">0 tracked changes</span>
+        <div class="spacer"></div>
+        <button class="tc-btn accept" id="btnAcceptAll">Accept All</button>
+        <button class="tc-btn reject" id="btnRejectAll">Reject All</button>
+    </div>
+
+    <!-- Welcome Screen -->
+    <div class="welcome" id="welcomeScreen">
+        <h2>Welcome to Folio</h2>
+        <p>A full-fidelity document editor powered by s1engine (Rust + WASM). All formatting operations go through the WASM document model. Supports DOCX, ODT, TXT, Markdown, and PDF export.</p>
+        <div class="actions">
+            <button class="big-btn primary" id="welcomeNew">New Document</button>
+            <button class="big-btn" id="welcomeOpen">Open File</button>
+        </div>
+        <div class="drop-zone" id="dropZone">
+            Drop a DOCX, ODT, TXT, or MD file here
+        </div>
+    </div>
+
+    <!-- Editor Canvas -->
+    <div class="canvas" id="editorCanvas">
+        <div class="doc-page" id="docPage" contenteditable="true" spellcheck="true"></div>
+        <!-- Find & Replace Bar -->
+        <div class="find-bar" id="findBar">
+            <div class="find-row">
+                <input class="find-input" id="findInput" placeholder="Find..." autocomplete="off">
+                <span class="find-count" id="findCount"></span>
+                <button class="find-btn" id="findPrev" title="Previous">&#9650;</button>
+                <button class="find-btn" id="findNext" title="Next">&#9660;</button>
+                <button class="find-close" id="findClose" title="Close">&times;</button>
+            </div>
+            <div class="find-row">
+                <input class="find-input" id="replaceInput" placeholder="Replace with...">
+                <button class="find-btn" id="replaceBtn">Replace</button>
+                <button class="find-btn primary" id="replaceAllBtn">Replace All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pages View -->
+    <div class="pages-view" id="pagesView"></div>
+
+    <!-- Text View -->
+    <div class="text-view" id="textView">
+        <pre id="textContent"></pre>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="statusbar" id="statusbar">
+        <span id="statusInfo">Ready</span>
+        <div class="spacer"></div>
+        <span id="statusFormat"></span>
+    </div>
 </div>
 
-<main>
-  <aside class="sidebar">
-    <div>
-      <h2>Open Document</h2>
-      <div class="drop-zone" id="drop-zone">
-        <p>Drop a file here or click to browse</p>
-        <p style="margin-top:0.3rem;font-size:0.75rem">DOCX, ODT, TXT, Markdown</p>
-        <input type="file" id="file-input" accept=".docx,.odt,.txt,.md,.markdown,.text">
-      </div>
-    </div>
-
-    <div>
-      <h2>Create Document</h2>
-      <div class="action-group">
-        <button onclick="createSampleReport()">Sample Report</button>
-        <button onclick="createSampleLetter()">Sample Letter</button>
-        <button onclick="createSampleTable()">Table Demo</button>
-      </div>
-    </div>
-
-    <div>
-      <h2>Export</h2>
-      <div class="export-buttons">
-        <button onclick="exportAs('docx')">DOCX</button>
-        <button onclick="exportAs('odt')">ODT</button>
-        <button onclick="exportAs('txt')">TXT</button>
-        <button onclick="exportAs('md')">MD</button>
-      </div>
-    </div>
-
-    <div>
-      <h2>Convert</h2>
-      <div style="display:flex;gap:0.5rem;align-items:center">
-        <select id="convert-format">
-          <option value="docx">DOCX</option>
-          <option value="odt">ODT</option>
-          <option value="txt">TXT</option>
-          <option value="md">Markdown</option>
-        </select>
-        <button onclick="convertAndReopen()" class="primary" style="flex:1">Convert & Reopen</button>
-      </div>
-    </div>
-
-    <div>
-      <h2>Self-Test</h2>
-      <div class="action-group">
-        <button onclick="runSelfTest()" class="primary">Run Format Tests</button>
-      </div>
-    </div>
-
-    <div>
-      <h2>Log</h2>
-      <div class="log" id="log"></div>
-    </div>
-  </aside>
-
-  <div class="content-area">
-    <div class="tabs">
-      <button class="tab active" data-tab="rich">Document</button>
-      <button class="tab" data-tab="pages">Pages</button>
-      <button class="tab" data-tab="text">Plain Text</button>
-      <button class="tab" data-tab="meta">Metadata</button>
-    </div>
-    <div class="tab-content">
-      <div id="tab-rich" class="tab-panel active">
-        <div id="empty-state" class="empty-state">
-          <h3>No document loaded</h3>
-          <p>Open a file or create a sample document to get started.</p>
+<!-- Insert Table Modal -->
+<div class="modal-overlay" id="tableModal">
+    <div class="modal">
+        <h3>Insert Table</h3>
+        <label>Rows: <input type="number" id="tableRows" value="3" min="1" max="50"></label>
+        <label>Columns: <input type="number" id="tableCols" value="3" min="1" max="20"></label>
+        <div class="modal-actions">
+            <button id="tableCancelBtn">Cancel</button>
+            <button class="primary" id="tableInsertBtn">Insert</button>
         </div>
-        <div id="rich-output" style="line-height:1.6;font-family:Georgia,serif"></div>
-      </div>
-      <div id="tab-pages" class="tab-panel">
-        <div class="page-nav" id="page-nav" style="display:none">
-          <button onclick="scrollToPage(-1)">&#8592; Previous</button>
-          <span class="page-indicator" id="page-indicator">Page 1 of 1</span>
-          <button onclick="scrollToPage(1)">Next &#8594;</button>
-          <span class="page-size-info" id="page-size-info"></span>
-        </div>
-        <div class="pages-container" id="pages-container">
-          <div class="pages-fallback" id="pages-fallback">
-            <h3>No document loaded</h3>
-            <p>Open a file or create a sample document, then switch to this tab to see the paginated layout.</p>
-          </div>
-        </div>
-      </div>
-      <div id="tab-text" class="tab-panel">
-        <div id="text-output"></div>
-      </div>
-      <div id="tab-meta" class="tab-panel">
-        <div class="meta-grid" id="meta-grid"></div>
-      </div>
     </div>
-  </div>
-</main>
+</div>
+
+<!-- Table Context Menu -->
+<div class="context-menu" id="tableContextMenu">
+    <button class="context-item" id="cmInsertRowAbove">Insert Row Above</button>
+    <button class="context-item" id="cmInsertRowBelow">Insert Row Below</button>
+    <button class="context-item" id="cmDeleteRow">Delete Row</button>
+    <div class="context-sep"></div>
+    <button class="context-item" id="cmInsertColLeft">Insert Column Left</button>
+    <button class="context-item" id="cmInsertColRight">Insert Column Right</button>
+    <button class="context-item" id="cmDeleteCol">Delete Column</button>
+    <div class="context-sep"></div>
+    <button class="context-item" id="cmCellBg">Cell Background Color...</button>
+</div>
 
 <script type="module">
-import init, {
-  WasmEngine,
-  WasmDocumentBuilder,
-  detect_format,
-} from './pkg/s1engine_wasm.js';
+import init, { WasmEngine, WasmDocument, WasmDocumentBuilder, detect_format } from './pkg/s1engine_wasm.js';
 
-let engine = null;
-let currentDoc = null;
-let pagesRendered = false;
+const $ = id => document.getElementById(id);
 
-function log(msg, type = '') {
-  const el = document.getElementById('log');
-  const time = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : '';
-  el.innerHTML = `<div class="entry"><span class="time">${time}</span> <span class="${cls}">${msg}</span></div>` + el.innerHTML;
-}
+// ─── State ────────────────────────────────────────────────────
+let engine = null, doc = null, currentView = 'editor', currentFormat = '';
+let pagesRendered = false, syncTimer = null, ignoreInput = false;
+let selectedImg = null, resizing = null;
+let contextTableId = null, contextCellId = null, contextRowIdx = 0, contextColIdx = 0;
+let findMatches = [], findIndex = -1;
+let lastSelInfo = null; // Saved selection for toolbar interactions
+const syncedTextCache = new Map(); // nodeId → last synced text (prevents duplicate ops)
 
-function updateDocStatus(name, paragraphs) {
-  document.getElementById('doc-status').innerHTML =
-    `<span class="dot green"></span>${name} (${paragraphs} paragraphs)`;
-}
-
-function clearDoc() {
-  document.getElementById('doc-status').innerHTML =
-    '<span class="dot yellow"></span>No document';
-  document.getElementById('text-output').textContent = '';
-  document.getElementById('rich-output').innerHTML = '';
-  document.getElementById('meta-grid').innerHTML = '';
-  document.getElementById('empty-state').style.display = 'block';
-  document.getElementById('size-info').textContent = '';
-  document.getElementById('pages-container').innerHTML =
-    '<div class="pages-fallback" id="pages-fallback"><h3>No document loaded</h3><p>Open a file or create a sample document, then switch to this tab to see the paginated layout.</p></div>';
-  document.getElementById('page-nav').style.display = 'none';
-  pagesRendered = false;
-  currentDoc = null;
-}
-
-function showDoc(doc, name) {
-  currentDoc = doc;
-  const text = doc.to_plain_text();
-  const count = doc.paragraph_count();
-  const title = doc.metadata_title();
-  const author = doc.metadata_author();
-
-  // Rich HTML view
-  try {
-    const html = doc.to_html();
-    document.getElementById('rich-output').innerHTML = html;
-  } catch (e) {
-    document.getElementById('rich-output').textContent = text;
-    console.error('to_html failed:', e);
-  }
-
-  // Plain text view
-  document.getElementById('text-output').textContent = text;
-  document.getElementById('empty-state').style.display = 'none';
-  updateDocStatus(name, count);
-
-  // Mark pages as needing re-render (lazy: rendered when Pages tab is selected)
-  pagesRendered = false;
-  // If the Pages tab is currently active, render immediately
-  const pagesTab = document.querySelector('.tab[data-tab="pages"]');
-  if (pagesTab && pagesTab.classList.contains('active')) {
-    renderPaginatedView();
-  }
-
-  const metaHtml = [
-    ['Title', title || '(none)'],
-    ['Author', author || '(none)'],
-    ['Paragraphs', count],
-    ['Characters', text.length],
-    ['Words', text.trim() ? text.trim().split(/\s+/).length : 0],
-  ].map(([l, v]) => `<span class="label">${l}</span><span class="value">${v}</span>`).join('');
-  document.getElementById('meta-grid').innerHTML = metaHtml;
-}
-
-async function initialize() {
-  try {
-    await init();
-    engine = new WasmEngine();
-    document.getElementById('wasm-status').innerHTML =
-      '<span class="dot green"></span>WASM ready';
-    log('s1engine WASM initialized', 'ok');
-  } catch (e) {
-    document.getElementById('wasm-status').innerHTML =
-      '<span class="dot" style="background:var(--error)"></span>WASM failed';
-    log('Failed to load WASM: ' + e.message, 'err');
-  }
-}
-
-function getFormatFromName(name) {
-  const ext = name.split('.').pop().toLowerCase();
-  const map = { docx: 'docx', odt: 'odt', txt: 'txt', text: 'txt', md: 'md', markdown: 'md', doc: 'doc' };
-  return map[ext] || null;
-}
-
-function handleFile(file) {
-  if (!engine) { log('Engine not ready', 'err'); return; }
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
+// ─── Boot ─────────────────────────────────────────────────────
+async function boot() {
     try {
-      const data = new Uint8Array(e.target.result);
-      const fmt = getFormatFromName(file.name);
-      document.getElementById('size-info').textContent =
-        `${(data.length / 1024).toFixed(1)} KB`;
-      const t0 = performance.now();
-      let doc;
-      if (fmt) {
-        doc = engine.open_as(data, fmt);
-      } else {
-        doc = engine.open(data);
-      }
-      const ms = (performance.now() - t0).toFixed(1);
-      showDoc(doc, file.name);
-      log(`Opened ${file.name} (${fmt || 'auto'}) in ${ms}ms`, 'ok');
-    } catch (err) {
-      console.error('s1engine open failed:', err);
-      log('Open failed: ' + (err.message || String(err)), 'err');
+        await init();
+        engine = new WasmEngine();
+        $('wasmDot').classList.add('ready');
+        $('wasmLabel').textContent = 'ready';
+    } catch (e) {
+        $('wasmDot').classList.add('error');
+        $('wasmLabel').textContent = 'error';
+        console.error('WASM init failed:', e);
     }
-  };
-  reader.readAsArrayBuffer(file);
+}
+boot();
+
+// ─── Document Operations ─────────────────────────────────────
+function newDocument() {
+    if (!engine) return;
+    doc = engine.create();
+    currentFormat = 'new';
+    doc.append_paragraph('');
+    doc.clear_history();
+    activateEditor();
+    renderDocument();
+    $('docName').value = 'Untitled Document';
+    $('docPage').focus();
 }
 
-// Drop zone
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
+function openFile(bytes, name) {
+    if (!engine) return;
+    try {
+        let fmt;
+        try { fmt = detect_format(bytes); } catch(_) { fmt = 'txt'; }
+        doc = engine.open(bytes);
+        currentFormat = fmt.toUpperCase();
+        activateEditor();
+        renderDocument();
+        if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
+        updateTrackChangesBar();
+    } catch (e) {
+        alert('Failed to open: ' + e.message);
+        console.error(e);
+    }
+}
 
-dropZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) handleFile(e.target.files[0]);
-});
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('drag-over');
-});
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+function exportDoc(format) {
+    if (!doc) return;
+    try {
+        syncAllText();
+        if (format === 'pdf') {
+            const url = doc.to_pdf_data_url();
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = ($('docName').value || 'document') + '.pdf';
+            a.click();
+            return;
+        }
+        const bytes = doc.export(format);
+        const blob = new Blob([bytes]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = ($('docName').value || 'document') + '.' + format;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Export failed: ' + e.message); }
+}
+
+// ─── UI Show/Hide ─────────────────────────────────────────────
+function activateEditor() {
+    $('welcomeScreen').style.display = 'none';
+    $('toolbar').classList.add('show');
+    $('tabbar').classList.add('show');
+    $('statusbar').classList.add('show');
+    switchView('editor');
+}
+
+function switchView(view) {
+    currentView = view;
+    $('editorCanvas').classList.toggle('show', view === 'editor');
+    $('pagesView').classList.toggle('show', view === 'pages');
+    $('textView').classList.toggle('show', view === 'text');
+    $('toolbar').classList.toggle('show', view === 'editor');
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+    if (view === 'pages') { syncAllText(); renderPages(); }
+    if (view === 'text') { syncAllText(); renderText(); }
+}
+
+// ─── Selection Mapping (DOM → WASM) ──────────────────────────
+function findParagraphEl(node) {
+    let n = node;
+    while (n && n !== $('docPage')) {
+        if (n.nodeType === 1 && n.dataset && n.dataset.nodeId) {
+            const tag = n.tagName.toLowerCase();
+            if (tag === 'p' || tag.match(/^h[1-6]$/)) return n;
+        }
+        n = n.parentNode;
+    }
+    return null;
+}
+
+function findNodeEl(node) {
+    let n = node;
+    while (n && n !== $('docPage')) {
+        if (n.nodeType === 1 && n.dataset && n.dataset.nodeId) return n;
+        n = n.parentNode;
+    }
+    return null;
+}
+
+function countCharsToPoint(container, targetNode, targetOffset) {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    let count = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node === targetNode) {
+            // targetOffset is in code units, convert to characters
+            const before = node.textContent.substring(0, targetOffset);
+            return count + Array.from(before).length;
+        }
+        count += Array.from(node.textContent).length;
+    }
+    // If targetNode is an element, count all text up to targetOffset-th child
+    if (targetNode.nodeType === 1) {
+        const kids = targetNode.childNodes;
+        const walker2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+        let c = 0;
+        let n2;
+        while ((n2 = walker2.nextNode())) {
+            let inRange = false;
+            for (let i = 0; i < targetOffset && i < kids.length; i++) {
+                if (kids[i].contains(n2) || kids[i] === n2) { inRange = true; break; }
+            }
+            if (inRange) c += Array.from(n2.textContent).length;
+        }
+        return c;
+    }
+    return count;
+}
+
+function getSelectionInfo() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return lastSelInfo; // Fallback to saved selection
+    const range = sel.getRangeAt(0);
+
+    const startEl = findParagraphEl(range.startContainer);
+    const endEl = findParagraphEl(range.endContainer);
+    if (!startEl) return lastSelInfo; // Selection outside editor — use saved
+
+    const startOff = countCharsToPoint(startEl, range.startContainer, range.startOffset);
+    const endOff = endEl ? countCharsToPoint(endEl, range.endContainer, range.endOffset) : startOff;
+
+    const info = {
+        startNodeId: startEl.dataset.nodeId,
+        startOffset: startOff,
+        endNodeId: endEl ? endEl.dataset.nodeId : startEl.dataset.nodeId,
+        endOffset: endOff,
+        collapsed: range.collapsed,
+        startEl,
+        endEl: endEl || startEl
+    };
+    lastSelInfo = info; // Save for toolbar fallback
+    return info;
+}
+
+// Save selection whenever it changes within the editor
+function saveSelection() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const startEl = findParagraphEl(range.startContainer);
+    if (!startEl) return; // Don't overwrite with non-editor selection
+    const endEl = findParagraphEl(range.endContainer);
+    const startOff = countCharsToPoint(startEl, range.startContainer, range.startOffset);
+    const endOff = endEl ? countCharsToPoint(endEl, range.endContainer, range.endOffset) : startOff;
+    lastSelInfo = {
+        startNodeId: startEl.dataset.nodeId,
+        startOffset: startOff,
+        endNodeId: endEl ? endEl.dataset.nodeId : startEl.dataset.nodeId,
+        endOffset: endOff,
+        collapsed: range.collapsed,
+        startEl,
+        endEl: endEl || startEl
+    };
+}
+
+function getActiveNodeId() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let n = sel.anchorNode;
+    while (n && n !== $('docPage')) {
+        if (n.nodeType === 1 && n.dataset && n.dataset.nodeId) return n.dataset.nodeId;
+        n = n.parentNode;
+    }
+    return null;
+}
+
+function getActiveElement() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let n = sel.anchorNode;
+    while (n && n !== $('docPage')) {
+        if (n.nodeType === 1 && n.dataset && n.dataset.nodeId) return n;
+        n = n.parentNode;
+    }
+    return null;
+}
+
+function getCursorOffset(el) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return 0;
+    const range = sel.getRangeAt(0);
+    return countCharsToPoint(el, range.startContainer, range.startOffset);
+}
+
+function setCursorAtOffset(el, charOffset) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    let counted = 0, node;
+    while ((node = walker.nextNode())) {
+        const chars = Array.from(node.textContent);
+        if (counted + chars.length >= charOffset) {
+            const range = document.createRange();
+            let strOff = 0;
+            for (let i = 0; i < charOffset - counted && i < chars.length; i++) strOff += chars[i].length;
+            range.setStart(node, strOff);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+            return;
+        }
+        counted += chars.length;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(el); range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+}
+
+function setSelectionRange(startEl, startOff, endEl, endOff) {
+    const setPoint = (el, off) => {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        let counted = 0, node;
+        while ((node = walker.nextNode())) {
+            const chars = Array.from(node.textContent);
+            if (counted + chars.length >= off) {
+                let strOff = 0;
+                for (let i = 0; i < off - counted && i < chars.length; i++) strOff += chars[i].length;
+                return { node, offset: strOff };
+            }
+            counted += chars.length;
+        }
+        return null;
+    };
+    const start = setPoint(startEl, startOff);
+    const end = setPoint(endEl, endOff);
+    if (!start) return;
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    if (end) range.setEnd(end.node, end.offset);
+    else range.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+}
+
+function setCursorAtStart(el) {
+    const r = document.createRange(); r.selectNodeContents(el); r.collapse(true);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+
+function isCursorAtStart(el) { return getCursorOffset(el) === 0; }
+function isCursorAtEnd(el) { return getCursorOffset(el) >= Array.from(el.textContent || '').length; }
+
+// ─── Text Sync ────────────────────────────────────────────────
+function syncParagraphText(el) {
+    if (!doc || ignoreInput || !el) return;
+    const nodeId = el.dataset?.nodeId;
+    if (!nodeId) return;
+    const newText = el.textContent || '';
+    // Only sync if text actually changed — prevents creating duplicate undo entries
+    if (syncedTextCache.get(nodeId) === newText) return;
+    try {
+        doc.set_paragraph_text(nodeId, newText);
+        syncedTextCache.set(nodeId, newText);
+    } catch (e) { console.error('sync error:', e); }
+}
+
+function syncAllText() {
+    if (!doc) return;
+    const page = $('docPage');
+    page.querySelectorAll('[data-node-id]').forEach(el => {
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'p' || tag.match(/^h[1-6]$/)) {
+            syncParagraphText(el);
+        }
+    });
+}
+
+function debouncedSync(el) {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+        syncParagraphText(el);
+        pagesRendered = false;
+        updatePageBreaks();
+        updateUndoRedo();
+    }, 200);
+}
+
+// ─── Rendering ────────────────────────────────────────────────
+function renderDocument() {
+    if (!doc) return;
+    try {
+        const html = doc.to_html();
+        ignoreInput = true;
+        $('docPage').innerHTML = html;
+        fixEmptyBlocks();
+        setupImages();
+        cacheAllText(); // Snapshot text so sync won't create duplicate ops
+        ignoreInput = false;
+        pagesRendered = false;
+        updatePageBreaks(); // Also updates status bar with page count
+        updateUndoRedo();
+    } catch (e) { console.error('Render error:', e); }
+}
+
+function cacheAllText() {
+    syncedTextCache.clear();
+    $('docPage').querySelectorAll('[data-node-id]').forEach(el => {
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'p' || tag.match(/^h[1-6]$/)) {
+            syncedTextCache.set(el.dataset.nodeId, el.textContent || '');
+        }
+    });
+}
+
+function fixEmptyBlocks() {
+    $('docPage').querySelectorAll('p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty').forEach(el => {
+        el.innerHTML = '<br>';
+    });
+}
+
+// ─── Visual Page Breaks ──────────────────────────────────────
+function updatePageBreaks() {
+    const page = $('docPage');
+    // Remove existing page break indicators and footers
+    page.querySelectorAll('.page-break-indicator, .editor-footer').forEach(el => el.remove());
+    // Remove rendered header/footer from editable area
+    page.querySelectorAll('header, footer').forEach(el => el.remove());
+
+    if (!doc) return;
+
+    // Use the WASM layout engine to get accurate page breaks
+    let pageMap = null;
+    try {
+        pageMap = JSON.parse(doc.get_page_map_json());
+    } catch(_) {}
+
+    if (!pageMap || !pageMap.pages || pageMap.pages.length <= 0) {
+        // Fallback: single page
+        updateStatusBar(1);
+        return;
+    }
+
+    const pages = pageMap.pages;
+    const numPages = pages.length;
+
+    // For each page boundary, find the last node on page N and insert
+    // a visual break indicator before the first node on page N+1
+    for (let i = 0; i < numPages - 1; i++) {
+        const curPage = pages[i];
+        const nextPage = pages[i + 1];
+        if (!nextPage.nodeIds || nextPage.nodeIds.length === 0) continue;
+
+        // Find the first DOM element of the next page
+        const firstNextId = nextPage.nodeIds[0];
+        const firstNextEl = page.querySelector(`[data-node-id="${firstNextId}"]`);
+        if (!firstNextEl) continue;
+
+        // Create page break indicator
+        const breakDiv = document.createElement('div');
+        breakDiv.className = 'page-break-indicator';
+        breakDiv.contentEditable = 'false';
+
+        const footerArea = document.createElement('div');
+        footerArea.className = 'page-footer-area';
+        footerArea.textContent = curPage.footer || ('Page ' + curPage.pageNum);
+
+        const gap = document.createElement('div');
+        gap.className = 'page-gap';
+
+        const headerArea = document.createElement('div');
+        headerArea.className = 'page-header-area';
+        headerArea.textContent = nextPage.header || '';
+
+        const badge = document.createElement('span');
+        badge.className = 'page-number-badge';
+        badge.textContent = 'Page ' + curPage.pageNum + ' / ' + numPages;
+
+        breakDiv.appendChild(footerArea);
+        breakDiv.appendChild(gap);
+        breakDiv.appendChild(headerArea);
+        breakDiv.appendChild(badge);
+
+        firstNextEl.before(breakDiv);
+    }
+
+    // Add footer at bottom of last page
+    const lastPage = pages[numPages - 1];
+    const editorFooter = document.createElement('div');
+    editorFooter.className = 'editor-footer';
+    editorFooter.contentEditable = 'false';
+    editorFooter.textContent = lastPage.footer || ('Page ' + numPages + ' of ' + numPages);
+    page.appendChild(editorFooter);
+
+    updateStatusBar(numPages);
+}
+
+function updateStatusBar(numPages) {
+    try {
+        const pCount = doc.paragraph_count();
+        const text = doc.to_plain_text();
+        const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+        $('statusInfo').textContent = words + ' words \u00b7 ' + pCount + ' paragraphs \u00b7 ' + numPages + ' page' + (numPages !== 1 ? 's' : '');
+        $('statusFormat').textContent = currentFormat;
+    } catch(_) {}
+}
+
+function renderNodeById(nodeIdStr) {
+    if (!doc) return null;
+    try {
+        const html = doc.render_node_html(nodeIdStr);
+        const el = $('docPage').querySelector(`[data-node-id="${nodeIdStr}"]`);
+        if (el) {
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            const newEl = temp.firstElementChild;
+            if (newEl) {
+                if (!newEl.innerHTML.trim()) newEl.innerHTML = '<br>';
+                el.replaceWith(newEl);
+                setupImages(newEl);
+                // Update text cache so sync won't create duplicate ops
+                syncedTextCache.set(nodeIdStr, newEl.textContent || '');
+                return newEl;
+            }
+        }
+    } catch (e) { console.error('renderNode error:', e); }
+    return null;
+}
+
+function renderPages() {
+    if (!doc) return;
+    try {
+        const html = doc.to_paginated_html();
+        const container = $('pagesView');
+        const pageCount = (html.match(/class="s1-page"/g) || []).length;
+        container.innerHTML =
+            '<div class="pages-nav">' +
+                '<button id="prevPage">&#9664; Prev</button>' +
+                '<span id="pageIndicator">' + pageCount + ' page' + (pageCount !== 1 ? 's' : '') + '</span>' +
+                '<button id="nextPage">Next &#9654;</button>' +
+            '</div>' +
+            '<div class="pages-container">' + html + '</div>';
+        pagesRendered = true;
+        container.querySelectorAll('.s1-page').forEach(page => {
+            page.style.margin = '0 auto';
+            page.querySelectorAll('img').forEach(img => { img.style.maxWidth = '100%'; img.style.height = 'auto'; });
+        });
+        const pages = container.querySelectorAll('.s1-page');
+        let cur = 0;
+        const prev = container.querySelector('#prevPage');
+        const next = container.querySelector('#nextPage');
+        if (prev) prev.onclick = () => { if (cur > 0) { cur--; pages[cur].scrollIntoView({behavior:'smooth',block:'start'}); } };
+        if (next) next.onclick = () => { if (cur < pages.length-1) { cur++; pages[cur].scrollIntoView({behavior:'smooth',block:'start'}); } };
+    } catch (e) {
+        $('pagesView').innerHTML = '<div style="padding:32px;color:#ff6b6b;font-size:14px">Layout error: ' + e.message + '</div>';
+        console.error('Pages view error:', e);
+    }
+}
+
+function renderText() {
+    if (!doc) return;
+    try { $('textContent').textContent = doc.to_plain_text(); }
+    catch (e) { $('textContent').textContent = 'Error: ' + e.message; }
+}
+
+// ─── Image Selection & Resize ────────────────────────────────
+function setupImages(scope) {
+    const root = scope || $('docPage');
+    const imgs = root.tagName === 'IMG' ? [root] : root.querySelectorAll('img');
+    imgs.forEach(img => {
+        img.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectImage(img);
+        });
+        img.setAttribute('draggable', 'false');
+    });
+}
+
+function selectImage(img) {
+    deselectImage();
+    selectedImg = img;
+    img.classList.add('img-selected');
+    const wrap = document.createElement('span');
+    wrap.className = 'img-resize-wrap';
+    wrap.contentEditable = 'false';
+    img.parentNode.insertBefore(wrap, img);
+    wrap.appendChild(img);
+    ['tl','tr','bl','br','ml','mr'].forEach(pos => {
+        const h = document.createElement('span');
+        h.className = 'img-handle ' + pos;
+        h.dataset.handle = pos;
+        h.addEventListener('mousedown', startResize);
+        wrap.appendChild(h);
+    });
+}
+
+function deselectImage() {
+    if (!selectedImg) return;
+    // If resized, sync to WASM
+    const nodeEl = findNodeEl(selectedImg);
+    if (nodeEl && doc && selectedImg.style.width) {
+        const imgNodeId = selectedImg.closest('[data-node-id]')?.dataset.nodeId;
+        if (imgNodeId) {
+            const wPt = selectedImg.offsetWidth * 0.75; // px to pt (approximate)
+            const hPt = selectedImg.offsetHeight * 0.75;
+            try { doc.resize_image(imgNodeId, wPt, hPt); } catch(_) {}
+        }
+    }
+    selectedImg.classList.remove('img-selected');
+    const wrap = selectedImg.closest('.img-resize-wrap');
+    if (wrap) {
+        wrap.parentNode.insertBefore(selectedImg, wrap);
+        wrap.remove();
+    }
+    selectedImg = null;
+}
+
+function startResize(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.target.dataset.handle;
+    const img = e.target.closest('.img-resize-wrap').querySelector('img');
+    if (!img) return;
+    resizing = {
+        img, handle,
+        startX: e.clientX, startY: e.clientY,
+        startW: img.offsetWidth, startH: img.offsetHeight,
+        ratio: img.offsetHeight / img.offsetWidth
+    };
+    document.addEventListener('mousemove', doResize);
+    document.addEventListener('mouseup', stopResize);
+}
+
+function doResize(e) {
+    if (!resizing) return;
+    const dx = e.clientX - resizing.startX;
+    let newW = resizing.startW;
+    const h = resizing.handle;
+    if (h === 'br' || h === 'tr' || h === 'mr') newW = Math.max(50, resizing.startW + dx);
+    if (h === 'bl' || h === 'tl' || h === 'ml') newW = Math.max(50, resizing.startW - dx);
+    let newH = (h === 'ml' || h === 'mr') ? resizing.startH : newW * resizing.ratio;
+    resizing.img.style.width = newW + 'px';
+    resizing.img.style.height = newH + 'px';
+}
+
+function stopResize() {
+    resizing = null;
+    document.removeEventListener('mousemove', doResize);
+    document.removeEventListener('mouseup', stopResize);
+}
+
+document.addEventListener('mousedown', e => {
+    if (selectedImg && !e.target.closest('.img-resize-wrap') && e.target !== selectedImg) {
+        deselectImage();
+    }
 });
 
-// Tabs
+// ─── Status Updates ──────────────────────────────────────────
+function updateStatus() {
+    updatePageBreaks(); // Also updates status bar
+}
+
+function updateUndoRedo() {
+    if (!doc) return;
+    try {
+        $('btnUndo').disabled = !doc.can_undo();
+        $('btnRedo').disabled = !doc.can_redo();
+    } catch (_) {}
+}
+
+function updateTrackChangesBar() {
+    if (!doc) return;
+    try {
+        const count = doc.tracked_changes_count();
+        if (count > 0) {
+            $('tcBar').classList.add('show');
+            $('tcCount').textContent = count + ' tracked change' + (count !== 1 ? 's' : '');
+        } else {
+            $('tcBar').classList.remove('show');
+        }
+    } catch (_) { $('tcBar').classList.remove('show'); }
+}
+
+// ─── Toolbar State (WASM-based) ──────────────────────────────
+function updateToolbarState() {
+    if (!doc || currentView !== 'editor') return;
+    // Save selection first (selectionchange fires before toolbar interactions)
+    saveSelection();
+    const info = lastSelInfo;
+    if (!info) return;
+
+    try {
+        let fmt;
+        if (info.collapsed) {
+            // Collapsed cursor — get paragraph formatting
+            fmt = JSON.parse(doc.get_formatting_json(info.startNodeId));
+        } else {
+            // Non-collapsed selection — get selection formatting
+            try {
+                fmt = JSON.parse(doc.get_selection_formatting_json(
+                    info.startNodeId, info.startOffset, info.endNodeId, info.endOffset
+                ));
+            } catch(_) {
+                // Fallback to paragraph formatting
+                fmt = JSON.parse(doc.get_formatting_json(info.startNodeId));
+            }
+        }
+
+        // Toggle buttons — handle both boolean and "mixed" values
+        $('btnBold').classList.toggle('active', fmt.bold === true || fmt.bold === 'true');
+        $('btnItalic').classList.toggle('active', fmt.italic === true || fmt.italic === 'true');
+        $('btnUnderline').classList.toggle('active', fmt.underline === true || fmt.underline === 'true');
+        $('btnStrike').classList.toggle('active', fmt.strikethrough === true || fmt.strikethrough === 'true');
+        $('btnSuperscript').classList.toggle('active', fmt.superscript === true || fmt.superscript === 'true');
+        $('btnSubscript').classList.toggle('active', fmt.subscript === true || fmt.subscript === 'true');
+
+        // Font/size/color — read from selection formatting when available
+        if (fmt.fontSize && fmt.fontSize !== 'mixed') {
+            $('fontSize').value = Math.round(parseFloat(fmt.fontSize));
+        }
+        if (fmt.fontFamily && fmt.fontFamily !== 'mixed') {
+            $('fontFamily').value = fmt.fontFamily;
+        } else if (!fmt.fontFamily) {
+            $('fontFamily').value = '';
+        }
+        if (fmt.color && fmt.color !== 'mixed') {
+            $('colorSwatch').style.background = '#' + fmt.color;
+        }
+
+        // Block-level properties (always from paragraph)
+        const paraFmt = info.collapsed ? fmt : JSON.parse(doc.get_formatting_json(info.startNodeId));
+        $('blockType').value = paraFmt.headingLevel || 0;
+        $('btnAlignL').classList.toggle('active', !paraFmt.alignment || paraFmt.alignment === 'left');
+        $('btnAlignC').classList.toggle('active', paraFmt.alignment === 'center');
+        $('btnAlignR').classList.toggle('active', paraFmt.alignment === 'right');
+        $('btnAlignJ').classList.toggle('active', paraFmt.alignment === 'justify');
+    } catch (_) {}
+}
+
+// ─── Formatting (WASM-based — NO document.execCommand) ───────
+
+function applyFormat(key, value) {
+    if (!doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+
+    // Re-find elements (may have been replaced by prior render)
+    const startEl = $('docPage').querySelector(`[data-node-id="${info.startNodeId}"]`) || info.startEl;
+    const endEl = info.endNodeId !== info.startNodeId
+        ? ($('docPage').querySelector(`[data-node-id="${info.endNodeId}"]`) || info.endEl)
+        : startEl;
+
+    // Sync text before formatting
+    syncParagraphText(startEl);
+    if (endEl !== startEl) syncParagraphText(endEl);
+
+    try {
+        if (info.collapsed) {
+            // Collapsed: format entire paragraph
+            const textLen = Array.from(startEl.textContent || '').length;
+            if (textLen > 0) {
+                doc.format_selection(info.startNodeId, 0, info.startNodeId, textLen, key, value);
+            }
+        } else {
+            // Selection: format the selected range
+            doc.format_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset, key, value);
+        }
+
+        // Re-render affected paragraphs
+        const newStartEl = renderNodeById(info.startNodeId);
+        let newEndEl = null;
+        if (info.endNodeId !== info.startNodeId) {
+            newEndEl = renderNodeById(info.endNodeId);
+        }
+
+        // Restore cursor/selection — focus docPage first
+        $('docPage').focus();
+        if (info.collapsed && newStartEl) {
+            setCursorAtOffset(newStartEl, info.startOffset);
+        } else if (newStartEl) {
+            setSelectionRange(
+                newStartEl, info.startOffset,
+                newEndEl || newStartEl, info.endOffset
+            );
+        }
+
+        // Update saved selection with new elements
+        if (newStartEl) {
+            lastSelInfo = {
+                ...info,
+                startEl: newStartEl,
+                endEl: newEndEl || newStartEl
+            };
+        }
+
+        pagesRendered = false;
+        updatePageBreaks();
+        updateToolbarState();
+        updateUndoRedo();
+    } catch (e) { console.error('format error:', e); }
+}
+
+function toggleFormat(key) {
+    if (!doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+
+    // Re-find elements
+    const startEl = $('docPage').querySelector(`[data-node-id="${info.startNodeId}"]`) || info.startEl;
+    const endEl = info.endNodeId !== info.startNodeId
+        ? ($('docPage').querySelector(`[data-node-id="${info.endNodeId}"]`) || info.endEl)
+        : startEl;
+
+    // Check current state
+    let isActive = false;
+    try {
+        if (info.collapsed) {
+            const fmt = JSON.parse(doc.get_formatting_json(info.startNodeId));
+            isActive = !!fmt[key];
+        } else {
+            syncParagraphText(startEl);
+            if (endEl !== startEl) syncParagraphText(endEl);
+            try {
+                const fmt = JSON.parse(doc.get_selection_formatting_json(
+                    info.startNodeId, info.startOffset, info.endNodeId, info.endOffset
+                ));
+                isActive = fmt[key] === true;
+            } catch(_) {
+                const fmt = JSON.parse(doc.get_formatting_json(info.startNodeId));
+                isActive = !!fmt[key];
+            }
+        }
+    } catch(_) {}
+
+    const newValue = isActive ? 'false' : 'true';
+
+    // Superscript/subscript are mutually exclusive
+    if (key === 'superscript' && newValue === 'true') {
+        applyFormat('subscript', 'false');
+    } else if (key === 'subscript' && newValue === 'true') {
+        applyFormat('superscript', 'false');
+    }
+
+    applyFormat(key, newValue);
+}
+
+function setAlignment(align) {
+    if (!doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+    syncParagraphText(info.startEl);
+    const offset = info.startOffset;
+    try {
+        doc.set_alignment(info.startNodeId, align);
+        const updated = renderNodeById(info.startNodeId);
+        if (updated) setCursorAtOffset(updated, offset);
+        pagesRendered = false;
+        updateToolbarState();
+        updateUndoRedo();
+    } catch (e) { console.error('align error:', e); }
+}
+
+function doUndo() {
+    if (!doc) return;
+    // Sync any pending text changes (cache prevents duplicate ops)
+    clearTimeout(syncTimer);
+    syncAllText();
+    try {
+        doc.undo();
+        renderDocument();
+        updateToolbarState();
+    } catch (e) { console.error('undo error:', e); }
+}
+
+function doRedo() {
+    if (!doc) return;
+    try {
+        doc.redo();
+        renderDocument();
+        updateToolbarState();
+    } catch (e) { console.error('redo error:', e); }
+}
+
+// ─── Table Operations (WASM-based) ───────────────────────────
+function insertTable(rows, cols) {
+    if (!doc) return;
+    const nodeId = getActiveNodeId();
+    if (!nodeId) return;
+    syncAllText();
+    try {
+        const tableId = doc.insert_table(nodeId, rows, cols);
+        renderDocument();
+        pagesRendered = false;
+        updateUndoRedo();
+    } catch (e) { console.error('insert table error:', e); }
+}
+
+// Table context menu
+$('docPage').addEventListener('contextmenu', e => {
+    const td = e.target.closest('td[data-node-id], th[data-node-id]');
+    const table = e.target.closest('table[data-node-id]');
+    if (!td || !table || !doc) return;
+
+    e.preventDefault();
+    contextTableId = table.dataset.nodeId;
+    contextCellId = td.dataset.nodeId;
+
+    // Find row and column index
+    const row = td.closest('tr');
+    const rows = Array.from(table.querySelectorAll('tr'));
+    contextRowIdx = rows.indexOf(row);
+    const cells = Array.from(row.querySelectorAll('td, th'));
+    contextColIdx = cells.indexOf(td);
+
+    const menu = $('tableContextMenu');
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.classList.add('show');
+});
+
+document.addEventListener('click', () => $('tableContextMenu').classList.remove('show'));
+
+$('cmInsertRowAbove').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.insert_table_row(contextTableId, contextRowIdx);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmInsertRowBelow').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.insert_table_row(contextTableId, contextRowIdx + 1);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmDeleteRow').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.delete_table_row(contextTableId, contextRowIdx);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmInsertColLeft').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.insert_table_column(contextTableId, contextColIdx);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmInsertColRight').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.insert_table_column(contextTableId, contextColIdx + 1);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmDeleteCol').addEventListener('click', () => {
+    if (!doc || !contextTableId) return;
+    try {
+        doc.delete_table_column(contextTableId, contextColIdx);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+$('cmCellBg').addEventListener('click', () => {
+    if (!doc || !contextCellId) return;
+    const color = prompt('Enter hex color (e.g. FF0000 for red):');
+    if (!color) return;
+    try {
+        doc.set_cell_background(contextCellId, color.replace('#', ''));
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error(e); }
+});
+
+// ─── Image Operations (WASM-based) ───────────────────────────
+function insertImage(file) {
+    if (!doc) return;
+    const nodeId = getActiveNodeId();
+    if (!nodeId) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        const bytes = new Uint8Array(reader.result);
+        const type = file.type || 'image/png';
+        try {
+            // Default size: 300x200 pt (roughly 400x267 px)
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                let w = img.naturalWidth * 0.75; // px to pt
+                let h = img.naturalHeight * 0.75;
+                // Cap at page width
+                if (w > 468) { const scale = 468 / w; w = 468; h *= scale; }
+                try {
+                    doc.insert_image(nodeId, bytes, type, w, h);
+                    renderDocument();
+                    updateUndoRedo();
+                } catch (e) { console.error('insert image error:', e); }
+                URL.revokeObjectURL(url);
+            };
+            img.onerror = () => {
+                // Fallback size
+                try {
+                    doc.insert_image(nodeId, bytes, type, 300, 200);
+                    renderDocument();
+                    updateUndoRedo();
+                } catch (e) { console.error('insert image error:', e); }
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+        } catch (e) { console.error('insert image error:', e); }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// Delete selected image via keyboard
+function deleteSelectedImage() {
+    if (!selectedImg || !doc) return;
+    const imgEl = selectedImg.closest('[data-node-id]');
+    if (imgEl) {
+        try {
+            doc.delete_image(imgEl.dataset.nodeId);
+            deselectImage();
+            renderDocument();
+            updateUndoRedo();
+        } catch (e) { console.error('delete image error:', e); }
+    }
+}
+
+// ─── List Operations (WASM-based) ────────────────────────────
+function toggleList(format) {
+    if (!doc) return;
+    const nodeId = getActiveNodeId();
+    if (!nodeId) return;
+    const el = getActiveElement();
+    if (el) syncParagraphText(el);
+    const offset = el ? getCursorOffset(el) : 0;
+    try {
+        // Check if already that format — toggle off
+        const fmt = JSON.parse(doc.get_formatting_json(nodeId));
+        const current = fmt.listFormat || 'none';
+        const newFormat = current === format ? 'none' : format;
+        doc.set_list_format(nodeId, newFormat, 0);
+        const updated = renderNodeById(nodeId);
+        if (updated) setCursorAtOffset(updated, offset);
+        pagesRendered = false;
+        updateUndoRedo();
+    } catch (e) { console.error('list error:', e); }
+}
+
+// ─── Hyperlink Operations (WASM-based) ───────────────────────
+function insertHyperlink() {
+    if (!doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+
+    const url = prompt('Enter URL:');
+    if (!url) return;
+
+    syncParagraphText(info.startEl);
+
+    try {
+        // Get run IDs in the paragraph and find the run containing the cursor
+        const runIds = JSON.parse(doc.get_run_ids(info.startNodeId));
+        if (runIds.length > 0) {
+            // Apply to first run (or the run at cursor)
+            const runId = runIds[0];
+            doc.insert_hyperlink(runId, url, '');
+            renderNodeById(info.startNodeId);
+            pagesRendered = false;
+            updateUndoRedo();
+        }
+    } catch (e) { console.error('hyperlink error:', e); }
+}
+
+// ─── Structural Operations (WASM-based) ──────────────────────
+function insertHR() {
+    if (!doc) return;
+    const nodeId = getActiveNodeId();
+    if (!nodeId) return;
+    syncAllText();
+    try {
+        doc.insert_horizontal_rule(nodeId);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error('HR error:', e); }
+}
+
+function insertPageBreak() {
+    if (!doc) return;
+    const nodeId = getActiveNodeId();
+    if (!nodeId) return;
+    syncAllText();
+    try {
+        doc.insert_page_break(nodeId);
+        renderDocument();
+        updateUndoRedo();
+    } catch (e) { console.error('page break error:', e); }
+}
+
+// ─── Find & Replace (WASM-based) ─────────────────────────────
+function openFindBar() {
+    $('findBar').classList.add('show');
+    $('findInput').focus();
+    $('findInput').select();
+}
+
+function closeFindBar() {
+    $('findBar').classList.remove('show');
+    clearHighlights();
+    findMatches = [];
+    findIndex = -1;
+    $('findCount').textContent = '';
+}
+
+function doFind() {
+    if (!doc) return;
+    const query = $('findInput').value;
+    if (!query) { clearHighlights(); $('findCount').textContent = ''; return; }
+
+    syncAllText();
+    try {
+        const result = doc.find_text(query, false); // case-insensitive
+        findMatches = JSON.parse(result);
+        findIndex = findMatches.length > 0 ? 0 : -1;
+        $('findCount').textContent = findMatches.length + ' match' + (findMatches.length !== 1 ? 'es' : '');
+        highlightMatches();
+        if (findIndex >= 0) scrollToMatch(findIndex);
+    } catch (e) {
+        $('findCount').textContent = 'Error';
+        console.error('find error:', e);
+    }
+}
+
+function findNextMatch() {
+    if (findMatches.length === 0) return;
+    findIndex = (findIndex + 1) % findMatches.length;
+    highlightMatches();
+    scrollToMatch(findIndex);
+}
+
+function findPrevMatch() {
+    if (findMatches.length === 0) return;
+    findIndex = (findIndex - 1 + findMatches.length) % findMatches.length;
+    highlightMatches();
+    scrollToMatch(findIndex);
+}
+
+function highlightMatches() {
+    clearHighlights();
+    // Re-render to clear any stale highlights, then add marks
+    // For simplicity, we use DOM-based highlighting via mark elements
+    const page = $('docPage');
+    const query = $('findInput').value.toLowerCase();
+    if (!query) return;
+
+    // Walk text nodes and highlight matches
+    const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+
+    for (const tn of textNodes) {
+        const text = tn.textContent;
+        const lower = text.toLowerCase();
+        let idx = lower.indexOf(query);
+        if (idx === -1) continue;
+
+        const frag = document.createDocumentFragment();
+        let lastIdx = 0;
+        while (idx !== -1) {
+            if (idx > lastIdx) frag.appendChild(document.createTextNode(text.substring(lastIdx, idx)));
+            const mark = document.createElement('mark');
+            mark.className = 'find-match';
+            mark.textContent = text.substring(idx, idx + query.length);
+            frag.appendChild(mark);
+            lastIdx = idx + query.length;
+            idx = lower.indexOf(query, lastIdx);
+        }
+        if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.substring(lastIdx)));
+        tn.parentNode.replaceChild(frag, tn);
+    }
+}
+
+function clearHighlights() {
+    $('docPage').querySelectorAll('mark.find-match').forEach(mark => {
+        const text = document.createTextNode(mark.textContent);
+        mark.parentNode.replaceChild(text, mark);
+    });
+    // Normalize text nodes
+    $('docPage').normalize();
+}
+
+function scrollToMatch(idx) {
+    const marks = $('docPage').querySelectorAll('mark.find-match');
+    marks.forEach((m, i) => {
+        m.style.background = i === idx ? '#f97316' : '#fef08a';
+    });
+    if (marks[idx]) {
+        marks[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    $('findCount').textContent = (idx + 1) + '/' + findMatches.length;
+}
+
+function doReplace() {
+    if (!doc || findIndex < 0 || findIndex >= findMatches.length) return;
+    const replacement = $('replaceInput').value;
+    const match = findMatches[findIndex];
+    syncAllText();
+    try {
+        doc.replace_text(match.nodeId, match.offset, match.length, replacement);
+        renderDocument();
+        // Re-run find
+        doFind();
+        updateUndoRedo();
+    } catch (e) { console.error('replace error:', e); }
+}
+
+function doReplaceAll() {
+    if (!doc) return;
+    const query = $('findInput').value;
+    const replacement = $('replaceInput').value;
+    if (!query) return;
+    syncAllText();
+    try {
+        const count = doc.replace_all(query, replacement, false);
+        renderDocument();
+        findMatches = [];
+        findIndex = -1;
+        $('findCount').textContent = count + ' replaced';
+        updateUndoRedo();
+    } catch (e) { console.error('replace all error:', e); }
+}
+
+// ─── Event Handlers ──────────────────────────────────────────
+
+// File Open
+$('btnOpen').addEventListener('click', () => $('fileInput').click());
+$('welcomeOpen').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => openFile(new Uint8Array(r.result), f.name);
+    r.readAsArrayBuffer(f);
+    e.target.value = '';
+});
+
+// Image file input
+$('imageInput').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    insertImage(f);
+    e.target.value = '';
+});
+
+// Drag and Drop
+[$('dropZone'), $('editorCanvas')].forEach(t => {
+    if (!t) return;
+    t.addEventListener('dragover', e => { e.preventDefault(); t.classList.add('drag-over'); });
+    t.addEventListener('dragleave', () => t.classList.remove('drag-over'));
+    t.addEventListener('drop', e => {
+        e.preventDefault(); t.classList.remove('drag-over');
+        const f = e.dataTransfer.files[0]; if (!f) return;
+        if (f.type.startsWith('image/') && doc) {
+            insertImage(f);
+        } else {
+            const r = new FileReader();
+            r.onload = () => openFile(new Uint8Array(r.result), f.name);
+            r.readAsArrayBuffer(f);
+        }
+    });
+});
+
+// New / Export
+$('btnNew').addEventListener('click', newDocument);
+$('welcomeNew').addEventListener('click', newDocument);
+$('btnExport').addEventListener('click', e => {
+    e.stopPropagation();
+    $('exportMenu').classList.toggle('show');
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('.dropdown')) $('exportMenu').classList.remove('show');
+    if (!e.target.closest('.insert-dropdown')) $('insertMenu').classList.remove('show');
+});
+$('exportMenu').querySelectorAll('.dropdown-item').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        exportDoc(btn.dataset.fmt);
+        $('exportMenu').classList.remove('show');
+    });
+});
+
+// Tab Bar
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-    // Lazy render paginated view when Pages tab is activated
-    if (tab.dataset.tab === 'pages' && !pagesRendered && currentDoc) {
-      renderPaginatedView();
-    }
-  });
+    tab.addEventListener('click', () => switchView(tab.dataset.view));
 });
 
-// --- Paginated View ---
+// ─── Editor Input ────────────────────────────────────────────
+const page = $('docPage');
 
-function renderPaginatedView() {
-  const container = document.getElementById('pages-container');
-  const nav = document.getElementById('page-nav');
-  const sizeInfo = document.getElementById('page-size-info');
+page.addEventListener('input', () => {
+    if (ignoreInput) return;
+    const el = getActiveElement();
+    if (el) debouncedSync(el);
+});
 
-  if (!currentDoc) {
-    container.innerHTML = '<div class="pages-fallback" id="pages-fallback"><h3>No document loaded</h3><p>Open a file or create a sample document, then switch to this tab to see the paginated layout.</p></div>';
-    nav.style.display = 'none';
-    return;
-  }
+page.addEventListener('keydown', e => {
+    if (!doc) return;
 
-  // Check if to_paginated_html is available
-  if (typeof currentDoc.to_paginated_html !== 'function') {
-    container.innerHTML = '<div class="pages-fallback"><h3>Paginated view not available</h3><p>The WASM bindings need to be rebuilt to include the layout engine. Run <code style="color:var(--accent)">make wasm</code> or <code style="color:var(--accent)">make wasm-release</code> to update.</p></div>';
-    nav.style.display = 'none';
-    return;
-  }
+    // Delete selected image
+    if (selectedImg && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        deleteSelectedImage();
+        return;
+    }
 
-  try {
-    const t0 = performance.now();
-    const html = currentDoc.to_paginated_html();
-    const ms = (performance.now() - t0).toFixed(1);
+    const sel = window.getSelection();
+    const info = getSelectionInfo();
 
-    container.innerHTML = html;
-    pagesRendered = true;
+    // ─── Delete/Backspace with selection (including Ctrl+A → Delete) ───
+    if ((e.key === 'Delete' || e.key === 'Backspace') && info && !info.collapsed) {
+        e.preventDefault();
+        clearTimeout(syncTimer);
+        syncAllText();
+        try {
+            // Delete selected text across paragraphs via WASM
+            doc.delete_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset);
+            renderDocument();
+            // Place cursor at start of deletion
+            let el = page.querySelector(`[data-node-id="${info.startNodeId}"]`);
+            if (el) {
+                setCursorAtOffset(el, info.startOffset);
+            } else {
+                // All paragraphs deleted — create a fresh empty one
+                const first = page.querySelector('[data-node-id]');
+                if (first) {
+                    setCursorAtStart(first);
+                } else {
+                    doc.append_paragraph('');
+                    renderDocument();
+                    const newFirst = page.querySelector('[data-node-id]');
+                    if (newFirst) setCursorAtStart(newFirst);
+                }
+            }
+            updateUndoRedo();
+        } catch (err) {
+            console.error('delete selection error:', err);
+        }
+        return;
+    }
 
-    // Count pages and set up navigation
-    const pages = container.querySelectorAll('.s1-page');
-    const pageCount = pages.length;
+    const el = getActiveElement();
 
-    if (pageCount > 0) {
-      nav.style.display = 'flex';
-      updatePageIndicator();
+    // Enter — split paragraph via WASM
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!el) return;
+        const nodeId = el.dataset.nodeId;
+        const offset = getCursorOffset(el);
+        clearTimeout(syncTimer); syncParagraphText(el);
+        try {
+            const newId = doc.split_paragraph(nodeId, offset);
+            renderNodeById(nodeId);
+            const newHtml = doc.render_node_html(newId);
+            const tmp = document.createElement('div'); tmp.innerHTML = newHtml;
+            const newEl = tmp.firstElementChild;
+            if (newEl) {
+                if (!newEl.innerHTML.trim()) newEl.innerHTML = '<br>';
+                const orig = page.querySelector(`[data-node-id="${nodeId}"]`);
+                if (orig) orig.after(newEl);
+                setupImages(newEl);
+                setCursorAtStart(newEl);
+            }
+            pagesRendered = false; updatePageBreaks(); updateUndoRedo();
+        } catch (err) { console.error('split error:', err); }
+        return;
+    }
 
-      // Get page dimensions from the first page
-      const firstPage = pages[0];
-      const widthMatch = firstPage.style.width;
-      const heightMatch = firstPage.style.height;
-      sizeInfo.textContent = pageCount + ' page' + (pageCount !== 1 ? 's' : '') + ' \u00B7 ' + widthMatch + ' \u00D7 ' + heightMatch + ' \u00B7 ' + ms + 'ms';
+    // Backspace at start — merge with previous via WASM
+    if (e.key === 'Backspace' && el && isCursorAtStart(el)) {
+        // Skip over page-break-indicator elements to find real previous sibling
+        let prev = el.previousElementSibling;
+        while (prev && (prev.classList.contains('page-break-indicator') || prev.classList.contains('editor-footer'))) {
+            prev = prev.previousElementSibling;
+        }
+        if (prev && prev.dataset && prev.dataset.nodeId) {
+            e.preventDefault();
+            clearTimeout(syncTimer); syncParagraphText(el); syncParagraphText(prev);
+            const cursorPos = Array.from(prev.textContent || '').length;
+            try {
+                doc.merge_paragraphs(prev.dataset.nodeId, el.dataset.nodeId);
+                const updated = renderNodeById(prev.dataset.nodeId);
+                el.remove();
+                if (updated) setCursorAtOffset(updated, cursorPos);
+                pagesRendered = false; updatePageBreaks(); updateUndoRedo();
+            } catch (err) { console.error('merge error:', err); }
+        }
+        return;
+    }
+
+    // Delete at end — merge with next via WASM
+    if (e.key === 'Delete' && el && isCursorAtEnd(el)) {
+        // Skip over page-break-indicator elements to find real next sibling
+        let next = el.nextElementSibling;
+        while (next && (next.classList.contains('page-break-indicator') || next.classList.contains('editor-footer'))) {
+            next = next.nextElementSibling;
+        }
+        if (next && next.dataset && next.dataset.nodeId) {
+            e.preventDefault();
+            clearTimeout(syncTimer); syncParagraphText(el); syncParagraphText(next);
+            const cursorPos = Array.from(el.textContent || '').length;
+            try {
+                doc.merge_paragraphs(el.dataset.nodeId, next.dataset.nodeId);
+                const updated = renderNodeById(el.dataset.nodeId);
+                next.remove();
+                if (updated) setCursorAtOffset(updated, cursorPos);
+                pagesRendered = false; updatePageBreaks(); updateUndoRedo();
+            } catch (err) { console.error('merge error:', err); }
+        }
+        return;
+    }
+
+    // Keyboard shortcuts
+    if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+            case 'b': e.preventDefault(); toggleFormat('bold'); break;
+            case 'i': e.preventDefault(); toggleFormat('italic'); break;
+            case 'u': e.preventDefault(); toggleFormat('underline'); break;
+            case 'z': e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); break;
+            case 'y': e.preventDefault(); doRedo(); break;
+            case 'f': e.preventDefault(); openFindBar(); break;
+            case 'h': e.preventDefault(); openFindBar(); break;
+            case 'a': /* Let browser handle Ctrl+A select all */ break;
+        }
+    }
+});
+
+// Paste — plain text via WASM
+page.addEventListener('paste', e => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+
+    const info = getSelectionInfo();
+    if (!info) return;
+
+    syncParagraphText(info.startEl);
+
+    // If text contains newlines, use paste_plain_text for multi-paragraph insert
+    if (text.includes('\n')) {
+        try {
+            doc.paste_plain_text(info.startNodeId, info.startOffset, text);
+            renderDocument();
+            updateUndoRedo();
+        } catch (e2) {
+            // Fallback: insert as single-line
+            const cleaned = text.replace(/\n/g, ' ');
+            document.execCommand('insertText', false, cleaned);
+        }
     } else {
-      nav.style.display = 'none';
+        // Single line: let browser handle it via insertText
+        // We use the native insertText (non-execCommand) behavior of contentEditable
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+            const range = sel.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            const el = getActiveElement();
+            if (el) debouncedSync(el);
+        }
     }
-
-    log('Paginated layout: ' + pageCount + ' page' + (pageCount !== 1 ? 's' : '') + ' in ' + ms + 'ms', 'ok');
-  } catch (err) {
-    console.error('to_paginated_html failed:', err);
-    container.innerHTML = '<div class="pages-fallback"><h3>Layout failed</h3><p>' + escapeHtml(err.message || String(err)) + '</p></div>';
-    nav.style.display = 'none';
-    log('Paginated layout failed: ' + (err.message || String(err)), 'err');
-  }
-}
-
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function updatePageIndicator() {
-  const container = document.getElementById('pages-container');
-  const pages = container.querySelectorAll('.s1-page');
-  const pageCount = pages.length;
-  if (pageCount === 0) return;
-
-  // Find the page closest to the current scroll position
-  const scrollTop = container.scrollTop;
-  const containerRect = container.getBoundingClientRect();
-  let currentPage = 1;
-
-  for (let i = 0; i < pages.length; i++) {
-    const rect = pages[i].getBoundingClientRect();
-    const relTop = rect.top - containerRect.top;
-    if (relTop <= containerRect.height / 3) {
-      currentPage = i + 1;
-    }
-  }
-
-  document.getElementById('page-indicator').textContent =
-    'Page ' + currentPage + ' of ' + pageCount;
-}
-
-// Update page indicator on scroll
-document.getElementById('pages-container').addEventListener('scroll', function() {
-  if (pagesRendered) {
-    updatePageIndicator();
-  }
 });
 
-window.scrollToPage = function(direction) {
-  const container = document.getElementById('pages-container');
-  const pages = container.querySelectorAll('.s1-page');
-  const pageCount = pages.length;
-  if (pageCount === 0) return;
+// Selection change — save selection and update toolbar state
+document.addEventListener('selectionchange', () => {
+    saveSelection();
+    updateToolbarState();
+});
 
-  // Find current visible page
-  const containerRect = container.getBoundingClientRect();
-  let currentIdx = 0;
+// ─── Toolbar Click Handlers (ALL WASM-based) ─────────────────
 
-  for (let i = 0; i < pages.length; i++) {
-    const rect = pages[i].getBoundingClientRect();
-    const relTop = rect.top - containerRect.top;
-    if (relTop <= containerRect.height / 3) {
-      currentIdx = i;
-    }
-  }
+// Prevent toolbar buttons from stealing focus/selection from the editor
+$('toolbar').addEventListener('mousedown', e => {
+    // Allow select/input elements to receive focus normally
+    const tag = e.target.tagName.toLowerCase();
+    if (tag === 'select' || tag === 'input') return;
+    e.preventDefault(); // Keeps contentEditable selection alive
+});
 
-  // Navigate
-  let targetIdx = currentIdx + direction;
-  if (targetIdx < 0) targetIdx = 0;
-  if (targetIdx >= pageCount) targetIdx = pageCount - 1;
+// Text formatting — via WASM format_selection
+$('btnBold').addEventListener('click', () => toggleFormat('bold'));
+$('btnItalic').addEventListener('click', () => toggleFormat('italic'));
+$('btnUnderline').addEventListener('click', () => toggleFormat('underline'));
+$('btnStrike').addEventListener('click', () => toggleFormat('strikethrough'));
+$('btnSuperscript').addEventListener('click', () => toggleFormat('superscript'));
+$('btnSubscript').addEventListener('click', () => toggleFormat('subscript'));
 
-  pages[targetIdx].scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
+// Alignment — via WASM
+$('btnAlignL').addEventListener('click', () => setAlignment('left'));
+$('btnAlignC').addEventListener('click', () => setAlignment('center'));
+$('btnAlignR').addEventListener('click', () => setAlignment('right'));
+$('btnAlignJ').addEventListener('click', () => setAlignment('justify'));
 
-// Expose to global scope for onclick handlers
-window.createSampleReport = function() {
-  if (!engine) return;
-  try {
-    const t0 = performance.now();
-    const doc = new WasmDocumentBuilder()
-      .title('Q4 Engineering Report')
-      .author('Engineering Team')
-      .heading(1, 'Q4 Engineering Report')
-      .text('This report summarizes the engineering achievements during Q4 2026.')
-      .heading(2, 'Key Metrics')
-      .text('Total commits: 1,247. Pull requests merged: 342. Test coverage: 94.2%.')
-      .text('Zero critical incidents. Average deploy time reduced by 38%.')
-      .heading(2, 'Notable Achievements')
-      .text('1. Migrated authentication service to the new identity platform.')
-      .text('2. Shipped real-time collaboration features ahead of schedule.')
-      .text('3. Reduced P99 API latency from 450ms to 120ms.')
-      .text('4. Completed SOC 2 Type II compliance audit.')
-      .heading(2, 'Looking Ahead')
-      .text('Q1 2027 will focus on scalability improvements and the mobile SDK launch.')
-      .build();
-    const ms = (performance.now() - t0).toFixed(1);
-    showDoc(doc, 'Sample Report');
-    log(`Created sample report in ${ms}ms`, 'ok');
-  } catch (e) { log('Create failed: ' + e.message, 'err'); }
-};
+// Lists — via WASM
+$('btnBulletList').addEventListener('click', () => toggleList('bullet'));
+$('btnNumberList').addEventListener('click', () => toggleList('decimal'));
 
-window.createSampleLetter = function() {
-  if (!engine) return;
-  try {
-    const doc = new WasmDocumentBuilder()
-      .title('Business Letter')
-      .author('Jane Smith')
-      .heading(1, 'Acme Corporation')
-      .text('123 Innovation Drive')
-      .text('San Francisco, CA 94102')
-      .text('')
-      .text('March 13, 2026')
-      .text('')
-      .text('Dear Valued Partner,')
-      .text('')
-      .text('We are pleased to announce the release of s1engine v1.0.0, our document engine SDK built entirely in Rust. This milestone represents months of development delivering a production-ready library for document processing.')
-      .text('')
-      .text('The SDK supports reading, writing, and converting between DOCX, ODT, PDF, TXT, and Markdown formats. It includes CRDT-based collaborative editing primitives and runs in the browser via WebAssembly.')
-      .text('')
-      .text('We look forward to your feedback.')
-      .text('')
-      .text('Best regards,')
-      .text('Jane Smith')
-      .text('VP of Engineering')
-      .build();
-    showDoc(doc, 'Sample Letter');
-    log('Created sample letter', 'ok');
-  } catch (e) { log('Create failed: ' + e.message, 'err'); }
-};
+// Insert menu
+$('btnInsertMenu').addEventListener('click', e => {
+    e.stopPropagation();
+    $('insertMenu').classList.toggle('show');
+});
+$('miTable').addEventListener('click', () => {
+    $('insertMenu').classList.remove('show');
+    $('tableModal').classList.add('show');
+});
+$('miImage').addEventListener('click', () => {
+    $('insertMenu').classList.remove('show');
+    $('imageInput').click();
+});
+$('miLink').addEventListener('click', () => {
+    $('insertMenu').classList.remove('show');
+    insertHyperlink();
+});
+$('miHR').addEventListener('click', () => {
+    $('insertMenu').classList.remove('show');
+    insertHR();
+});
+$('miPageBreak').addEventListener('click', () => {
+    $('insertMenu').classList.remove('show');
+    insertPageBreak();
+});
 
-window.createSampleTable = function() {
-  if (!engine) return;
-  try {
-    const doc = new WasmDocumentBuilder()
-      .title('Format Support Matrix')
-      .author('s1engine')
-      .heading(1, 'Format Support Matrix')
-      .text('s1engine supports multiple document formats with varying levels of feature coverage:')
-      .text('')
-      .heading(2, 'Read/Write Support')
-      .text('DOCX: Full read/write with round-trip fidelity')
-      .text('ODT: Full read/write with round-trip fidelity')
-      .text('PDF: Export only (text, tables, images, hyperlinks, bookmarks)')
-      .text('TXT: Full read/write with encoding detection')
-      .text('Markdown: Full read/write (CommonMark + GFM)')
-      .text('')
-      .heading(2, 'Feature Highlights')
-      .text('- Bold, italic, underline, strikethrough formatting')
-      .text('- Tables with merged cells and nested tables')
-      .text('- Inline images (JPEG, PNG)')
-      .text('- Hyperlinks and bookmarks')
-      .text('- Headers, footers, and page numbering')
-      .text('- Comments and annotations')
-      .text('- CRDT-based collaborative editing')
-      .build();
-    showDoc(doc, 'Table Demo');
-    log('Created table demo', 'ok');
-  } catch (e) { log('Create failed: ' + e.message, 'err'); }
-};
+// Find & Replace
+$('btnFind').addEventListener('click', openFindBar);
+$('findClose').addEventListener('click', closeFindBar);
+$('findInput').addEventListener('input', doFind);
+$('findInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? findPrevMatch() : findNextMatch(); }
+    if (e.key === 'Escape') closeFindBar();
+});
+$('replaceInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doReplace(); }
+    if (e.key === 'Escape') closeFindBar();
+});
+$('findNext').addEventListener('click', findNextMatch);
+$('findPrev').addEventListener('click', findPrevMatch);
+$('replaceBtn').addEventListener('click', doReplace);
+$('replaceAllBtn').addEventListener('click', doReplaceAll);
 
-window.exportAs = function(format) {
-  if (!currentDoc) { log('No document to export', 'err'); return; }
-  try {
-    const t0 = performance.now();
-    const bytes = currentDoc.export(format);
-    const ms = (performance.now() - t0).toFixed(1);
-    const blob = new Blob([bytes], { type: getMime(format) });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `document.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-    log(`Exported ${format.toUpperCase()} (${(bytes.length / 1024).toFixed(1)} KB) in ${ms}ms`, 'ok');
-  } catch (e) { log('Export failed: ' + e.message, 'err'); }
-};
+// Undo / Redo
+$('btnUndo').addEventListener('click', doUndo);
+$('btnRedo').addEventListener('click', doRedo);
 
-window.convertAndReopen = function() {
-  if (!currentDoc) { log('No document to convert', 'err'); return; }
-  const format = document.getElementById('convert-format').value;
-  try {
-    const t0 = performance.now();
-    const bytes = currentDoc.export(format);
-    const doc = engine.open_as(bytes, format);
-    const ms = (performance.now() - t0).toFixed(1);
-    showDoc(doc, `converted.${format}`);
-    log(`Converted to ${format.toUpperCase()} and reopened in ${ms}ms`, 'ok');
-  } catch (e) { log('Convert failed: ' + e.message, 'err'); }
-};
-
-window.runSelfTest = function() {
-  if (!engine) { log('Engine not ready', 'err'); return; }
-  let passed = 0;
-  let failed = 0;
-
-  function test(name, fn) {
+// Block type (heading level) — via WASM
+$('blockType').addEventListener('change', e => {
+    if (!doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+    syncParagraphText(info.startEl);
+    const offset = info.startOffset;
     try {
-      fn();
-      log(`PASS: ${name}`, 'ok');
-      passed++;
-    } catch (err) {
-      console.error(`FAIL: ${name}`, err);
-      log(`FAIL: ${name} - ${err.message || String(err)}`, 'err');
-      failed++;
-    }
-  }
+        doc.set_heading_level(info.startNodeId, parseInt(e.target.value));
+        const updated = renderNodeById(info.startNodeId);
+        if (updated) setCursorAtOffset(updated, offset);
+        pagesRendered = false; updateToolbarState(); updateUndoRedo();
+    } catch (err) { console.error('heading error:', err); }
+});
 
-  // Test 1: Create document
-  test('Create document', () => {
-    const doc = engine.create();
-    if (!doc.is_valid()) throw new Error('Document not valid');
-  });
+// Font family — via WASM format_selection
+$('fontFamily').addEventListener('change', e => {
+    const font = e.target.value;
+    if (!font) return;
+    applyFormat('fontFamily', font);
+});
 
-  // Test 2: Builder
-  test('Builder creates document', () => {
-    const doc = new WasmDocumentBuilder()
-      .title('Test').author('Tester')
-      .heading(1, 'Hello').text('World')
-      .build();
-    if (!doc.is_valid()) throw new Error('Document not valid');
-    if (doc.paragraph_count() < 2) throw new Error('Expected >= 2 paragraphs');
-  });
+// Font size — via WASM format_selection
+$('fontSize').addEventListener('change', e => {
+    const size = parseFloat(e.target.value);
+    if (!size || size < 1) return;
+    applyFormat('fontSize', String(size));
+});
 
-  // Test 3: TXT export + reopen
-  test('TXT roundtrip', () => {
-    const doc = new WasmDocumentBuilder().text('Hello TXT').build();
-    const bytes = doc.export('txt');
-    const doc2 = engine.open_as(bytes, 'txt');
-    const text = doc2.to_plain_text();
-    if (!text.includes('Hello TXT')) throw new Error('Text not found: ' + text);
-  });
+// Text color — via WASM format_selection
+$('colorPicker').addEventListener('input', e => {
+    const hex = e.target.value.replace('#', '');
+    $('colorSwatch').style.background = '#' + hex;
+    applyFormat('color', hex);
+});
 
-  // Test 4: DOCX export
-  test('DOCX export', () => {
-    const doc = new WasmDocumentBuilder()
-      .title('DOCX Test').text('DOCX content').build();
-    const bytes = doc.export('docx');
-    if (bytes.length < 100) throw new Error('DOCX too small: ' + bytes.length);
-    // Check ZIP magic
-    if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) throw new Error('Not a ZIP file');
-  });
+// Highlight color — via WASM format_selection
+$('highlightPicker').addEventListener('input', e => {
+    const hex = e.target.value.replace('#', '');
+    applyFormat('highlight', hex);
+});
 
-  // Test 5: DOCX reopen
-  test('DOCX roundtrip', () => {
-    const doc = new WasmDocumentBuilder()
-      .title('RT Test').author('RT Author')
-      .heading(1, 'Heading').text('Body text').build();
-    const bytes = doc.export('docx');
-    const doc2 = engine.open_as(bytes, 'docx');
-    if (!doc2.is_valid()) throw new Error('Reopened doc not valid');
-    const text = doc2.to_plain_text();
-    if (!text.includes('Body text')) throw new Error('Text not found: ' + text);
-    const title = doc2.metadata_title();
-    if (title !== 'RT Test') throw new Error('Title mismatch: ' + title);
-  });
+// ─── Insert Table (WASM-based) ───────────────────────────────
+$('tableCancelBtn').addEventListener('click', () => {
+    $('tableModal').classList.remove('show');
+});
+$('tableInsertBtn').addEventListener('click', () => {
+    const rows = parseInt($('tableRows').value) || 3;
+    const cols = parseInt($('tableCols').value) || 3;
+    $('tableModal').classList.remove('show');
+    insertTable(rows, cols);
+});
 
-  // Test 6: ODT export
-  test('ODT export', () => {
-    const doc = new WasmDocumentBuilder()
-      .title('ODT Test').text('ODT content').build();
-    const bytes = doc.export('odt');
-    if (bytes.length < 100) throw new Error('ODT too small: ' + bytes.length);
-    if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) throw new Error('Not a ZIP file');
-  });
-
-  // Test 7: ODT reopen
-  test('ODT roundtrip', () => {
-    const doc = new WasmDocumentBuilder()
-      .title('ODT RT').text('ODT body').build();
-    const bytes = doc.export('odt');
-    const doc2 = engine.open_as(bytes, 'odt');
-    if (!doc2.is_valid()) throw new Error('Reopened doc not valid');
-    const text = doc2.to_plain_text();
-    if (!text.includes('ODT body')) throw new Error('Text not found: ' + text);
-  });
-
-  // Test 8: Auto-detect DOCX
-  test('Auto-detect DOCX', () => {
-    const doc = new WasmDocumentBuilder().text('Auto test').build();
-    const bytes = doc.export('docx');
-    const doc2 = engine.open(bytes);
-    if (!doc2.is_valid()) throw new Error('Auto-detected doc not valid');
-  });
-
-  // Test 9: Format detection
-  test('Format detection', () => {
-    const doc = new WasmDocumentBuilder().text('Detect').build();
-    const docxBytes = doc.export('docx');
-    const txtBytes = doc.export('txt');
-    const fmtDocx = detect_format(docxBytes);
-    const fmtTxt = detect_format(txtBytes);
-    if (fmtDocx !== 'docx' && fmtDocx !== 'odt') throw new Error('DOCX detected as: ' + fmtDocx);
-    if (fmtTxt !== 'txt') throw new Error('TXT detected as: ' + fmtTxt);
-  });
-
-  log(`Self-test complete: ${passed} passed, ${failed} failed`, failed > 0 ? 'err' : 'ok');
-};
-
-function getMime(fmt) {
-  const mimes = {
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    odt: 'application/vnd.oasis.opendocument.text',
-    txt: 'text/plain',
-    pdf: 'application/pdf',
-    md: 'text/markdown',
-  };
-  return mimes[fmt] || 'application/octet-stream';
-}
-
-initialize();
+// Track changes
+$('btnAcceptAll').addEventListener('click', () => {
+    if (!doc) return;
+    try { doc.accept_all_changes(); renderDocument(); updateTrackChangesBar(); }
+    catch (e) { console.error('accept error:', e); }
+});
+$('btnRejectAll').addEventListener('click', () => {
+    if (!doc) return;
+    try { doc.reject_all_changes(); renderDocument(); updateTrackChangesBar(); }
+    catch (e) { console.error('reject error:', e); }
+});
 </script>
 </body>
 </html>

@@ -787,6 +787,24 @@ enum RunContent {
     Tab,
     Image(ImageInfo),
     Field(FieldType, String),
+    /// A shape/drawing element with its raw VML/XML for round-trip preservation.
+    Shape(ShapeInfo),
+}
+
+/// Information about a parsed shape.
+struct ShapeInfo {
+    /// Shape type (e.g., "rect", "roundrect", "oval", "line", "shape")
+    shape_type: String,
+    /// Width in points (if available)
+    width_pts: Option<f64>,
+    /// Height in points (if available)
+    height_pts: Option<f64>,
+    /// Fill color hex (if available)
+    fill_color: Option<String>,
+    /// Stroke color hex (if available)
+    stroke_color: Option<String>,
+    /// The raw XML of the entire <w:pict> element for round-trip fidelity
+    raw_xml: String,
 }
 
 /// State machine for tracking complex field parsing (fldChar begin/separate/end)
@@ -809,6 +827,20 @@ struct ImageInfo {
     width_pts: Option<f64>,
     height_pts: Option<f64>,
     alt_text: Option<String>,
+    /// Whether this is an inline or anchor (floating) image
+    is_floating: bool,
+    /// Text wrap type for floating images
+    wrap_type: Option<String>,
+    /// Horizontal offset in EMUs (for floating images)
+    h_offset: Option<i64>,
+    /// Vertical offset in EMUs (for floating images)
+    v_offset: Option<i64>,
+    /// Horizontal relative-from (for floating images)
+    h_relative_from: Option<String>,
+    /// Vertical relative-from (for floating images)
+    v_relative_from: Option<String>,
+    /// Distance from text: (distT, distB, distL, distR) in EMUs
+    dist_from_text: Option<(i64, i64, i64, i64)>,
 }
 
 /// Handle a `<w:fldChar>` element (whether self-closing or not).
@@ -901,6 +933,12 @@ fn parse_run(
                         // Consume the closing </w:fldChar> tag
                         skip_element(reader)?;
                     }
+                    // VML shapes: <w:pict><v:shape>...</v:shape></w:pict>
+                    b"pict" => {
+                        if let Some(shape) = parse_pict(reader)? {
+                            content.push(RunContent::Shape(shape));
+                        }
+                    }
                     _ => {
                         skip_element(reader)?;
                     }
@@ -978,6 +1016,10 @@ fn parse_run(
                 doc.insert_node(para_id, *child_index, field_node)
                     .map_err(|e| DocxError::InvalidStructure(format!("{e}")))?;
                 *child_index += 1;
+            }
+            RunContent::Shape(info) => {
+                flush_texts_to_run(&mut texts, &run_attrs, doc, para_id, child_index)?;
+                insert_shape_node(doc, para_id, child_index, &info)?;
             }
         }
     }
@@ -1119,8 +1161,20 @@ fn parse_drawing(
     let mut width_pts: Option<f64> = None;
     let mut height_pts: Option<f64> = None;
     let mut alt_text: Option<String> = None;
+    let mut is_floating = false;
+    let mut wrap_type: Option<String> = None;
+    let mut h_offset: Option<i64> = None;
+    let mut v_offset: Option<i64> = None;
+    let mut h_relative_from: Option<String> = None;
+    let mut v_relative_from: Option<String> = None;
+    let mut dist_from_text: Option<(i64, i64, i64, i64)> = None;
 
     let mut depth = 1u32;
+    // Track whether we're inside positionH or positionV to capture posOffset text
+    let mut in_position_h = false;
+    let mut in_position_v = false;
+    let mut in_pos_offset = false;
+    let mut pos_offset_text = String::new();
 
     loop {
         match reader.read_event() {
@@ -1128,6 +1182,35 @@ fn parse_drawing(
                 depth += 1;
                 let name = e.local_name().as_ref().to_vec();
                 match name.as_slice() {
+                    b"anchor" => {
+                        is_floating = true;
+                        // Extract distance attributes
+                        let dist_t = get_attr(&e, b"distT").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        let dist_b = get_attr(&e, b"distB").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        let dist_l = get_attr(&e, b"distL").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        let dist_r = get_attr(&e, b"distR").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        if dist_t != 0 || dist_b != 0 || dist_l != 0 || dist_r != 0 {
+                            dist_from_text = Some((dist_t, dist_b, dist_l, dist_r));
+                        }
+                    }
+                    b"positionH" => {
+                        in_position_h = true;
+                        h_relative_from = get_attr(&e, b"relativeFrom");
+                    }
+                    b"positionV" => {
+                        in_position_v = true;
+                        v_relative_from = get_attr(&e, b"relativeFrom");
+                    }
+                    b"posOffset" => {
+                        in_pos_offset = true;
+                        pos_offset_text.clear();
+                    }
+                    // Wrap type detection
+                    b"wrapSquare" => { wrap_type = Some("square".to_string()); }
+                    b"wrapTight" => { wrap_type = Some("tight".to_string()); }
+                    b"wrapThrough" => { wrap_type = Some("through".to_string()); }
+                    b"wrapTopAndBottom" => { wrap_type = Some("topAndBottom".to_string()); }
+                    b"wrapNone" => { wrap_type = Some("none".to_string()); }
                     b"extent" => {
                         if let Some(cx) = get_attr(&e, b"cx") {
                             width_pts = emu_to_points(&cx);
@@ -1149,11 +1232,23 @@ fn parse_drawing(
                         }
                     }
                     _ => {}
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if in_pos_offset {
+                    if let Ok(s) = t.unescape() {
+                        pos_offset_text.push_str(&s);
+                    }
                 }
             }
             Ok(Event::Empty(e)) => {
                 let name = e.local_name().as_ref().to_vec();
                 match name.as_slice() {
+                    b"wrapSquare" => { wrap_type = Some("square".to_string()); }
+                    b"wrapTight" => { wrap_type = Some("tight".to_string()); }
+                    b"wrapThrough" => { wrap_type = Some("through".to_string()); }
+                    b"wrapTopAndBottom" => { wrap_type = Some("topAndBottom".to_string()); }
+                    b"wrapNone" => { wrap_type = Some("none".to_string()); }
                     b"extent" => {
                         if let Some(cx) = get_attr(&e, b"cx") {
                             width_pts = emu_to_points(&cx);
@@ -1177,7 +1272,25 @@ fn parse_drawing(
                     _ => {}
                 }
             }
-            Ok(Event::End(_)) => {
+            Ok(Event::End(e)) => {
+                let name = e.local_name().as_ref().to_vec();
+                match name.as_slice() {
+                    b"posOffset" => {
+                        if in_pos_offset {
+                            if let Ok(val) = pos_offset_text.trim().parse::<i64>() {
+                                if in_position_h {
+                                    h_offset = Some(val);
+                                } else if in_position_v {
+                                    v_offset = Some(val);
+                                }
+                            }
+                            in_pos_offset = false;
+                        }
+                    }
+                    b"positionH" => { in_position_h = false; }
+                    b"positionV" => { in_position_v = false; }
+                    _ => {}
+                }
                 depth -= 1;
                 if depth == 0 {
                     break;
@@ -1203,6 +1316,13 @@ fn parse_drawing(
         width_pts,
         height_pts,
         alt_text,
+        is_floating,
+        wrap_type,
+        h_offset,
+        v_offset,
+        h_relative_from,
+        v_relative_from,
+        dist_from_text,
     }))
 }
 
@@ -1253,7 +1373,230 @@ fn insert_image_node(
         );
     }
 
+    // Store floating image positioning data
+    if info.is_floating {
+        image_node.attributes.set(
+            AttributeKey::ImagePositionType,
+            AttributeValue::String("anchor".to_string()),
+        );
+        if let Some(ref wt) = info.wrap_type {
+            image_node.attributes.set(
+                AttributeKey::ImageWrapType,
+                AttributeValue::String(wt.clone()),
+            );
+        }
+        if let Some(ho) = info.h_offset {
+            image_node.attributes.set(
+                AttributeKey::ImageHorizontalOffset,
+                AttributeValue::Int(ho),
+            );
+        }
+        if let Some(vo) = info.v_offset {
+            image_node.attributes.set(
+                AttributeKey::ImageVerticalOffset,
+                AttributeValue::Int(vo),
+            );
+        }
+        if let Some(ref hrf) = info.h_relative_from {
+            image_node.attributes.set(
+                AttributeKey::ImageHorizontalRelativeFrom,
+                AttributeValue::String(hrf.clone()),
+            );
+        }
+        if let Some(ref vrf) = info.v_relative_from {
+            image_node.attributes.set(
+                AttributeKey::ImageVerticalRelativeFrom,
+                AttributeValue::String(vrf.clone()),
+            );
+        }
+        if let Some((dt, db, dl, dr)) = info.dist_from_text {
+            image_node.attributes.set(
+                AttributeKey::ImageDistanceFromText,
+                AttributeValue::String(format!("{},{},{},{}", dt, db, dl, dr)),
+            );
+        }
+    }
+
     doc.insert_node(para_id, *child_index, image_node)
+        .map_err(|e| DocxError::InvalidStructure(format!("{e}")))?;
+    *child_index += 1;
+
+    Ok(())
+}
+
+/// Parse `<w:pict>` containing VML shape elements.
+///
+/// Extracts shape type, dimensions, fill/stroke colors, and stores the raw XML
+/// for round-trip preservation of shapes.
+fn parse_pict(
+    reader: &mut Reader<&[u8]>,
+) -> Result<Option<ShapeInfo>, DocxError> {
+    let mut shape_type: Option<String> = None;
+    let mut width_pts: Option<f64> = None;
+    let mut height_pts: Option<f64> = None;
+    let mut fill_color: Option<String> = None;
+    let mut stroke_color: Option<String> = None;
+    let mut raw_parts: Vec<String> = Vec::new();
+    let mut depth = 1u32;
+
+    raw_parts.push("<w:pict>".to_string());
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                depth += 1;
+                let name = e.local_name().as_ref().to_vec();
+                // Capture raw XML for round-trip
+                raw_parts.push(format!("<{}>", std::str::from_utf8(e.name().as_ref()).unwrap_or("?")));
+
+                match name.as_slice() {
+                    b"shape" | b"rect" | b"roundrect" | b"oval" | b"line" | b"polyline" | b"group" => {
+                        let type_name = String::from_utf8_lossy(&name).to_string();
+                        shape_type = Some(type_name);
+
+                        // Try to extract style attribute for dimensions
+                        if let Some(style) = get_attr(e, b"style") {
+                            parse_vml_style(&style, &mut width_pts, &mut height_pts);
+                        }
+                        // Fill color from fillcolor attribute
+                        if let Some(fc) = get_attr(e, b"fillcolor") {
+                            fill_color = Some(fc.trim_start_matches('#').to_string());
+                        }
+                        // Stroke color from strokecolor attribute
+                        if let Some(sc) = get_attr(e, b"strokecolor") {
+                            stroke_color = Some(sc.trim_start_matches('#').to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                raw_parts.push(format!("<{}/>", std::str::from_utf8(e.name().as_ref()).unwrap_or("?")));
+                let name = e.local_name().as_ref().to_vec();
+                match name.as_slice() {
+                    b"shape" | b"rect" | b"roundrect" | b"oval" | b"line" => {
+                        let type_name = String::from_utf8_lossy(&name).to_string();
+                        shape_type = Some(type_name);
+                        if let Some(style) = get_attr(e, b"style") {
+                            parse_vml_style(&style, &mut width_pts, &mut height_pts);
+                        }
+                        if let Some(fc) = get_attr(e, b"fillcolor") {
+                            fill_color = Some(fc.trim_start_matches('#').to_string());
+                        }
+                        if let Some(sc) = get_attr(e, b"strokecolor") {
+                            stroke_color = Some(sc.trim_start_matches('#').to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref t)) => {
+                if let Ok(s) = t.unescape() {
+                    raw_parts.push(s.to_string());
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                raw_parts.push(format!("</{}>", std::str::from_utf8(e.name().as_ref()).unwrap_or("?")));
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+
+    // Only create a shape node if we actually found a shape element
+    match shape_type {
+        Some(st) => Ok(Some(ShapeInfo {
+            shape_type: st,
+            width_pts,
+            height_pts,
+            fill_color,
+            stroke_color,
+            raw_xml: raw_parts.join(""),
+        })),
+        None => Ok(None),
+    }
+}
+
+/// Parse VML style string for width/height.
+/// e.g., "width:100pt;height:50pt" or "width:2in;height:1in"
+fn parse_vml_style(style: &str, width: &mut Option<f64>, height: &mut Option<f64>) {
+    for part in style.split(';') {
+        let part = part.trim();
+        if let Some(val) = part.strip_prefix("width:") {
+            *width = parse_vml_length(val.trim());
+        } else if let Some(val) = part.strip_prefix("height:") {
+            *height = parse_vml_length(val.trim());
+        }
+    }
+}
+
+/// Parse a VML length value to points.
+fn parse_vml_length(s: &str) -> Option<f64> {
+    let s = s.trim();
+    if let Some(v) = s.strip_suffix("pt") {
+        v.trim().parse::<f64>().ok()
+    } else if let Some(v) = s.strip_suffix("in") {
+        v.trim().parse::<f64>().ok().map(|x| x * 72.0)
+    } else if let Some(v) = s.strip_suffix("cm") {
+        v.trim().parse::<f64>().ok().map(|x| x * 28.3465)
+    } else if let Some(v) = s.strip_suffix("mm") {
+        v.trim().parse::<f64>().ok().map(|x| x * 2.83465)
+    } else if let Some(v) = s.strip_suffix("px") {
+        v.trim().parse::<f64>().ok().map(|x| x * 0.75) // 96 DPI → 72 DPI
+    } else {
+        // Try bare number as points
+        s.parse::<f64>().ok()
+    }
+}
+
+/// Create a Drawing node from parsed shape info.
+fn insert_shape_node(
+    doc: &mut DocumentModel,
+    para_id: NodeId,
+    child_index: &mut usize,
+    info: &ShapeInfo,
+) -> Result<(), DocxError> {
+    let shape_id = doc.next_id();
+    let mut shape_node = Node::new(shape_id, NodeType::Drawing);
+
+    shape_node.attributes.set(
+        AttributeKey::ShapeType,
+        AttributeValue::String(info.shape_type.clone()),
+    );
+    if let Some(w) = info.width_pts {
+        shape_node
+            .attributes
+            .set(AttributeKey::ShapeWidth, AttributeValue::Float(w));
+    }
+    if let Some(h) = info.height_pts {
+        shape_node
+            .attributes
+            .set(AttributeKey::ShapeHeight, AttributeValue::Float(h));
+    }
+    if let Some(ref fc) = info.fill_color {
+        shape_node.attributes.set(
+            AttributeKey::ShapeFillColor,
+            AttributeValue::String(fc.clone()),
+        );
+    }
+    if let Some(ref sc) = info.stroke_color {
+        shape_node.attributes.set(
+            AttributeKey::ShapeStrokeColor,
+            AttributeValue::String(sc.clone()),
+        );
+    }
+    // Store raw XML for round-trip preservation
+    shape_node.attributes.set(
+        AttributeKey::ShapeRawXml,
+        AttributeValue::String(info.raw_xml.clone()),
+    );
+
+    doc.insert_node(para_id, *child_index, shape_node)
         .map_err(|e| DocxError::InvalidStructure(format!("{e}")))?;
     *child_index += 1;
 
@@ -3421,5 +3764,164 @@ mod tests {
         assert_eq!(para.children.len(), 1);
         let image = doc.node(para.children[0]).unwrap();
         assert_eq!(image.node_type, NodeType::Image);
+    }
+
+    #[test]
+    fn parse_floating_image_with_positioning() {
+        let xml = wrap_doc(
+            r#"<w:p><w:r><w:drawing><wp:anchor distT="45720" distB="45720" distL="114300" distR="114300" simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+                <wp:simplePos x="0" y="0"/>
+                <wp:positionH relativeFrom="column"><wp:posOffset>914400</wp:posOffset></wp:positionH>
+                <wp:positionV relativeFrom="paragraph"><wp:posOffset>457200</wp:posOffset></wp:positionV>
+                <wp:extent cx="1828800" cy="1371600"/>
+                <wp:effectExtent l="0" t="0" r="0" b="0"/>
+                <wp:wrapSquare wrapText="bothSides"/>
+                <wp:docPr id="1" name="Picture 1" descr="Floating test"/>
+                <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                    <pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="img1"/><pic:cNvPicPr/></pic:nvPicPr>
+                    <pic:blipFill><a:blip r:embed="rId10"/></pic:blipFill>
+                    <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="1371600"/></a:xfrm></pic:spPr>
+                    </pic:pic>
+                </a:graphicData></a:graphic>
+            </wp:anchor></w:drawing></w:r></w:p>"#,
+        );
+        let mut rels = HashMap::new();
+        rels.insert("rId10".to_string(), "media/float.jpg".to_string());
+        let mut media = HashMap::new();
+        media.insert("media/float.jpg".to_string(), vec![0xFF, 0xD8, 0xFF, 0xE0]);
+
+        let mut doc = DocumentModel::new();
+        parse_document_xml(
+            &xml,
+            &mut doc,
+            &rels,
+            &media,
+            &s1_model::NumberingDefinitions::default(),
+        )
+        .unwrap();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+        let img = doc.node(para.children[0]).unwrap();
+        assert_eq!(img.node_type, NodeType::Image);
+
+        // Verify floating position type
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImagePositionType),
+            Some("anchor")
+        );
+
+        // Verify wrap type
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImageWrapType),
+            Some("square")
+        );
+
+        // Verify horizontal positioning: column-relative, 914400 EMU offset
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImageHorizontalRelativeFrom),
+            Some("column")
+        );
+        assert_eq!(
+            img.attributes.get_i64(&AttributeKey::ImageHorizontalOffset),
+            Some(914400)
+        );
+
+        // Verify vertical positioning: paragraph-relative, 457200 EMU offset
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImageVerticalRelativeFrom),
+            Some("paragraph")
+        );
+        assert_eq!(
+            img.attributes.get_i64(&AttributeKey::ImageVerticalOffset),
+            Some(457200)
+        );
+
+        // Verify dimensions: 1828800 / 12700 = 144pt, 1371600 / 12700 = 108pt
+        assert!((img.attributes.get_f64(&AttributeKey::ImageWidth).unwrap() - 144.0).abs() < 0.01);
+        assert!((img.attributes.get_f64(&AttributeKey::ImageHeight).unwrap() - 108.0).abs() < 0.01);
+
+        // Verify distance from text
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImageDistanceFromText),
+            Some("45720,45720,114300,114300")
+        );
+
+        // Verify alt text
+        assert_eq!(
+            img.attributes.get_string(&AttributeKey::ImageAltText),
+            Some("Floating test")
+        );
+    }
+
+    #[test]
+    fn parse_vml_shape_rect() {
+        let xml = wrap_doc(
+            r##"<w:p><w:r><w:pict>
+                <v:rect style="width:200pt;height:100pt" fillcolor="#FF0000" strokecolor="#0000FF"/>
+            </w:pict></w:r></w:p>"##,
+        );
+        let rels = HashMap::new();
+        let media = HashMap::new();
+        let mut doc = DocumentModel::new();
+        parse_document_xml(&xml, &mut doc, &rels, &media, &s1_model::NumberingDefinitions::default()).unwrap();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+        assert!(!para.children.is_empty(), "paragraph should have a drawing child");
+
+        let shape = doc.node(para.children[0]).unwrap();
+        assert_eq!(shape.node_type, NodeType::Drawing);
+        assert_eq!(shape.attributes.get_string(&AttributeKey::ShapeType), Some("rect"));
+        assert!((shape.attributes.get_f64(&AttributeKey::ShapeWidth).unwrap() - 200.0).abs() < 0.01);
+        assert!((shape.attributes.get_f64(&AttributeKey::ShapeHeight).unwrap() - 100.0).abs() < 0.01);
+        assert_eq!(shape.attributes.get_string(&AttributeKey::ShapeFillColor), Some("FF0000"));
+        assert_eq!(shape.attributes.get_string(&AttributeKey::ShapeStrokeColor), Some("0000FF"));
+        // Raw XML should be preserved
+        assert!(shape.attributes.get_string(&AttributeKey::ShapeRawXml).unwrap().contains("w:pict"));
+    }
+
+    #[test]
+    fn parse_vml_shape_with_style_dimensions() {
+        let xml = wrap_doc(
+            r#"<w:p><w:r><w:pict>
+                <v:shape style="width:2in;height:1in">
+                    <v:textbox>Some text</v:textbox>
+                </v:shape>
+            </w:pict></w:r></w:p>"#,
+        );
+        let rels = HashMap::new();
+        let media = HashMap::new();
+        let mut doc = DocumentModel::new();
+        parse_document_xml(&xml, &mut doc, &rels, &media, &s1_model::NumberingDefinitions::default()).unwrap();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+        let shape = doc.node(para.children[0]).unwrap();
+        assert_eq!(shape.node_type, NodeType::Drawing);
+        assert_eq!(shape.attributes.get_string(&AttributeKey::ShapeType), Some("shape"));
+        // 2in = 144pt, 1in = 72pt
+        assert!((shape.attributes.get_f64(&AttributeKey::ShapeWidth).unwrap() - 144.0).abs() < 0.01);
+        assert!((shape.attributes.get_f64(&AttributeKey::ShapeHeight).unwrap() - 72.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_empty_pict_no_shape() {
+        // <w:pict> with no recognized shape element should produce no Drawing node
+        let xml = wrap_doc(
+            r#"<w:p><w:r><w:pict><o:OLEObject/></w:pict></w:r></w:p>"#,
+        );
+        let rels = HashMap::new();
+        let media = HashMap::new();
+        let mut doc = DocumentModel::new();
+        parse_document_xml(&xml, &mut doc, &rels, &media, &s1_model::NumberingDefinitions::default()).unwrap();
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+        assert_eq!(para.children.len(), 0, "no shape should be created for OLE-only pict");
     }
 }

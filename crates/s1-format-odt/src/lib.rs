@@ -12,6 +12,8 @@ mod metadata_parser;
 mod metadata_writer;
 mod property_parser;
 mod property_writer;
+mod settings_parser;
+mod settings_writer;
 mod style_parser;
 mod style_writer;
 mod xml_util;

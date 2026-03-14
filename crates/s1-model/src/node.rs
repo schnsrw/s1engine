@@ -158,6 +158,7 @@ impl NodeType {
                 NodeType::ColumnBreak,
                 NodeType::Tab,
                 NodeType::Image,
+                NodeType::Drawing,
                 NodeType::Field,
                 NodeType::BookmarkStart,
                 NodeType::BookmarkEnd,
@@ -239,9 +240,9 @@ impl Node {
         self.children.len()
     }
 
-    /// Returns the text content length, or 0 for non-text nodes.
+    /// Returns the text content length in characters, or 0 for non-text nodes.
     pub fn text_len(&self) -> usize {
-        self.text_content.as_ref().map_or(0, |t| t.len())
+        self.text_content.as_ref().map_or(0, |t| t.chars().count())
     }
 }
 

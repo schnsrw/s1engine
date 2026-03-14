@@ -8,8 +8,8 @@ use s1_text::{FontDatabase, FontId, FontMetrics, ShapedGlyph};
 
 use crate::error::LayoutError;
 use crate::style_resolver::{
-    resolve_paragraph_style, resolve_run_style, ResolvedParagraphStyle, DEFAULT_FONT_FAMILY,
-    DEFAULT_FONT_SIZE,
+    resolve_paragraph_style, resolve_run_style, ResolvedParagraphStyle, ResolvedRunStyle,
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE,
 };
 use crate::types::*;
 
@@ -370,6 +370,19 @@ impl<'a> LayoutEngine<'a> {
                         current_y += block_height;
                     }
                 }
+                NodeType::PageBreak => {
+                    // Force a page break
+                    if !page_blocks.is_empty() {
+                        pages.push(self.make_page(
+                            page_index,
+                            &page_layout,
+                            std::mem::take(&mut page_blocks),
+                        ));
+                        page_section_indices.push(current_section_idx);
+                        page_index += 1;
+                        current_y = content_rect.y;
+                    }
+                }
                 _ => {} // Skip other node types
             }
         }
@@ -555,6 +568,14 @@ impl<'a> LayoutEngine<'a> {
                                 }
                             }
                         }
+                        NodeType::Section => {
+                            // Recursively collect blocks inside Section containers
+                            self.collect_body_blocks(child_id, blocks);
+                        }
+                        NodeType::PageBreak => {
+                            // Treat standalone page break as a paragraph with PageBreakBefore
+                            blocks.push((child_id, NodeType::PageBreak));
+                        }
                         _ => {}
                     }
                 }
@@ -570,7 +591,17 @@ impl<'a> LayoutEngine<'a> {
         content_rect: Rect,
         y_pos: f64,
     ) -> Result<LayoutBlock, LayoutError> {
-        let hash = content_hash(self.doc, para_id);
+        let mut hash = content_hash(self.doc, para_id);
+        // Include available width, indent, and spacing in hash so cache invalidates
+        // when layout context changes (H-08 fix)
+        hash ^= content_rect.width.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
+        hash ^= para_style.indent_left.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
+        hash ^= para_style.indent_right.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
+        hash ^= para_style.indent_first_line.to_bits();
+        hash = hash.wrapping_mul(0x100000001b3);
 
         // Check cache
         if let Some(ref cache) = self.cache {
@@ -612,7 +643,7 @@ impl<'a> LayoutEngine<'a> {
                 return Ok(LayoutBlock {
                     source_id: para_id,
                     bounds: Rect::new(x_start, y_pos, available_width, 0.0),
-                    kind: LayoutBlockKind::Paragraph { lines: Vec::new() },
+                    kind: LayoutBlockKind::Paragraph { lines: Vec::new(), text_align: None, background_color: None, border: None },
                 });
             }
         };
@@ -624,8 +655,26 @@ impl<'a> LayoutEngine<'a> {
             if let Some(child) = self.doc.node(child_id) {
                 match child.node_type {
                     NodeType::Run => {
-                        let run_info = self.shape_run(child_id)?;
-                        shaped_runs.push(run_info);
+                        // Check if this run contains any LineBreak children —
+                        // if so, split into multiple shaped runs at each break.
+                        let mut has_inline_break = false;
+                        if let Some(run_node) = self.doc.node(child_id) {
+                            for &sub_id in &run_node.children {
+                                if let Some(sub) = self.doc.node(sub_id) {
+                                    if sub.node_type == NodeType::LineBreak {
+                                        has_inline_break = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if has_inline_break {
+                            // Split into segments at each LineBreak
+                            self.shape_run_with_breaks(child_id, &mut shaped_runs)?;
+                        } else {
+                            let run_info = self.shape_run(child_id)?;
+                            shaped_runs.push(run_info);
+                        }
                     }
                     NodeType::LineBreak => {
                         shaped_runs.push(ShapedRunInfo {
@@ -642,6 +691,12 @@ impl<'a> LayoutEngine<'a> {
                             italic: false,
                             underline: false,
                             strikethrough: false,
+                            superscript: false,
+                            subscript: false,
+                            highlight_color: None,
+                            character_spacing: 0.0,
+                            revision_type: None,
+                            revision_author: None,
                         });
                     }
                     NodeType::Tab => {
@@ -667,8 +722,53 @@ impl<'a> LayoutEngine<'a> {
                             italic: false,
                             underline: false,
                             strikethrough: false,
+                            superscript: false,
+                            subscript: false,
+                            highlight_color: None,
+                            character_spacing: 0.0,
+                            revision_type: None,
+                            revision_author: None,
                         });
                     }
+                    // Bookmark/Comment markers — no visual output, skip silently
+                    NodeType::BookmarkStart
+                    | NodeType::BookmarkEnd
+                    | NodeType::CommentStart
+                    | NodeType::CommentEnd => {}
+                    // Field nodes — extract display text from FieldCode attribute
+                    NodeType::Field => {
+                        let field_text = child
+                            .attributes
+                            .get_string(&AttributeKey::FieldCode)
+                            .map(|s| s.to_string())
+                            .unwrap_or_default();
+                        if !field_text.is_empty() {
+                            let glyphs = synthesize_glyphs(&field_text, DEFAULT_FONT_SIZE);
+                            shaped_runs.push(ShapedRunInfo {
+                                source_id: child_id,
+                                font_id: None,
+                                font_size: DEFAULT_FONT_SIZE,
+                                color: s1_model::Color::new(0, 0, 0),
+                                glyphs,
+                                is_line_break: false,
+                                metrics: None,
+                                hyperlink_url: None,
+                                text: field_text,
+                                bold: false,
+                                italic: false,
+                                underline: false,
+                                strikethrough: false,
+                                superscript: false,
+                                subscript: false,
+                                highlight_color: None,
+                                character_spacing: 0.0,
+                                revision_type: None,
+                                revision_author: None,
+                            });
+                        }
+                    }
+                    // Drawing — skip (TODO: inline drawings)
+                    NodeType::Drawing | NodeType::Image => {}
                     _ => {}
                 }
             }
@@ -685,7 +785,18 @@ impl<'a> LayoutEngine<'a> {
         Ok(LayoutBlock {
             source_id: para_id,
             bounds: Rect::new(x_start, y_pos, available_width, total_height),
-            kind: LayoutBlockKind::Paragraph { lines },
+            kind: LayoutBlockKind::Paragraph {
+                lines,
+                text_align: match para_style.alignment {
+                    s1_model::Alignment::Left => None,
+                    s1_model::Alignment::Center => Some("center".to_string()),
+                    s1_model::Alignment::Right => Some("right".to_string()),
+                    s1_model::Alignment::Justify => Some("justify".to_string()),
+                    _ => None,
+                },
+                background_color: None,
+                border: None,
+            },
         })
     }
 
@@ -772,6 +883,151 @@ impl<'a> LayoutEngine<'a> {
             italic: run_style.italic,
             underline: run_style.underline,
             strikethrough: run_style.strikethrough,
+            superscript: run_style.superscript,
+            subscript: run_style.subscript,
+            highlight_color: run_style.highlight_color,
+            character_spacing: run_style.character_spacing,
+            revision_type: run_style.revision_type.clone(),
+            revision_author: run_style.revision_author.clone(),
+        })
+    }
+
+    /// Shape a Run that contains LineBreak children — split into multiple shaped runs.
+    fn shape_run_with_breaks(
+        &self,
+        run_id: NodeId,
+        shaped_runs: &mut Vec<ShapedRunInfo>,
+    ) -> Result<(), LayoutError> {
+        let run_node = match self.doc.node(run_id) {
+            Some(n) => n,
+            None => return Ok(()),
+        };
+        let run_style = resolve_run_style(self.doc, run_id);
+        let font_id = self
+            .font_db
+            .find(&run_style.font_family, run_style.bold, run_style.italic)
+            .or_else(|| self.font_db.find(DEFAULT_FONT_FAMILY, false, false))
+            .or_else(|| self.font_db.find("Helvetica", false, false))
+            .or_else(|| self.font_db.find("Arial", false, false))
+            .or_else(|| self.font_db.find("DejaVu Sans", false, false));
+
+        let hyperlink_url = run_node.attributes.get_string(&AttributeKey::HyperlinkUrl)
+            .map(|s| s.to_string())
+            .or_else(|| {
+                run_node.parent.and_then(|pid| {
+                    self.doc.node(pid).and_then(|p| {
+                        p.attributes.get_string(&AttributeKey::HyperlinkUrl).map(|s| s.to_string())
+                    })
+                })
+            });
+
+        // Iterate children, accumulate text segments between line breaks
+        let mut segment_text = String::new();
+        for &child_id in &run_node.children {
+            if let Some(child) = self.doc.node(child_id) {
+                match child.node_type {
+                    NodeType::Text => {
+                        if let Some(t) = &child.text_content {
+                            segment_text.push_str(t);
+                        }
+                    }
+                    NodeType::LineBreak => {
+                        // Flush current text segment as a shaped run
+                        if !segment_text.is_empty() {
+                            let info = self.shape_text_segment(
+                                run_id, &segment_text, &run_style, font_id, hyperlink_url.clone(),
+                            )?;
+                            shaped_runs.push(info);
+                            segment_text.clear();
+                        }
+                        // Add line break marker
+                        shaped_runs.push(ShapedRunInfo {
+                            source_id: child_id,
+                            font_id: None,
+                            font_size: run_style.font_size,
+                            color: run_style.color,
+                            glyphs: Vec::new(),
+                            is_line_break: true,
+                            metrics: None,
+                            hyperlink_url: None,
+                            text: String::new(),
+                            bold: run_style.bold,
+                            italic: run_style.italic,
+                            underline: run_style.underline,
+                            strikethrough: run_style.strikethrough,
+                            superscript: run_style.superscript,
+                            subscript: run_style.subscript,
+                            highlight_color: run_style.highlight_color,
+                            character_spacing: run_style.character_spacing,
+                            revision_type: run_style.revision_type.clone(),
+                            revision_author: run_style.revision_author.clone(),
+                        });
+                    }
+                    NodeType::Tab => {
+                        segment_text.push('\t');
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Flush remaining text
+        if !segment_text.is_empty() {
+            let info = self.shape_text_segment(
+                run_id, &segment_text, &run_style, font_id, hyperlink_url,
+            )?;
+            shaped_runs.push(info);
+        }
+        Ok(())
+    }
+
+    /// Shape a text segment with given run styling.
+    fn shape_text_segment(
+        &self,
+        source_id: NodeId,
+        text: &str,
+        run_style: &ResolvedRunStyle,
+        font_id: Option<s1_text::FontId>,
+        hyperlink_url: Option<String>,
+    ) -> Result<ShapedRunInfo, LayoutError> {
+        let (glyphs, metrics) = if let Some(fid) = font_id {
+            if let Some(font) = self.font_db.load_font(fid) {
+                let font_size = if run_style.superscript || run_style.subscript {
+                    run_style.font_size * 0.65
+                } else {
+                    run_style.font_size
+                };
+                let glyphs = s1_text::shape_text(
+                    text, &font, font_size, &[], None, s1_text::Direction::Ltr,
+                )?;
+                let metrics = font.metrics(font_size);
+                (glyphs, Some(metrics))
+            } else {
+                (synthesize_glyphs(text, run_style.font_size), None)
+            }
+        } else {
+            (synthesize_glyphs(text, run_style.font_size), None)
+        };
+
+        Ok(ShapedRunInfo {
+            source_id,
+            font_id,
+            font_size: run_style.font_size,
+            color: run_style.color,
+            glyphs,
+            is_line_break: false,
+            metrics,
+            hyperlink_url,
+            text: text.to_string(),
+            bold: run_style.bold,
+            italic: run_style.italic,
+            underline: run_style.underline,
+            strikethrough: run_style.strikethrough,
+            superscript: run_style.superscript,
+            subscript: run_style.subscript,
+            highlight_color: run_style.highlight_color,
+            character_spacing: run_style.character_spacing,
+            revision_type: run_style.revision_type.clone(),
+            revision_author: run_style.revision_author.clone(),
         })
     }
 
@@ -839,6 +1095,12 @@ impl<'a> LayoutEngine<'a> {
                             italic: run_info.italic,
                             underline: run_info.underline,
                             strikethrough: run_info.strikethrough,
+                            superscript: run_info.superscript,
+                            subscript: run_info.subscript,
+                            highlight_color: run_info.highlight_color,
+                            character_spacing: run_info.character_spacing,
+                            revision_type: run_info.revision_type.clone(),
+                            revision_author: run_info.revision_author.clone(),
                         });
                         current_x += width;
                         if *height > max_height {
@@ -992,9 +1254,34 @@ impl<'a> LayoutEngine<'a> {
                             max_cell_height = cell_y;
                         }
 
+                        // Extract cell background color
+                        let background_color = cell_node.attributes
+                            .get(&AttributeKey::CellBackground)
+                            .and_then(|v| if let AttributeValue::Color(c) = v { Some(*c) } else { None });
+
+                        // Extract cell borders
+                        let (border_top, border_bottom, border_left, border_right) =
+                            if let Some(AttributeValue::Borders(borders)) =
+                                cell_node.attributes.get(&AttributeKey::CellBorders)
+                            {
+                                (
+                                    borders.top.as_ref().map(format_border_css),
+                                    borders.bottom.as_ref().map(format_border_css),
+                                    borders.left.as_ref().map(format_border_css),
+                                    borders.right.as_ref().map(format_border_css),
+                                )
+                            } else {
+                                (None, None, None, None)
+                            };
+
                         cells.push(LayoutTableCell {
                             bounds: cell_rect,
                             blocks: cell_blocks,
+                            background_color,
+                            border_top,
+                            border_bottom,
+                            border_left,
+                            border_right,
                         });
                     }
                 }
@@ -1211,7 +1498,7 @@ impl<'a> LayoutEngine<'a> {
                 return Ok(LayoutBlock {
                     source_id: node_id,
                     bounds: Rect::new(hf_x, hf_y, hf_width, 0.0),
-                    kind: LayoutBlockKind::Paragraph { lines: Vec::new() },
+                    kind: LayoutBlockKind::Paragraph { lines: Vec::new(), text_align: None, background_color: None, border: None },
                 });
             }
         };
@@ -1250,7 +1537,7 @@ impl<'a> LayoutEngine<'a> {
             let lines = blocks
                 .into_iter()
                 .filter_map(|b| {
-                    if let LayoutBlockKind::Paragraph { lines } = b.kind {
+                    if let LayoutBlockKind::Paragraph { lines, .. } = b.kind {
                         Some(lines)
                     } else {
                         None
@@ -1262,7 +1549,7 @@ impl<'a> LayoutEngine<'a> {
             Ok(LayoutBlock {
                 source_id: node_id,
                 bounds: Rect::new(hf_x, hf_y, hf_width, total_height),
-                kind: LayoutBlockKind::Paragraph { lines },
+                kind: LayoutBlockKind::Paragraph { lines, text_align: None, background_color: None, border: None },
             })
         }
     }
@@ -1299,7 +1586,7 @@ impl<'a> LayoutEngine<'a> {
 
                         // Find any glyph run with this source_id and update it,
                         // or append a synthesized run to the last line
-                        if let LayoutBlockKind::Paragraph { lines } = &mut block.kind {
+                        if let LayoutBlockKind::Paragraph { lines, .. } = &mut block.kind {
                             let font_size = DEFAULT_FONT_SIZE;
                             let glyphs = synthesize_glyphs(&text, font_size);
                             let width: f64 = glyphs.iter().map(|g| g.x_advance).sum();
@@ -1325,6 +1612,12 @@ impl<'a> LayoutEngine<'a> {
                                     italic: false,
                                     underline: false,
                                     strikethrough: false,
+                                    superscript: false,
+                                    subscript: false,
+                                    highlight_color: None,
+                                    character_spacing: 0.0,
+                                    revision_type: None,
+                                    revision_author: None,
                                 });
                             }
                         }
@@ -1366,7 +1659,7 @@ impl<'a> LayoutEngine<'a> {
 
                 // Check last block on current page — is it a paragraph with too few lines?
                 let orphan_problem = if let Some(last_block) = current_page.blocks.last() {
-                    if let LayoutBlockKind::Paragraph { lines } = &last_block.kind {
+                    if let LayoutBlockKind::Paragraph { lines, .. } = &last_block.kind {
                         lines.len() > 1 && lines.len() < min_orphan + min_widow
                     } else {
                         false
@@ -1377,7 +1670,7 @@ impl<'a> LayoutEngine<'a> {
 
                 // Check first block on next page — is it a continuation with too few lines?
                 let widow_problem = if let Some(first_block) = next_page.blocks.first() {
-                    if let LayoutBlockKind::Paragraph { lines } = &first_block.kind {
+                    if let LayoutBlockKind::Paragraph { lines, .. } = &first_block.kind {
                         !lines.is_empty() && lines.len() < min_widow
                     } else {
                         false
@@ -1505,6 +1798,18 @@ struct ShapedRunInfo {
     underline: bool,
     /// Strikethrough formatting.
     strikethrough: bool,
+    /// Superscript formatting.
+    superscript: bool,
+    /// Subscript formatting.
+    subscript: bool,
+    /// Highlight/background color.
+    highlight_color: Option<s1_model::Color>,
+    /// Character spacing in points.
+    character_spacing: f64,
+    /// Revision type for track changes.
+    revision_type: Option<String>,
+    /// Revision author for track changes.
+    revision_author: Option<String>,
 }
 
 /// Compute a content hash for a node and its descendants.
@@ -1584,6 +1889,24 @@ fn hash_node(doc: &DocumentModel, node_id: NodeId, hash: &mut u64) {
             hash_node(doc, child_id, hash);
         }
     }
+}
+
+/// Format a border side as a CSS border value.
+fn format_border_css(border: &s1_model::BorderSide) -> String {
+    let style_str = match border.style {
+        s1_model::BorderStyle::None => "none",
+        s1_model::BorderStyle::Single => "solid",
+        s1_model::BorderStyle::Double => "double",
+        s1_model::BorderStyle::Dotted => "dotted",
+        s1_model::BorderStyle::Dashed => "dashed",
+        s1_model::BorderStyle::Thick => "solid",
+        _ => "solid",
+    };
+    let width = if border.width > 0.0 { border.width } else { 1.0 };
+    format!(
+        "{:.1}pt {} #{:02x}{:02x}{:02x}",
+        width, style_str, border.color.r, border.color.g, border.color.b
+    )
 }
 
 /// Synthesize glyphs when no font is available (fallback for headless testing).
@@ -1935,7 +2258,7 @@ mod tests {
         assert_eq!(result.pages.len(), 1);
         assert_eq!(result.pages[0].blocks.len(), 1);
         match &result.pages[0].blocks[0].kind {
-            LayoutBlockKind::Paragraph { lines } => {
+            LayoutBlockKind::Paragraph { lines, .. } => {
                 assert!(!lines.is_empty());
                 assert!(!lines[0].runs.is_empty());
             }
@@ -2009,7 +2332,7 @@ mod tests {
         let result = engine.layout().unwrap();
         assert_eq!(result.pages[0].blocks.len(), 1);
         match &result.pages[0].blocks[0].kind {
-            LayoutBlockKind::Paragraph { lines } => {
+            LayoutBlockKind::Paragraph { lines, .. } => {
                 assert_eq!(lines.len(), 1);
                 assert!(lines[0].height > 0.0);
             }
@@ -3046,7 +3369,7 @@ mod tests {
         // Find the page with section 1's content
         let section1_page = result.pages.iter().find(|p| {
             p.blocks.iter().any(|b| {
-                if let LayoutBlockKind::Paragraph { lines } = &b.kind {
+                if let LayoutBlockKind::Paragraph { lines, .. } = &b.kind {
                     lines.iter().any(|l| !l.runs.is_empty())
                 } else {
                     false

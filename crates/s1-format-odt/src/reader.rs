@@ -9,6 +9,7 @@ use zip::ZipArchive;
 use crate::content_parser::{parse_content_body, ParseContext};
 use crate::error::OdtError;
 use crate::metadata_parser::parse_meta_xml;
+use crate::settings_parser::parse_settings_xml;
 use crate::style_parser::{parse_automatic_styles, parse_styles_xml, HfContent, HfSegment};
 use crate::xml_util::mime_for_extension;
 
@@ -43,6 +44,13 @@ pub fn read(data: &[u8]) -> Result<DocumentModel, OdtError> {
     // 5. Parse meta.xml (optional)
     if let Ok(meta_xml) = read_zip_entry(&mut archive, "meta.xml") {
         parse_meta_xml(&meta_xml, &mut doc)?;
+    }
+
+    // 5b. Parse settings.xml (optional — zoom, view settings)
+    if let Ok(settings_xml) = read_zip_entry(&mut archive, "settings.xml") {
+        // Parse settings but currently we just validate it; settings data
+        // could be used for editor zoom level in the future
+        let _settings = parse_settings_xml(&settings_xml)?;
     }
 
     // 6. Build section properties from master page info

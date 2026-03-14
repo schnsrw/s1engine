@@ -1,0 +1,18 @@
+{
+  "name": "folio-editor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "wasm": "cd .. && wasm-pack build ffi/wasm --target web --out-dir ../../editor/wasm-pkg",
+    "test": "npx playwright test",
+    "test:ui": "npx playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "vite": "^5.0.0"
+  }
+}

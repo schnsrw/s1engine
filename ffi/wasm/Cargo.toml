@@ -15,11 +15,13 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-s1engine = { workspace = true, features = ["layout", "pdf"] }
+s1engine = { workspace = true, features = ["layout", "pdf", "crdt"] }
 s1-model = { workspace = true }
 s1-layout = { workspace = true }
 s1-text = { workspace = true }
 s1-format-pdf = { workspace = true }
+s1-crdt = { workspace = true }
+s1-ops = { workspace = true }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 

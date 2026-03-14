@@ -339,6 +339,15 @@ fn write_paragraph(
                 }
                 i += 1;
             }
+            NodeType::Drawing => {
+                // Write shape using stored raw XML for round-trip fidelity
+                if let Some(raw) = child.attributes.get_string(&AttributeKey::ShapeRawXml) {
+                    xml.push_str("<w:r>");
+                    xml.push_str(raw);
+                    xml.push_str("</w:r>");
+                }
+                i += 1;
+            }
             _ => {
                 i += 1;
             }
@@ -657,7 +666,8 @@ fn write_border_side(name: &str, side: &BorderSide, xml: &mut String) {
     ));
 }
 
-/// Write an inline image as `<w:r><w:drawing><wp:inline>…</wp:inline></w:drawing></w:r>`.
+/// Write an image as `<w:r><w:drawing>…</w:drawing></w:r>`.
+/// Supports both inline (`wp:inline`) and floating (`wp:anchor`) images.
 fn write_image(
     doc: &DocumentModel,
     image_id: NodeId,
@@ -710,12 +720,88 @@ fn write_image(
         .get_string(&AttributeKey::ImageAltText)
         .unwrap_or("");
 
-    xml.push_str("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">");
-    xml.push_str(&format!(r#"<wp:extent cx="{cx}" cy="{cy}"/>"#));
-    xml.push_str(&format!(
-        r#"<wp:docPr id="{idx}" name="Image{idx}" descr="{}"/>"#,
-        escape_xml(alt)
-    ));
+    // Check if this is a floating (anchor) image
+    let is_floating = image
+        .attributes
+        .get_string(&AttributeKey::ImagePositionType)
+        .map(|s| s == "anchor")
+        .unwrap_or(false);
+
+    xml.push_str("<w:r><w:drawing>");
+
+    if is_floating {
+        // Floating image — output wp:anchor
+        let dist_str = image
+            .attributes
+            .get_string(&AttributeKey::ImageDistanceFromText)
+            .unwrap_or("0,0,0,0");
+        let dists: Vec<&str> = dist_str.split(',').collect();
+        let dist_t = dists.first().unwrap_or(&"0");
+        let dist_b = dists.get(1).unwrap_or(&"0");
+        let dist_l = dists.get(2).unwrap_or(&"0");
+        let dist_r = dists.get(3).unwrap_or(&"0");
+
+        xml.push_str(&format!(
+            r#"<wp:anchor distT="{dist_t}" distB="{dist_b}" distL="{dist_l}" distR="{dist_r}" simplePos="0" relativeHeight="0" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">"#
+        ));
+        xml.push_str(r#"<wp:simplePos x="0" y="0"/>"#);
+
+        // Horizontal position
+        let h_rel = image
+            .attributes
+            .get_string(&AttributeKey::ImageHorizontalRelativeFrom)
+            .unwrap_or("column");
+        let h_off = image
+            .attributes
+            .get_i64(&AttributeKey::ImageHorizontalOffset)
+            .unwrap_or(0);
+        xml.push_str(&format!(
+            r#"<wp:positionH relativeFrom="{h_rel}"><wp:posOffset>{h_off}</wp:posOffset></wp:positionH>"#
+        ));
+
+        // Vertical position
+        let v_rel = image
+            .attributes
+            .get_string(&AttributeKey::ImageVerticalRelativeFrom)
+            .unwrap_or("paragraph");
+        let v_off = image
+            .attributes
+            .get_i64(&AttributeKey::ImageVerticalOffset)
+            .unwrap_or(0);
+        xml.push_str(&format!(
+            r#"<wp:positionV relativeFrom="{v_rel}"><wp:posOffset>{v_off}</wp:posOffset></wp:positionV>"#
+        ));
+
+        xml.push_str(&format!(r#"<wp:extent cx="{cx}" cy="{cy}"/>"#));
+        xml.push_str("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>");
+        xml.push_str(&format!(
+            r#"<wp:docPr id="{idx}" name="Image{idx}" descr="{}"/>"#,
+            escape_xml(alt)
+        ));
+
+        // Wrap type
+        let wrap = image
+            .attributes
+            .get_string(&AttributeKey::ImageWrapType)
+            .unwrap_or("square");
+        match wrap {
+            "none" => xml.push_str("<wp:wrapNone/>"),
+            "tight" => xml.push_str(r#"<wp:wrapTight wrapText="bothSides"><wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/><wp:lineTo x="21600" y="0"/><wp:lineTo x="0" y="0"/></wp:wrapPolygon></wp:wrapTight>"#),
+            "through" => xml.push_str(r#"<wp:wrapThrough wrapText="bothSides"><wp:wrapPolygon edited="0"><wp:start x="0" y="0"/><wp:lineTo x="0" y="21600"/><wp:lineTo x="21600" y="21600"/><wp:lineTo x="21600" y="0"/><wp:lineTo x="0" y="0"/></wp:wrapPolygon></wp:wrapThrough>"#),
+            "topAndBottom" => xml.push_str("<wp:wrapTopAndBottom/>"),
+            _ => xml.push_str(r#"<wp:wrapSquare wrapText="bothSides"/>"#), // default: square
+        }
+    } else {
+        // Inline image — output wp:inline
+        xml.push_str("<wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">");
+        xml.push_str(&format!(r#"<wp:extent cx="{cx}" cy="{cy}"/>"#));
+        xml.push_str(&format!(
+            r#"<wp:docPr id="{idx}" name="Image{idx}" descr="{}"/>"#,
+            escape_xml(alt)
+        ));
+    }
+
+    // Common graphic element (same for both inline and anchor)
     xml.push_str("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
     xml.push_str(&format!(
         r#"<pic:pic><pic:nvPicPr><pic:cNvPr id="{idx}" name="Image{idx}"/><pic:cNvPicPr/></pic:nvPicPr>"#
@@ -726,7 +812,12 @@ fn write_image(
     xml.push_str(&format!(
         r#"<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>"#
     ));
-    xml.push_str("</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>");
+
+    if is_floating {
+        xml.push_str("</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>");
+    } else {
+        xml.push_str("</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>");
+    }
 }
 
 /// Generate paragraph properties XML from a Node.
@@ -2074,5 +2165,105 @@ mod tests {
         // FormatChange should NOT wrap in <w:ins> or <w:del>
         assert!(!xml.contains("<w:ins"));
         assert!(!xml.contains("<w:del"));
+    }
+
+    #[test]
+    fn write_floating_image_anchor() {
+        let mut doc = DocumentModel::new();
+        let para_id = doc.next_id();
+        doc.insert_node(doc.body_id().unwrap(), 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        // Create a Run to hold the image
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+
+        // Create floating image node
+        let img_id = doc.next_id();
+        let mut img = Node::new(img_id, NodeType::Image);
+        let media_id = doc.media_mut().insert("image/png", vec![0x89, 0x50, 0x4E, 0x47], Some("float.png".to_string()));
+        img.attributes.set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+        img.attributes.set(AttributeKey::ImageWidth, AttributeValue::Float(200.0));
+        img.attributes.set(AttributeKey::ImageHeight, AttributeValue::Float(150.0));
+        img.attributes.set(AttributeKey::ImagePositionType, AttributeValue::String("anchor".to_string()));
+        img.attributes.set(AttributeKey::ImageWrapType, AttributeValue::String("square".to_string()));
+        img.attributes.set(AttributeKey::ImageHorizontalOffset, AttributeValue::Int(914400));
+        img.attributes.set(AttributeKey::ImageVerticalOffset, AttributeValue::Int(457200));
+        img.attributes.set(AttributeKey::ImageHorizontalRelativeFrom, AttributeValue::String("column".to_string()));
+        img.attributes.set(AttributeKey::ImageVerticalRelativeFrom, AttributeValue::String("paragraph".to_string()));
+        img.attributes.set(AttributeKey::ImageDistanceFromText, AttributeValue::String("45720,45720,114300,114300".to_string()));
+        img.attributes.set(AttributeKey::ImageAltText, AttributeValue::String("Float test".to_string()));
+        doc.insert_node(para_id, 0, img).unwrap();
+
+        let (xml, image_rels, _) = write_document_xml(&doc);
+
+        // Should use wp:anchor, not wp:inline
+        assert!(xml.contains("<wp:anchor"), "should contain wp:anchor");
+        assert!(!xml.contains("<wp:inline"), "should not contain wp:inline");
+
+        // Check positioning
+        assert!(xml.contains(r#"relativeFrom="column">"#));
+        assert!(xml.contains("<wp:posOffset>914400</wp:posOffset>"));
+        assert!(xml.contains(r#"relativeFrom="paragraph">"#));
+        assert!(xml.contains("<wp:posOffset>457200</wp:posOffset>"));
+
+        // Check wrap type
+        assert!(xml.contains("<wp:wrapSquare"));
+
+        // Check distances
+        assert!(xml.contains(r#"distT="45720""#));
+        assert!(xml.contains(r#"distL="114300""#));
+
+        // Check image relationship
+        assert_eq!(image_rels.len(), 1);
+    }
+
+    #[test]
+    fn write_shape_roundtrip_raw_xml() {
+        let mut doc = DocumentModel::new();
+        let para_id = doc.next_id();
+        doc.insert_node(doc.body_id().unwrap(), 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let shape_id = doc.next_id();
+        let mut shape = Node::new(shape_id, NodeType::Drawing);
+        shape.attributes.set(AttributeKey::ShapeType, AttributeValue::String("rect".to_string()));
+        shape.attributes.set(AttributeKey::ShapeWidth, AttributeValue::Float(200.0));
+        shape.attributes.set(AttributeKey::ShapeHeight, AttributeValue::Float(100.0));
+        shape.attributes.set(AttributeKey::ShapeFillColor, AttributeValue::String("FF0000".to_string()));
+        let raw = r##"<w:pict><v:rect style="width:200pt;height:100pt" fillcolor="#FF0000"/></w:pict>"##;
+        shape.attributes.set(AttributeKey::ShapeRawXml, AttributeValue::String(raw.to_string()));
+        doc.insert_node(para_id, 0, shape).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+
+        // Should contain the raw VML wrapped in a run
+        assert!(xml.contains("<w:r><w:pict>"), "should wrap shape in run");
+        assert!(xml.contains("v:rect"), "should preserve shape element");
+        assert!(xml.contains("fillcolor"), "should preserve fill color");
+    }
+
+    #[test]
+    fn write_inline_image_default() {
+        let mut doc = DocumentModel::new();
+        let para_id = doc.next_id();
+        doc.insert_node(doc.body_id().unwrap(), 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let img_id = doc.next_id();
+        let mut img = Node::new(img_id, NodeType::Image);
+        let media_id = doc.media_mut().insert("image/png", vec![0x89, 0x50], Some("inline.png".to_string()));
+        img.attributes.set(AttributeKey::ImageMediaId, AttributeValue::MediaId(media_id));
+        img.attributes.set(AttributeKey::ImageWidth, AttributeValue::Float(100.0));
+        img.attributes.set(AttributeKey::ImageHeight, AttributeValue::Float(100.0));
+        // No ImagePositionType set — should default to inline
+        doc.insert_node(para_id, 0, img).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+
+        // Should use wp:inline, not wp:anchor
+        assert!(xml.contains("<wp:inline"), "should contain wp:inline");
+        assert!(!xml.contains("<wp:anchor"), "should not contain wp:anchor");
     }
 }

@@ -1,0 +1,7 @@
+[package]
+name = "create_test_doc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+s1engine = { path = "../../../crates/s1engine", features = ["docx", "odt", "txt"] }

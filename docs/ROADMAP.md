@@ -12,6 +12,8 @@ Phase 4: Collaboration      █████████████████�
 Phase 5: Production Ready   ████████████████████  COMPLETE (WASM, C FFI, hardening)
 Phase 6: Fidelity & MD      ████████████████████  COMPLETE (F.1-F.7 all milestones)
 Phase 7: Hardening Plan     ████████████████████  COMPLETE (15/15 milestones + bug fixes)
+Phase 8: Editor API         ████████████████████  COMPLETE (P.1-P.5, 44 new WASM tests)
+Phase 9: Editor Demo        ████████████████░░░░  MOSTLY COMPLETE (P.6+P.7 done, P.8+P.9 planned)
 ```
 
 ---
@@ -608,6 +610,113 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 #### WASM PDF Export (4 new tests)
 - [x] `to_pdf()`, `to_pdf_with_fonts()`, `to_pdf_data_url()`, `to_pdf_data_url_with_fonts()`
 - [x] Feature-gated `pdf` on s1engine (`export_pdf`, `export_pdf_with_config`)
+
+---
+
+## Phase 8: Production Editor API (P.1-P.5 COMPLETE)
+
+**Completed**: 2026-03-14
+**Tests**: 44 new WASM tests (102 total)
+**Goal**: Full WASM API for building a production-grade document editor. Selection-based formatting, table/image/structural editing, find & replace.
+
+### P.1: Selection & Range Formatting (COMPLETE — 12 tests)
+- [x] `split_run(node_id, char_offset)` — Split Run at character offset, preserve formatting
+- [x] `format_run(run_id, key, value)` — Set attribute on specific Run
+- [x] `format_selection(start_node, start_off, end_node, end_off, key, value)` — Format text range spanning runs/paragraphs (auto-splits, single transaction)
+- [x] `get_run_ids(paragraph_id)` — JSON array of run IDs
+- [x] `get_run_text(run_id)` — Text content of specific run
+- [x] `get_run_formatting_json(run_id)` — Formatting as JSON
+- [x] `get_selection_formatting_json(...)` — Common formatting (true/false/"mixed")
+- [x] Helper: `format_range_in_paragraph`, `split_run_internal`, `parse_format_kv`
+
+### P.2: Table Operations (COMPLETE — 10 tests)
+- [x] `insert_table(after_node, rows, cols)` — Full Table>Row>Cell>Para>Run>Text structure
+- [x] `insert_table_row(table_id, row_index)` — Insert row with matching column count
+- [x] `delete_table_row(table_id, row_index)` — Delete row
+- [x] `insert_table_column(table_id, col_index)` — Insert column across all rows
+- [x] `delete_table_column(table_id, col_index)` — Delete column across all rows
+- [x] `set_cell_text(cell_id, text)` / `get_cell_text(cell_id)` — Cell text get/set
+- [x] `get_table_dimensions(table_id)` — JSON `{rows, cols}`
+- [x] `merge_cells(table_id, start_row/col, end_row/col)` — ColumnSpan/RowSpan
+- [x] `set_cell_background(cell_id, hex)` — Cell background color
+
+### P.3: Image Operations (COMPLETE — 6 tests)
+- [x] `insert_image(after_node, data, content_type, width, height)` — Image node under Paragraph (per model constraints)
+- [x] `delete_image(image_id)` — Remove image node
+- [x] `resize_image(image_id, width, height)` — Update dimensions
+- [x] `get_image_data_url(image_id)` — Base64 data URL for display
+- [x] `set_image_alt_text(image_id, alt)` — Accessibility
+
+### P.4: Structural Elements (COMPLETE — 10 tests)
+- [x] `insert_hyperlink(run_id, url, tooltip)` / `remove_hyperlink(run_id)`
+- [x] `insert_bookmark(para_id, name)` — BookmarkStart + BookmarkEnd
+- [x] `set_list_format(para_id, format, level)` — bullet/decimal/none
+- [x] `insert_page_break(after_node)` / `insert_horizontal_rule(after_node)`
+- [x] `get_comments_json()` / `insert_comment(...)` / `delete_comment(comment_id)`
+- [x] `get_sections_json()` — Page size, margins, orientation
+
+### P.5: Find & Replace (COMPLETE — 6 tests)
+- [x] `find_text(query, case_sensitive)` — JSON array of `{nodeId, offset, length}`
+- [x] `replace_text(node_id, offset, length, replacement)` — Single replacement
+- [x] `replace_all(query, replacement, case_sensitive)` — Atomic transaction, returns count
+- [x] `paste_plain_text(para_id, offset, text)` — Multi-paragraph paste (splits on newlines)
+- [x] `get_document_text()` — Full document text
+
+---
+
+## Phase 9: Production Editor Demo (MOSTLY COMPLETE)
+
+**Goal**: Complete rewrite of `demo/index.html` as operation-based editor. All mutations through WASM, no `document.execCommand()`. Collaboration API exposed via WASM.
+
+### P.6: Collaboration WASM API (COMPLETE)
+- [x] `WasmCollabDocument` struct wrapping `CollabDocument`
+- [x] `create_collab(replica_id)` / `open_collab(data, replica_id)` on WasmEngine
+- [x] `apply_local_insert_text()` / `apply_local_delete_text()` / `apply_local_format()` — returns serialized CRDT ops
+- [x] `apply_remote_ops(json)` — apply received remote operations
+- [x] `get_state_vector()` / `get_changes_since(state_vector_json)` — delta sync
+- [x] `set_cursor(node_id, offset, user_name, user_color)` / `apply_awareness_update()` — cursor awareness
+- [x] `get_peers_json()` — peer cursor positions
+- [x] `undo()` / `redo()` / `can_undo()` / `can_redo()` — local undo/redo with CRDT broadcast
+- [x] `compact_op_log()` / `gc_tombstones()` / `auto_compact()` — session management
+- [x] `snapshot()` / `restore_snapshot()` — full snapshot sync
+- [x] `to_html()` / `export(format)` — render/export collaborative doc
+
+### P.7: Demo Editor Rewrite (COMPLETE)
+- [x] WYSIWYG editor with contentEditable and WASM-backed operations
+- [x] Google Docs-style UI: menu bar, formatting toolbar, insert bar
+- [x] Formatting via `format_selection()` WASM API (Bold, Italic, Underline, Strikethrough, Font, Size, Color, Highlight)
+- [x] Paragraph operations: Enter splits, Backspace merges, all via WASM
+- [x] Heading levels (Normal, H1-H6) via `set_heading_level()`
+- [x] Block formatting: alignment, lists (bullet/numbered)
+- [x] Keyboard shortcuts (Cmd/Ctrl+B/I/U/Z/Shift+Z)
+- [x] Insert menu: Table, Image, Hyperlink, Page Break, Horizontal Rule
+- [x] Table editing: insert/delete rows/columns, cell text editing, cell background
+- [x] Image editing: insert from file, resize, delete, alt text
+- [x] Find & Replace (Ctrl+F/H with match highlighting)
+- [x] Comments (view, insert, delete)
+- [x] Track changes visual indicators (accept/reject all)
+- [x] Undo/Redo via WASM history
+- [x] Export dropdown (DOCX/ODT/TXT/MD/PDF)
+- [x] Pages view (paginated HTML from layout engine)
+- [x] Text view (plain text read-only)
+- [x] Drag-and-drop file opening
+- [x] Status bar (word count, paragraph count, format, zoom)
+
+### P.8: Collaboration Frontend (PLANNED)
+- [ ] WebSocket relay server
+- [ ] Wire local edits → serialize → broadcast
+- [ ] Wire received ops → apply_remote → re-render
+- [ ] Peer cursor rendering (colored carets)
+- [ ] Connection status UI
+- [ ] Offline editing + reconnect sync
+- [ ] Share URL generation
+
+### P.9: Polish & Performance (PLANNED)
+- [ ] Edge cases (empty paragraphs, table navigation, HTML paste)
+- [ ] Performance (debounce DOM patches, lazy render, virtual scroll)
+- [ ] Accessibility (ARIA labels, keyboard navigation)
+- [ ] Mobile (touch selection, responsive toolbar)
+- [ ] Playwright e2e tests
 
 ---
 

@@ -65,6 +65,12 @@ pub enum LayoutBlockKind {
     Paragraph {
         /// Lines of text.
         lines: Vec<LayoutLine>,
+        /// Text alignment (CSS text-align value).
+        text_align: Option<String>,
+        /// Paragraph background color.
+        background_color: Option<Color>,
+        /// Paragraph border (CSS border shorthand).
+        border: Option<String>,
     },
     /// A table with rows.
     Table {
@@ -126,6 +132,18 @@ pub struct GlyphRun {
     pub underline: bool,
     /// Whether this run has strikethrough.
     pub strikethrough: bool,
+    /// Whether this run is superscript.
+    pub superscript: bool,
+    /// Whether this run is subscript.
+    pub subscript: bool,
+    /// Highlight/background color.
+    pub highlight_color: Option<Color>,
+    /// Character spacing in points (letter-spacing).
+    pub character_spacing: f64,
+    /// Revision type for track changes (e.g., "insertion", "deletion").
+    pub revision_type: Option<String>,
+    /// Revision author for track changes.
+    pub revision_author: Option<String>,
 }
 
 /// A table row in the layout.
@@ -146,6 +164,16 @@ pub struct LayoutTableCell {
     pub bounds: Rect,
     /// Content blocks inside the cell.
     pub blocks: Vec<LayoutBlock>,
+    /// Cell background color (if any).
+    pub background_color: Option<Color>,
+    /// Cell border top (CSS border string).
+    pub border_top: Option<String>,
+    /// Cell border bottom (CSS border string).
+    pub border_bottom: Option<String>,
+    /// Cell border left (CSS border string).
+    pub border_left: Option<String>,
+    /// Cell border right (CSS border string).
+    pub border_right: Option<String>,
 }
 
 /// A rectangle with position and size.

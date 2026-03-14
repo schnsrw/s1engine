@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+exclude = [
+    "editor/test-docs/create_test_doc",
+]
 members = [
     "crates/s1-model",
     "crates/s1-ops",
