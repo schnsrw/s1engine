@@ -44,12 +44,32 @@ export function renderDocument() {
     temp.innerHTML = html;
 
     // Extract header/footer HTML from WASM output
-    const hdrEl = temp.querySelector(':scope > header');
-    const ftrEl = temp.querySelector(':scope > footer');
-    state.docHeaderHtml = hdrEl ? hdrEl.innerHTML : '';
-    state.docFooterHtml = ftrEl ? ftrEl.innerHTML : '';
-    if (hdrEl) hdrEl.remove();
-    if (ftrEl) ftrEl.remove();
+    // Supports "different first page" — first-page headers/footers are separate
+    const headers = temp.querySelectorAll(':scope > header');
+    const footers = temp.querySelectorAll(':scope > footer');
+    state.docHeaderHtml = '';
+    state.docFooterHtml = '';
+    state.docFirstPageHeaderHtml = '';
+    state.docFirstPageFooterHtml = '';
+    state.hasDifferentFirstPage = false;
+    headers.forEach(h => {
+      if (h.dataset.headerType === 'first') {
+        state.docFirstPageHeaderHtml = h.innerHTML;
+        state.hasDifferentFirstPage = true;
+      } else {
+        state.docHeaderHtml = h.innerHTML;
+      }
+      h.remove();
+    });
+    footers.forEach(f => {
+      if (f.dataset.footerType === 'first') {
+        state.docFirstPageFooterHtml = f.innerHTML;
+        state.hasDifferentFirstPage = true;
+      } else {
+        state.docFooterHtml = f.innerHTML;
+      }
+      f.remove();
+    });
 
     // Clear nodeIdToElement map (DOM is rebuilt)
     state.nodeIdToElement.clear();

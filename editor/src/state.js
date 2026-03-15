@@ -47,6 +47,9 @@ export const state = {
   // Header/footer HTML extracted from WASM to_html()
   docHeaderHtml: '',
   docFooterHtml: '',
+  docFirstPageHeaderHtml: '',
+  docFirstPageFooterHtml: '',
+  hasDifferentFirstPage: false,
   // Page dimensions from WASM sections (in points)
   pageDims: null,
   // Multi-page rendering state

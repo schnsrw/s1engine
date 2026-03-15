@@ -20,11 +20,23 @@ export function repaginate() {
   syncAllTextInline();
 
   // Get authoritative page map from WASM layout engine
+  let pageMapJson = null;
+  try { pageMapJson = doc.get_page_map_json(); } catch (_) {}
+
   let pageMap = null;
-  try { pageMap = JSON.parse(doc.get_page_map_json()); } catch (_) {}
+  if (pageMapJson) {
+    try { pageMap = JSON.parse(pageMapJson); } catch (_) {}
+  }
+
+  // Fast-path: if the page map hasn't changed and DOM pages exist, skip reconciliation
+  if (pageMap && state._lastPageMapHash === pageMapJson && state.pageElements.length > 0) {
+    return;
+  }
+  state._lastPageMapHash = pageMapJson;
 
   if (!pageMap || !pageMap.pages || pageMap.pages.length === 0) {
     // Fallback: single page with all content
+    state._lastPageMapHash = null;
     ensureSinglePage(container);
     state.pageMap = null;
     _updateStatus();
@@ -33,8 +45,11 @@ export function repaginate() {
 
   const pages = pageMap.pages;
   const numPages = pages.length;
-  const headerHtml = state.docHeaderHtml || '';
-  const footerHtml = state.docFooterHtml || '';
+  const defaultHeaderHtml = state.docHeaderHtml || '';
+  const defaultFooterHtml = state.docFooterHtml || '';
+  const firstPageHeaderHtml = state.docFirstPageHeaderHtml || '';
+  const firstPageFooterHtml = state.docFirstPageFooterHtml || '';
+  const hasDifferentFirst = state.hasDifferentFirstPage || false;
 
   // Get page dimensions
   const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
@@ -53,7 +68,11 @@ export function repaginate() {
 
   // Create missing pages
   for (let i = existingCount; i < numPages; i++) {
-    const pageEl = createPageElement(i + 1, pages[i], dims, headerHtml, footerHtml, numPages);
+    const pageNum = i + 1;
+    const isFirstPage = pageNum === 1;
+    const hdr = (isFirstPage && hasDifferentFirst) ? firstPageHeaderHtml : defaultHeaderHtml;
+    const ftr = (isFirstPage && hasDifferentFirst) ? firstPageFooterHtml : defaultFooterHtml;
+    const pageEl = createPageElement(pageNum, pages[i], dims, hdr, ftr, numPages);
     container.appendChild(pageEl);
   }
 
@@ -75,8 +94,11 @@ export function repaginate() {
     // Update page dimensions
     applyPageStyle(pageEl, pg, dims);
 
-    // Update header/footer
-    updatePageHeaderFooter(pageEl, pg.pageNum, numPages, headerHtml, footerHtml);
+    // Update header/footer — first page uses first-page variants if available
+    const isFirstPage = pg.pageNum === 1;
+    const hdr = (isFirstPage && hasDifferentFirst) ? firstPageHeaderHtml : defaultHeaderHtml;
+    const ftr = (isFirstPage && hasDifferentFirst) ? firstPageFooterHtml : defaultFooterHtml;
+    updatePageHeaderFooter(pageEl, pg.pageNum, numPages, hdr, ftr);
 
     // Set of nodeIds that belong on this page
     const pageNodeIds = new Set(pg.nodeIds);
@@ -241,8 +263,6 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
   if (footerHtml) {
     footer.innerHTML = footerHtml;
     substitutePageNumbers(footer, pageNum, totalPages);
-  } else {
-    footer.innerHTML = `<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">${pageNum}</span>`;
   }
   pageEl.appendChild(footer);
 
@@ -282,7 +302,7 @@ function updatePageHeaderFooter(pageEl, pageNum, totalPages, headerHtml, footerH
       footer.innerHTML = footerHtml;
       substitutePageNumbers(footer, pageNum, totalPages);
     } else {
-      footer.innerHTML = `<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">${pageNum}</span>`;
+      footer.innerHTML = '';
     }
   }
 }

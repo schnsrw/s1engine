@@ -15,10 +15,30 @@ const PAGE = () => {
   return $('pageContainer');
 };
 
-export function findParagraphEl(node) {
+export function findParagraphEl(node, offset) {
   let n = node;
   const page = PAGE();
-  while (n && n !== page) {
+
+  // When the node IS the page-content (or pageContainer) and offset points to a
+  // child element, resolve to that child first.  This happens when the browser
+  // represents a cross-paragraph selection end as (contenteditable, childIndex).
+  if (n && (n === page || n === $('pageContainer')) && n.nodeType === 1 && typeof offset === 'number') {
+    const children = n.childNodes;
+    // offset points AFTER the child, so the last selected element is offset-1
+    const targetIdx = Math.max(0, Math.min(offset - 1, children.length - 1));
+    const child = children[targetIdx];
+    if (child) {
+      // If the child itself is a paragraph, return it
+      if (child.nodeType === 1 && child.dataset?.nodeId) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === 'p' || /^h[1-6]$/.test(tag)) return child;
+      }
+      // Otherwise descend into the child to find a paragraph
+      n = child;
+    }
+  }
+
+  while (n && n !== page && n !== $('pageContainer')) {
     if (n.nodeType === 1 && n.dataset?.nodeId) {
       const tag = n.tagName.toLowerCase();
       if (tag === 'p' || /^h[1-6]$/.test(tag)) return n;
@@ -28,10 +48,22 @@ export function findParagraphEl(node) {
   return null;
 }
 
-export function findNodeEl(node) {
+export function findNodeEl(node, offset) {
   let n = node;
   const page = PAGE();
-  while (n && n !== page) {
+
+  // Same container-level resolution as findParagraphEl
+  if (n && (n === page || n === $('pageContainer')) && n.nodeType === 1 && typeof offset === 'number') {
+    const children = n.childNodes;
+    const targetIdx = Math.max(0, Math.min(offset - 1, children.length - 1));
+    const child = children[targetIdx];
+    if (child) {
+      if (child.nodeType === 1 && child.dataset?.nodeId) return child;
+      n = child;
+    }
+  }
+
+  while (n && n !== page && n !== $('pageContainer')) {
     if (n.nodeType === 1 && n.dataset?.nodeId) return n;
     n = n.parentNode;
   }
@@ -65,8 +97,8 @@ export function getSelectionInfo() {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return state.lastSelInfo;
   const range = sel.getRangeAt(0);
-  const startEl = findParagraphEl(range.startContainer);
-  const endEl = findParagraphEl(range.endContainer);
+  const startEl = findParagraphEl(range.startContainer, range.startOffset);
+  const endEl = findParagraphEl(range.endContainer, range.endOffset);
   if (!startEl) return state.lastSelInfo;
 
   const startOff = countCharsToPoint(startEl, range.startContainer, range.startOffset);
@@ -89,9 +121,9 @@ export function saveSelection() {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return;
   const range = sel.getRangeAt(0);
-  const startEl = findParagraphEl(range.startContainer);
+  const startEl = findParagraphEl(range.startContainer, range.startOffset);
   if (!startEl) return;
-  const endEl = findParagraphEl(range.endContainer);
+  const endEl = findParagraphEl(range.endContainer, range.endOffset);
   const startOff = countCharsToPoint(startEl, range.startContainer, range.startOffset);
   const endOff = endEl ? countCharsToPoint(endEl, range.endContainer, range.endOffset) : startOff;
   state.lastSelInfo = {

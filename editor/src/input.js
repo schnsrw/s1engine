@@ -18,23 +18,15 @@ export function initInput() {
   // ─── E-01 fix: Capture cursor offset before text insertion for pending formats ───
   page.addEventListener('beforeinput', (e) => {
     if (state.ignoreInput) return;
-    // E1.6 fix: Prevent browser from deleting page-break / HR elements via
-    // native deletion (deleteContentBackward/Forward). Check if any target
-    // range includes a non-editable element.
+    // Prevent deletion into non-editable elements (page headers/footers)
     if (e.inputType && e.inputType.startsWith('delete') && e.getTargetRanges) {
       const ranges = e.getTargetRanges();
       for (const r of ranges) {
-        // Walk through the range to see if it spans a page-break or HR
         const container = r.commonAncestorContainer;
         const parent = container.nodeType === 1 ? container : container.parentElement;
-        if (parent) {
-          const breaks = parent.querySelectorAll ? parent.querySelectorAll('.page-break, hr.page-break, .editor-header, .editor-footer') : [];
-          for (const b of breaks) {
-            if (r.intersectsNode?.(b)) {
-              e.preventDefault();
-              return;
-            }
-          }
+        if (parent && parent.closest?.('.page-header, .page-footer')) {
+          e.preventDefault();
+          return;
         }
       }
     }
@@ -215,6 +207,59 @@ export function initInput() {
       e.preventDefault(); deleteSelectedImage(); return;
     }
 
+    // ── Cross-page arrow key navigation ──
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowRight') && !e.ctrlKey && !e.metaKey) {
+      const el = getActiveElement();
+      if (el && isCursorAtEnd(el)) {
+        let next = el.nextElementSibling;
+        while (next && !next.dataset?.nodeId) next = next.nextElementSibling;
+        if (!next) {
+          // At end of page — jump to next page's first node
+          const pageContent = el.closest('.page-content');
+          const pageEl = pageContent?.closest('.doc-page');
+          if (pageEl) {
+            const pageIdx = state.pageElements.indexOf(pageEl);
+            if (pageIdx >= 0 && pageIdx < state.pageElements.length - 1) {
+              const nextPageContent = state.pageElements[pageIdx + 1]?.querySelector('.page-content');
+              const firstNode = nextPageContent?.querySelector(':scope > [data-node-id]');
+              if (firstNode) {
+                e.preventDefault();
+                nextPageContent.focus();
+                setCursorAtStart(firstNode);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowLeft') && !e.ctrlKey && !e.metaKey) {
+      const el = getActiveElement();
+      if (el && isCursorAtStart(el)) {
+        let prev = el.previousElementSibling;
+        while (prev && !prev.dataset?.nodeId) prev = prev.previousElementSibling;
+        if (!prev) {
+          // At start of page — jump to previous page's last node
+          const pageContent = el.closest('.page-content');
+          const pageEl = pageContent?.closest('.doc-page');
+          if (pageEl) {
+            const pageIdx = state.pageElements.indexOf(pageEl);
+            if (pageIdx > 0) {
+              const prevPageContent = state.pageElements[pageIdx - 1]?.querySelector('.page-content');
+              const prevNodes = prevPageContent?.querySelectorAll(':scope > [data-node-id]');
+              const lastNode = prevNodes?.length > 0 ? prevNodes[prevNodes.length - 1] : null;
+              if (lastNode) {
+                e.preventDefault();
+                prevPageContent.focus();
+                setCursorAtOffset(lastNode, Array.from(lastNode.textContent || '').length);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+
     const info = getSelectionInfo();
 
     // ── Ctrl/Cmd shortcuts ──
@@ -228,7 +273,28 @@ export function initInput() {
         case 'x': e.preventDefault(); doCut(e); return;
         case 'c': /* handled by copy event above */ return;
         case 'v': /* handled by paste event */ return;
-        case 'a': /* let browser handle select all */ return;
+        case 'a': {
+          // Select all: if multiple pages, select from first node to last node across all pages
+          if (state.pageElements.length > 1) {
+            e.preventDefault();
+            const allNodes = page.querySelectorAll('[data-node-id]');
+            if (allNodes.length >= 2) {
+              const first = allNodes[0];
+              const last = allNodes[allNodes.length - 1];
+              try {
+                const range = document.createRange();
+                range.setStartBefore(first);
+                range.setEndAfter(last);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              } catch (_) {
+                // Fallback: select within current page
+              }
+            }
+          }
+          return;
+        }
         case 's': e.preventDefault(); saveToLocal(); return;
         case 'f': e.preventDefault(); $('findBar').classList.add('show'); $('findInput').focus(); return;
         case 'h': e.preventDefault(); $('findBar').classList.add('show'); $('replaceInput')?.focus(); return;
@@ -370,31 +436,40 @@ export function initInput() {
       return;
     }
 
-    // ── E1.6: Prevent deletion of page-break / HR divs ──
+    // Prevent deletion when cursor is on non-editable elements
     if ((e.key === 'Delete' || e.key === 'Backspace') && !el) {
-      // Cursor might be on a non-editable element (page-break, HR)
       const sel = window.getSelection();
       if (sel && sel.anchorNode) {
         const anchor = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
-        if (anchor && (anchor.classList?.contains('page-break') || anchor.tagName === 'HR' ||
-            anchor.closest?.('.page-break') || anchor.closest?.('.editor-header') || anchor.closest?.('.editor-footer'))) {
+        if (anchor && anchor.closest?.('.page-header, .page-footer')) {
           e.preventDefault();
           return;
         }
       }
     }
 
-    // ── Backspace at start — merge prev ──
+    // ── Backspace at start — merge prev (including cross-page) ──
     if (e.key === 'Backspace' && el && isCursorAtStart(el)) {
       let prev = el.previousElementSibling;
-      // Skip CSS pagination divs (editor-header/footer, page-break DIVs) but
-      // NOT model-level page break HRs — those should block merging.
-      while (prev && prev.tagName !== 'HR' && (prev.classList.contains('page-break') || prev.classList.contains('editor-footer') || prev.classList.contains('editor-header'))) prev = prev.previousElementSibling;
-      // If we hit a model-level page break HR, don't merge across it
-      if (prev && prev.tagName === 'HR' && prev.classList.contains('page-break')) {
-        e.preventDefault();
-        return;
+      // Skip non-model elements
+      while (prev && !prev.dataset?.nodeId) prev = prev.previousElementSibling;
+
+      // Cross-page: if no prev sibling within this page, look at previous page's last paragraph
+      if (!prev) {
+        const pageContent = el.closest('.page-content');
+        const pageEl = pageContent?.closest('.doc-page');
+        if (pageEl) {
+          const pageIdx = state.pageElements.indexOf(pageEl);
+          if (pageIdx > 0) {
+            const prevPageContent = state.pageElements[pageIdx - 1]?.querySelector('.page-content');
+            if (prevPageContent) {
+              const prevPageNodes = prevPageContent.querySelectorAll(':scope > [data-node-id]');
+              prev = prevPageNodes.length > 0 ? prevPageNodes[prevPageNodes.length - 1] : null;
+            }
+          }
+        }
       }
+
       if (prev?.dataset?.nodeId) {
         e.preventDefault();
         clearTimeout(state.syncTimer); syncParagraphText(el); syncParagraphText(prev);
@@ -414,16 +489,27 @@ export function initInput() {
       return;
     }
 
-    // ── Delete at end — merge next ──
+    // ── Delete at end — merge next (including cross-page) ──
     if (e.key === 'Delete' && el && isCursorAtEnd(el)) {
       let next = el.nextElementSibling;
-      // Skip CSS pagination divs but NOT model-level page break HRs
-      while (next && next.tagName !== 'HR' && (next.classList.contains('page-break') || next.classList.contains('editor-footer') || next.classList.contains('editor-header'))) next = next.nextElementSibling;
-      // If we hit a model-level page break HR, don't merge across it
-      if (next && next.tagName === 'HR' && next.classList.contains('page-break')) {
-        e.preventDefault();
-        return;
+      // Skip non-model elements
+      while (next && !next.dataset?.nodeId) next = next.nextElementSibling;
+
+      // Cross-page: if no next sibling within this page, look at next page's first paragraph
+      if (!next) {
+        const pageContent = el.closest('.page-content');
+        const pageEl = pageContent?.closest('.doc-page');
+        if (pageEl) {
+          const pageIdx = state.pageElements.indexOf(pageEl);
+          if (pageIdx >= 0 && pageIdx < state.pageElements.length - 1) {
+            const nextPageContent = state.pageElements[pageIdx + 1]?.querySelector('.page-content');
+            if (nextPageContent) {
+              next = nextPageContent.querySelector(':scope > [data-node-id]');
+            }
+          }
+        }
       }
+
       if (next?.dataset?.nodeId) {
         e.preventDefault();
         clearTimeout(state.syncTimer); syncParagraphText(el); syncParagraphText(next);
