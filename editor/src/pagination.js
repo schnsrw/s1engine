@@ -269,19 +269,23 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
   return pageEl;
 }
 
-function applyPageStyle(pageEl, pgData, dims) {
+function applyPageStyle(pageEl, pgData, defaultDims) {
   const w = (pgData?.width || 612) * PT_TO_PX;
   const h = (pgData?.height || 792) * PT_TO_PX;
   pageEl.style.width = Math.round(w) + 'px';
   pageEl.style.minHeight = Math.round(h) + 'px';
 
-  // Content area gets the margin padding
+  // Content area gets per-page margins (from layout engine) or fallback to section defaults
   const contentEl = pageEl.querySelector('.page-content');
   if (contentEl) {
-    contentEl.style.paddingTop = Math.round(dims.marginTopPt * PT_TO_PX) + 'px';
-    contentEl.style.paddingBottom = Math.round(dims.marginBottomPt * PT_TO_PX) + 'px';
-    contentEl.style.paddingLeft = Math.round(dims.marginLeftPt * PT_TO_PX) + 'px';
-    contentEl.style.paddingRight = Math.round(dims.marginRightPt * PT_TO_PX) + 'px';
+    const mt = pgData?.marginTop ?? defaultDims.marginTopPt ?? 72;
+    const mb = pgData?.marginBottom ?? defaultDims.marginBottomPt ?? 72;
+    const ml = pgData?.marginLeft ?? defaultDims.marginLeftPt ?? 72;
+    const mr = pgData?.marginRight ?? defaultDims.marginRightPt ?? 72;
+    contentEl.style.paddingTop = Math.round(mt * PT_TO_PX) + 'px';
+    contentEl.style.paddingBottom = Math.round(mb * PT_TO_PX) + 'px';
+    contentEl.style.paddingLeft = Math.round(ml * PT_TO_PX) + 'px';
+    contentEl.style.paddingRight = Math.round(mr * PT_TO_PX) + 'px';
   }
 }
 

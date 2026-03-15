@@ -336,12 +336,23 @@ impl WasmDocument {
                 }
             }).unwrap_or_default();
 
+            // Compute margins from page size and content area
+            let margin_top = page.content_area.y;
+            let margin_left = page.content_area.x;
+            let margin_right = page.width - page.content_area.x - page.content_area.width;
+            let margin_bottom = page.height - page.content_area.y - page.content_area.height;
+
             let ids_arr: Vec<String> = node_ids.iter().map(|id| format!("\"{}\"", id)).collect();
             pages_json.push(format!(
-                "{{\"pageNum\":{},\"width\":{:.1},\"height\":{:.1},\"nodeIds\":[{}],\"footer\":\"{}\",\"header\":\"{}\"}}",
+                "{{\"pageNum\":{},\"width\":{:.1},\"height\":{:.1},\"marginTop\":{:.1},\"marginBottom\":{:.1},\"marginLeft\":{:.1},\"marginRight\":{:.1},\"sectionIndex\":{},\"nodeIds\":[{}],\"footer\":\"{}\",\"header\":\"{}\"}}",
                 i + 1,
                 page.width,
                 page.height,
+                margin_top,
+                margin_bottom,
+                margin_left,
+                margin_right,
+                page.section_index,
                 ids_arr.join(","),
                 footer_text.replace('"', "\\\""),
                 header_text.replace('"', "\\\""),
