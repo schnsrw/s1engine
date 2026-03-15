@@ -211,6 +211,11 @@ impl Document {
         self.history.clear();
     }
 
+    /// Set the maximum number of undo steps. 0 means unlimited.
+    pub fn set_undo_cap(&mut self, max: usize) {
+        self.history.set_max_undo(max);
+    }
+
     // ─── TOC ────────────────────────────────────────────────────────
 
     /// Update all Table of Contents entries in the document.

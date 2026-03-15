@@ -100,6 +100,23 @@ impl History {
         self.redo_stack.len()
     }
 
+    /// Set the maximum undo depth. 0 means unlimited.
+    ///
+    /// If the current stack exceeds the new limit, oldest entries are trimmed.
+    pub fn set_max_undo(&mut self, max: usize) {
+        self.max_undo = max;
+        if max > 0 {
+            while self.undo_stack.len() > max {
+                self.undo_stack.remove(0);
+            }
+        }
+    }
+
+    /// Get the current maximum undo depth (0 = unlimited).
+    pub fn max_undo(&self) -> usize {
+        self.max_undo
+    }
+
     /// Clear all history.
     pub fn clear(&mut self) {
         self.undo_stack.clear();

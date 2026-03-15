@@ -2799,13 +2799,23 @@ impl WasmDocument {
                         text.push_str(&extract_paragraph_text(model, para_id));
                     }
 
-                    comments.push(format!(
-                        "{{\"id\":\"{}\",\"author\":\"{}\",\"date\":\"{}\",\"text\":\"{}\"}}",
+                    let parent_id = child
+                        .attributes
+                        .get_string(&AttributeKey::CommentParentId)
+                        .unwrap_or("");
+
+                    let mut entry = format!(
+                        "{{\"id\":\"{}\",\"author\":\"{}\",\"date\":\"{}\",\"text\":\"{}\"",
                         escape_json(id_str),
                         escape_json(author),
                         escape_json(date),
                         escape_json(&text)
-                    ));
+                    );
+                    if !parent_id.is_empty() {
+                        entry.push_str(&format!(",\"parentId\":\"{}\"", escape_json(parent_id)));
+                    }
+                    entry.push('}');
+                    comments.push(entry);
                 }
             }
         }
@@ -3428,6 +3438,348 @@ impl WasmDocument {
         Ok(html)
     }
 
+    // ─── E9.5: Table of Contents ────────────────────────────────
+
+    /// Insert a Table of Contents after the given node.
+    ///
+    /// `max_level` controls the deepest heading level included (1-9, default 3).
+    /// If `title` is non-empty, it is set as the TOC title.
+    /// Returns the TOC node ID string.
+    pub fn insert_table_of_contents(
+        &mut self,
+        after_node_str: &str,
+        max_level: u8,
+        title: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let after_id = parse_node_id(after_node_str)?;
+        let body_id = doc
+            .body_id()
+            .ok_or_else(|| JsError::new("No body node"))?;
+        let body = doc
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+        let index = body
+            .children
+            .iter()
+            .position(|&c| c == after_id)
+            .ok_or_else(|| JsError::new("Node not found in body"))?
+            + 1;
+
+        let level = max_level.clamp(1, 9);
+        let toc_id = doc.next_id();
+        let mut toc_node = Node::new(toc_id, NodeType::TableOfContents);
+        toc_node.attributes.set(
+            AttributeKey::TocMaxLevel,
+            AttributeValue::Int(level as i64),
+        );
+        if !title.is_empty() {
+            toc_node.attributes.set(
+                AttributeKey::TocTitle,
+                AttributeValue::String(title.to_string()),
+            );
+        }
+
+        let mut txn = Transaction::with_label("Insert table of contents");
+        txn.push(Operation::insert_node(body_id, index, toc_node));
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Auto-populate TOC entries
+        doc.update_toc();
+
+        Ok(format!("{}:{}", toc_id.replica, toc_id.counter))
+    }
+
+    /// Update all Table of Contents entries in the document.
+    ///
+    /// Rescans headings and regenerates TOC child paragraphs.
+    pub fn update_table_of_contents(&mut self) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        doc.update_toc();
+        Ok(())
+    }
+
+    // ─── E5.4: Threaded Comment Replies ──────────────────────────
+
+    /// Insert a reply to an existing comment.
+    ///
+    /// Returns the reply comment ID string.
+    pub fn insert_comment_reply(
+        &mut self,
+        parent_comment_id: &str,
+        author: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let root_id = doc.model().root_id();
+        let root_children = doc
+            .node(root_id)
+            .map(|n| n.children.len())
+            .unwrap_or(0);
+
+        let reply_id_val = format!("{}:{}", doc.next_id().replica, doc.next_id().counter);
+
+        // Create reply CommentBody with parent reference
+        let cb_id = doc.next_id();
+        let mut cb_node = Node::new(cb_id, NodeType::CommentBody);
+        cb_node.attributes.set(
+            AttributeKey::CommentId,
+            AttributeValue::String(reply_id_val.clone()),
+        );
+        cb_node.attributes.set(
+            AttributeKey::CommentAuthor,
+            AttributeValue::String(author.to_string()),
+        );
+        cb_node.attributes.set(
+            AttributeKey::CommentParentId,
+            AttributeValue::String(parent_comment_id.to_string()),
+        );
+
+        let cb_para_id = doc.next_id();
+        let cb_run_id = doc.next_id();
+        let cb_text_id = doc.next_id();
+
+        let mut txn = Transaction::with_label("Insert comment reply");
+        txn.push(Operation::insert_node(root_id, root_children, cb_node));
+        txn.push(Operation::insert_node(
+            cb_id,
+            0,
+            Node::new(cb_para_id, NodeType::Paragraph),
+        ));
+        txn.push(Operation::insert_node(
+            cb_para_id,
+            0,
+            Node::new(cb_run_id, NodeType::Run),
+        ));
+        txn.push(Operation::insert_node(
+            cb_run_id,
+            0,
+            Node::text(cb_text_id, text),
+        ));
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(reply_id_val)
+    }
+
+    // ─── E8: Performance APIs ────────────────────────────────────
+
+    /// Set the maximum number of undo steps to keep.
+    ///
+    /// `max` of 0 means unlimited. Excess history is trimmed (oldest first).
+    pub fn set_undo_history_cap(&mut self, max: usize) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        doc.set_undo_cap(max);
+        Ok(())
+    }
+
+    /// Get layout cache statistics as JSON.
+    ///
+    /// Returns `{"hits":N,"misses":N,"entries":N}`.
+    pub fn get_layout_cache_stats(&self) -> Result<String, JsError> {
+        // Layout cache is transient per-render, report zeroes for now
+        Ok("{\"hits\":0,\"misses\":0,\"entries\":0}".to_string())
+    }
+
+    // ─── E9.3: Equations ─────────────────────────────────────────
+
+    /// Insert an equation (inline math) into a paragraph.
+    ///
+    /// `node_id_str` is the paragraph to insert into.
+    /// `latex_source` is the equation source (LaTeX or raw XML).
+    /// Returns the equation node ID string.
+    pub fn insert_equation(
+        &mut self,
+        node_id_str: &str,
+        latex_source: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+        let index = para.children.len();
+
+        let eq_id = doc.next_id();
+        let mut eq_node = Node::new(eq_id, NodeType::Equation);
+        eq_node.attributes.set(
+            AttributeKey::EquationSource,
+            AttributeValue::String(latex_source.to_string()),
+        );
+
+        let mut txn = Transaction::with_label("Insert equation");
+        txn.push(Operation::insert_node(para_id, index, eq_node));
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(format!("{}:{}", eq_id.replica, eq_id.counter))
+    }
+
+    // ─── E9.6: Footnotes / Endnotes ─────────────────────────────
+
+    /// Insert a footnote at the current position in a paragraph.
+    ///
+    /// Creates a footnote reference in the paragraph and a footnote body
+    /// at the document root. Returns the footnote body node ID.
+    pub fn insert_footnote(
+        &mut self,
+        node_id_str: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+        let para_child_count = para.children.len();
+        let root_id = doc.model().root_id();
+        let root_node = doc
+            .node(root_id)
+            .ok_or_else(|| JsError::new("Root not found"))?;
+        let root_children = root_node.children.len();
+
+        // Auto-assign footnote number by counting existing FootnoteBody nodes
+        let fn_number = root_node
+            .children
+            .iter()
+            .filter(|&&id| {
+                doc.node(id)
+                    .map(|n| n.node_type == NodeType::FootnoteBody)
+                    .unwrap_or(false)
+            })
+            .count()
+            + 1;
+
+        let ref_id = doc.next_id();
+        let body_id = doc.next_id();
+        let body_para_id = doc.next_id();
+        let body_run_id = doc.next_id();
+        let body_text_id = doc.next_id();
+
+        let mut ref_node = Node::new(ref_id, NodeType::FootnoteRef);
+        ref_node.attributes.set(
+            AttributeKey::FootnoteNumber,
+            AttributeValue::Int(fn_number as i64),
+        );
+
+        let mut body_node = Node::new(body_id, NodeType::FootnoteBody);
+        body_node.attributes.set(
+            AttributeKey::FootnoteNumber,
+            AttributeValue::Int(fn_number as i64),
+        );
+
+        let mut txn = Transaction::with_label("Insert footnote");
+        txn.push(Operation::insert_node(para_id, para_child_count, ref_node));
+        txn.push(Operation::insert_node(root_id, root_children, body_node));
+        txn.push(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(body_para_id, NodeType::Paragraph),
+        ));
+        txn.push(Operation::insert_node(
+            body_para_id,
+            0,
+            Node::new(body_run_id, NodeType::Run),
+        ));
+        txn.push(Operation::insert_node(
+            body_run_id,
+            0,
+            Node::text(body_text_id, text),
+        ));
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(format!("{}:{}", body_id.replica, body_id.counter))
+    }
+
+    /// Insert an endnote at the current position in a paragraph.
+    ///
+    /// Creates an endnote reference in the paragraph and an endnote body
+    /// at the document root. Returns the endnote body node ID.
+    pub fn insert_endnote(
+        &mut self,
+        node_id_str: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+        let para_child_count = para.children.len();
+        let root_id = doc.model().root_id();
+        let root_node = doc
+            .node(root_id)
+            .ok_or_else(|| JsError::new("Root not found"))?;
+        let root_children = root_node.children.len();
+
+        let en_number = root_node
+            .children
+            .iter()
+            .filter(|&&id| {
+                doc.node(id)
+                    .map(|n| n.node_type == NodeType::EndnoteBody)
+                    .unwrap_or(false)
+            })
+            .count()
+            + 1;
+
+        let ref_id = doc.next_id();
+        let body_id = doc.next_id();
+        let body_para_id = doc.next_id();
+        let body_run_id = doc.next_id();
+        let body_text_id = doc.next_id();
+
+        let mut ref_node = Node::new(ref_id, NodeType::EndnoteRef);
+        ref_node.attributes.set(
+            AttributeKey::EndnoteNumber,
+            AttributeValue::Int(en_number as i64),
+        );
+
+        let mut body_node = Node::new(body_id, NodeType::EndnoteBody);
+        body_node.attributes.set(
+            AttributeKey::EndnoteNumber,
+            AttributeValue::Int(en_number as i64),
+        );
+
+        let mut txn = Transaction::with_label("Insert endnote");
+        txn.push(Operation::insert_node(para_id, para_child_count, ref_node));
+        txn.push(Operation::insert_node(root_id, root_children, body_node));
+        txn.push(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(body_para_id, NodeType::Paragraph),
+        ));
+        txn.push(Operation::insert_node(
+            body_para_id,
+            0,
+            Node::new(body_run_id, NodeType::Run),
+        ));
+        txn.push(Operation::insert_node(
+            body_run_id,
+            0,
+            Node::text(body_text_id, text),
+        ));
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(format!("{}:{}", body_id.replica, body_id.counter))
+    }
+
+    /// Get all footnotes as JSON array.
+    ///
+    /// Returns `[{"number":1,"text":"Footnote text"},...]`.
+    pub fn get_footnotes_json(&self) -> Result<String, JsError> {
+        self.get_notes_json(NodeType::FootnoteBody, &AttributeKey::FootnoteNumber)
+    }
+
+    /// Get all endnotes as JSON array.
+    ///
+    /// Returns `[{"number":1,"text":"Endnote text"},...]`.
+    pub fn get_endnotes_json(&self) -> Result<String, JsError> {
+        self.get_notes_json(NodeType::EndnoteBody, &AttributeKey::EndnoteNumber)
+    }
+
     // ─── Lifecycle ────────────────────────────────────────────────
 
     /// Free the document, releasing memory.
@@ -3454,6 +3806,47 @@ impl WasmDocument {
         self.inner
             .as_mut()
             .ok_or_else(|| JsError::new("Document has been freed"))
+    }
+
+    /// Get footnotes or endnotes as JSON array.
+    fn get_notes_json(
+        &self,
+        body_type: NodeType,
+        number_key: &AttributeKey,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let root = model.root_id();
+        let root_node = model
+            .node(root)
+            .ok_or_else(|| JsError::new("Root not found"))?;
+
+        let mut notes = Vec::new();
+        for &child_id in &root_node.children {
+            if let Some(child) = model.node(child_id) {
+                if child.node_type == body_type {
+                    let number = child
+                        .attributes
+                        .get_i64(number_key)
+                        .unwrap_or(0);
+
+                    let mut text = String::new();
+                    for &para_id in &child.children {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&extract_paragraph_text(model, para_id));
+                    }
+
+                    notes.push(format!(
+                        "{{\"number\":{},\"text\":\"{}\"}}",
+                        number,
+                        escape_json(&text)
+                    ));
+                }
+            }
+        }
+        Ok(format!("[{}]", notes.join(",")))
     }
 }
 

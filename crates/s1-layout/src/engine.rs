@@ -108,6 +108,8 @@ impl<'a> LayoutEngine<'a> {
         let mut page_index = 0;
         // Track which section each page belongs to (for header/footer resolution)
         let mut page_section_indices: Vec<usize> = Vec::new();
+        // Track previous block's space_after for CSS-style margin collapsing
+        let mut prev_space_after: f64 = 0.0;
 
         for (block_idx, (node_id, node_type)) in blocks.iter().enumerate() {
             let block_section_idx = section_map[block_idx];
@@ -197,10 +199,18 @@ impl<'a> LayoutEngine<'a> {
                         page_section_indices.push(current_section_idx);
                         page_index += 1;
                         current_y = content_rect.y;
+                        prev_space_after = 0.0;
                     }
 
-                    // Add spacing before (sanitize to guard against NaN/infinity)
-                    current_y += sanitize_pt(para_style.space_before);
+                    // CSS-style margin collapsing: use the larger of
+                    // previous block's space_after and this block's space_before
+                    let space_before = sanitize_pt(para_style.space_before);
+                    let collapsed_spacing = if prev_space_after > 0.0 || space_before > 0.0 {
+                        space_before.max(prev_space_after) - prev_space_after
+                    } else {
+                        0.0
+                    };
+                    current_y += collapsed_spacing;
 
                     let block = self.layout_paragraph_cached(
                         *node_id,
@@ -210,6 +220,7 @@ impl<'a> LayoutEngine<'a> {
                     )?;
 
                     let block_height = block.bounds.height;
+                    let space_after = sanitize_pt(para_style.space_after);
 
                     // Check if this block fits on the current page
                     if current_y + block_height > content_rect.bottom()
@@ -223,7 +234,8 @@ impl<'a> LayoutEngine<'a> {
                         ));
                         page_section_indices.push(current_section_idx);
                         page_index += 1;
-                        current_y = content_rect.y + sanitize_pt(para_style.space_before);
+                        // At top of new page, apply full space_before (no collapse)
+                        current_y = content_rect.y + space_before;
 
                         // Re-layout at top of new page
                         let block = self.layout_paragraph_cached(
@@ -234,10 +246,12 @@ impl<'a> LayoutEngine<'a> {
                         )?;
                         let block_height = block.bounds.height;
                         page_blocks.push(block);
-                        current_y += block_height + sanitize_pt(para_style.space_after);
+                        current_y += block_height + space_after;
+                        prev_space_after = space_after;
                     } else {
                         page_blocks.push(block);
-                        current_y += block_height + sanitize_pt(para_style.space_after);
+                        current_y += block_height + space_after;
+                        prev_space_after = space_after;
                     }
                 }
                 NodeType::Table => {

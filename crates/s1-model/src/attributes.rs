@@ -344,6 +344,20 @@ pub enum AttributeKey {
     /// Custom title for the TOC (e.g. "Table of Contents").
     TocTitle,
 
+    // BiDi attribute
+    /// Whether text direction is right-to-left.
+    Bidi,
+
+    // Equation attributes
+    /// Source content for an equation (LaTeX string or raw OOXML).
+    EquationSource,
+
+    // Footnote/Endnote attributes
+    /// Footnote number (auto-assigned).
+    FootnoteNumber,
+    /// Endnote number (auto-assigned).
+    EndnoteNumber,
+
     // Link / annotation attributes
     HyperlinkUrl,
     HyperlinkTooltip,
@@ -351,6 +365,8 @@ pub enum AttributeKey {
     CommentId,
     CommentAuthor,
     CommentDate,
+    /// Parent comment ID for threaded replies.
+    CommentParentId,
 
     // Revision / track changes attributes
     /// Revision type: "Insert", "Delete", or "FormatChange".
