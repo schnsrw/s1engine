@@ -1,10 +1,11 @@
 // File operations: new, open, export, drag-drop
 import { state, $ } from './state.js';
-import { renderDocument, syncAllText, renderPages, renderText, applyPageDimensions } from './render.js';
+import { renderDocument, syncAllText, applyPageDimensions } from './render.js';
 import { insertImage } from './images.js';
 import { renderRuler } from './ruler.js';
 import { broadcastOp } from './collab.js';
 import { showToast } from './toolbar-handlers.js';
+import { trackEvent } from './analytics.js';
 
 let detect_format_fn = null;
 
@@ -12,7 +13,7 @@ export function setDetectFormat(fn) { detect_format_fn = fn; }
 
 // ─── Autosave ─────────────────────────────────────
 const AUTOSAVE_INTERVAL = 30000; // 30 seconds
-const DB_NAME = 'FolioAutosave';
+const DB_NAME = 's1Autosave';
 const DB_VERSION = 2;
 
 // ─── CRC32 Checksum ──────────────────────────────
@@ -39,7 +40,7 @@ function crc32(bytes) {
 // ─── BroadcastChannel Multi-Tab Coordination ─────
 let _saveChannel = null;
 try {
-  _saveChannel = new BroadcastChannel('folio-autosave');
+  _saveChannel = new BroadcastChannel('s1-autosave');
 } catch (_) {
   // BroadcastChannel not available (e.g., older browsers, file:// protocol)
 }
@@ -356,6 +357,28 @@ function resetEditorState() {
   clearTimeout(state._findRefreshTimer);
   clearInterval(state.autosaveTimer);
   clearInterval(state.versionTimer);
+  // E8: Clear performance optimization state
+  state._layoutCache = null;
+  state._layoutDirty = true;
+  clearTimeout(state._layoutDebounceTimer);
+  state._layoutDebounceTimer = null;
+  state._vsRAF = null;
+  state._vsLastScrollTop = 0;
+  state._offscreenImageSrcs.clear();
+  state._perfWarningShown = false;
+  if (state._lazyPageObserver) {
+    state._lazyPageObserver.disconnect();
+    state._lazyPageObserver = null;
+  }
+  // Clean up PDF viewer (but preserve annotations until new PDF is opened)
+  if (state.pdfViewer) {
+    state.pdfViewer.destroy();
+    state.pdfViewer = null;
+  }
+  state.pdfBytes = null;
+  state.pdfCurrentPage = 1;
+  state.pdfZoom = 1.0;
+  state.pdfTool = 'select';
 }
 
 export function newDocument() {
@@ -377,8 +400,71 @@ export function newDocument() {
   startVersionTimer();
 }
 
-export function openFile(bytes, name) {
+/**
+ * Detect if a byte array is a PDF by checking for the %PDF magic header.
+ */
+function isPdf(bytes) {
+  return bytes.length >= 5 &&
+    bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+}
+
+export async function openFile(bytes, name) {
   if (!state.engine) return;
+
+  const ext = name?.split('.').pop()?.toLowerCase();
+
+  // PDF detection — open in PDF viewer
+  if (ext === 'pdf' || isPdf(bytes)) {
+    try {
+      resetEditorState();
+      // Clear PDF-specific state for new PDF
+      state.pdfAnnotations = [];
+      state.pdfModified = false;
+      state.pdfTextEdits = [];
+      state.pdfFormFields = [];
+      // Lazy-load PDF viewer module
+      const { PdfViewer } = await import('./pdf-viewer.js');
+      state.currentFormat = 'PDF';
+      // Activate UI — hide welcome, show status bar, switch to PDF view
+      $('welcomeScreen').style.display = 'none';
+      $('statusbar').classList.add('show');
+      switchView('pdf'); // This hides doc toolbar+menubar and shows PDF view
+      // Destroy previous viewer if any
+      if (state.pdfViewer) { state.pdfViewer.destroy(); }
+      state.pdfViewer = new PdfViewer($('pdfCanvasContainer'));
+      // Set initial tool cursor
+      const container = $('pdfCanvasContainer');
+      if (container) container.dataset.tool = 'select';
+      // Copy bytes before PDF.js consumes the buffer
+      state.pdfBytes = new Uint8Array(bytes);
+      await state.pdfViewer.open(state.pdfBytes);
+      state.pdfCurrentPage = 1;
+      state.pdfModified = false;
+      if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
+      updatePdfStatusBar();
+      $('statusFormat').textContent = 'PDF';
+      // Initialize annotation tools, text editing, and thumbnails
+      try {
+        const [annot, textEdit, pages] = await Promise.all([
+          import('./pdf-annotations.js'),
+          import('./pdf-text-edit.js'),
+          import('./pdf-pages.js'),
+        ]);
+        annot.initAnnotationTools();
+        textEdit.initPdfTextEdit();
+        pages.renderThumbnails();
+        // Wire up thumbnail sync on scroll
+        state.pdfViewer.onPageChange((pageNum) => {
+          pages.updateActiveThumbnail(pageNum);
+        });
+      } catch (err) { console.warn('PDF tools init:', err); }
+    } catch (e) {
+      showToast('Failed to open PDF: ' + e.message, 'error');
+      console.error(e);
+    }
+    return;
+  }
+
   try {
     resetEditorState();
     let fmt = 'txt';
@@ -400,11 +486,21 @@ export function openFile(bytes, name) {
   }
 }
 
+export function updatePdfStatusBar() {
+  if (!state.pdfViewer) return;
+  const pageCount = state.pdfViewer.getPageCount();
+  const info = $('statusInfo');
+  if (info) info.textContent = `Page ${state.pdfCurrentPage} of ${pageCount}`;
+  const pageInfo = $('pdfPageInfo');
+  if (pageInfo) pageInfo.textContent = `${state.pdfCurrentPage} / ${pageCount}`;
+}
+
 export function exportDoc(format) {
   const { doc } = state;
   if (!doc) return;
   try {
     syncAllText();
+    trackEvent('export', format);
     if (format === 'pdf') {
       const url = doc.to_pdf_data_url();
       const a = document.createElement('a');
@@ -446,17 +542,22 @@ export function switchView(view) {
   }
 
   state.currentView = view;
-  $('editorCanvas').classList.toggle('show', view === 'editor');
-  $('pagesView').classList.toggle('show', view === 'pages');
-  $('textView').classList.toggle('show', view === 'text');
+  // Show the editor wrapper (which contains pages panel + canvas + comments panel)
+  const wrapper = $('editorWrapper');
+  if (wrapper) wrapper.classList.toggle('show', view === 'editor');
+  $('pdfView').classList.toggle('show', view === 'pdf');
+  // Hide doc editor chrome when in PDF mode
   $('toolbar').classList.toggle('show', view === 'editor');
+  const menubar = $('appMenubar');
+  if (menubar) menubar.classList.toggle('show', view === 'editor');
+  // Hide ruler in PDF mode
+  const ruler = $('ruler');
+  if (ruler) ruler.style.display = view === 'pdf' ? 'none' : '';
   // Update legacy tab bar (hidden) and new status bar view buttons
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.querySelectorAll('.status-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   // Update view menu entries
   document.querySelectorAll('.tab-menu-entry').forEach(e => e.classList.toggle('active', e.dataset.view === view));
-  if (view === 'pages') { syncAllText(); renderPages(); }
-  if (view === 'text') { syncAllText(); renderText(); }
 
   // Restore cursor position when returning to editor view
   if (view === 'editor' && _savedCursorForView) {
@@ -532,7 +633,7 @@ export function initFileHandlers() {
   });
 
   // Drag & drop
-  [$('dropZone'), $('editorCanvas')].forEach(t => {
+  [$('dropZone'), $('editorCanvas'), $('pdfView')].forEach(t => {
     if (!t) return;
     t.addEventListener('dragover', e => { e.preventDefault(); t.classList.add('drag-over'); });
     t.addEventListener('dragleave', () => t.classList.remove('drag-over'));

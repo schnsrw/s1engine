@@ -6,7 +6,8 @@ WASM_CRATE := ffi/wasm
 WASM_OUT := demo/pkg
 DEMO_PORT := 8080
 
-.PHONY: help build test clippy fmt check wasm wasm-release demo clean
+.PHONY: help build test clippy fmt check wasm wasm-release demo clean \
+       docker-build docker-run docker-compose-up docker-compose-down
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -56,6 +57,20 @@ demo: wasm-release ## Build WASM and start demo server
 demo-only: ## Start demo server (without rebuilding WASM)
 	@echo "Demo at http://localhost:$(DEMO_PORT)"
 	@cd demo && python3 -m http.server $(DEMO_PORT)
+
+# ─── Docker ─────────────────────────────────────────────────────────
+
+docker-build: ## Build Docker image for s1 editor
+	docker build -t s1-editor .
+
+docker-run: ## Run s1 editor in Docker (port 8787)
+	docker run -p 8787:8787 -v s1-editor-data:/app/data s1-editor
+
+docker-compose-up: ## Start s1 editor with docker compose
+	docker compose up -d
+
+docker-compose-down: ## Stop s1 editor docker compose
+	docker compose down
 
 # ─── Clean ───────────────────────────────────────────────────────────
 

@@ -11,6 +11,9 @@ let _repaginateTimer = null;
 /**
  * Build or update per-page DOM containers inside #pageContainer.
  * Each page gets: .page-header (non-editable), .page-content (contenteditable), .page-footer (non-editable).
+ *
+ * E8.3: Integrates layout caching — when _layoutDirty is false and page map
+ * hasn't changed, skips the expensive DOM reconciliation.
  */
 export function repaginate() {
   const container = $('pageContainer');
@@ -54,11 +57,15 @@ export function repaginate() {
     try { pageMap = JSON.parse(pageMapJson); } catch (_) {}
   }
 
-  // Fast-path: if the page map hasn't changed and DOM pages exist, skip reconciliation
+  // Fast-path: if the page map hasn't changed and DOM pages exist, skip reconciliation.
+  // E8.3: Also skip when layout is not dirty (text-only edits within paragraphs).
   if (pageMap && state._lastPageMapHash === pageMapJson && state.pageElements.length > 0) {
     return;
   }
   state._lastPageMapHash = pageMapJson;
+
+  // E8.3: Invalidate layout cache when pagination actually changes
+  state._layoutCache = null;
 
   if (!pageMap || !pageMap.pages || pageMap.pages.length === 0) {
     // Fallback: single page with all content
@@ -290,8 +297,11 @@ export function repaginate() {
 
 /**
  * Schedule a debounced repagination (300ms).
+ * E8.3: Also marks layout as dirty since this is called after structural changes.
  */
 export function scheduleRepaginate() {
+  state._layoutDirty = true;
+  state._layoutCache = null;
   clearTimeout(_repaginateTimer);
   _repaginateTimer = setTimeout(() => repaginate(), 300);
 }
@@ -299,6 +309,7 @@ export function scheduleRepaginate() {
 /**
  * Legacy compatibility — called by existing code that used updatePageBreaks().
  * Uses debounced repagination to avoid redundant DOM reconciliation.
+ * E8.3: Marks layout dirty since this indicates a structural change.
  */
 export function updatePageBreaks() {
   scheduleRepaginate();

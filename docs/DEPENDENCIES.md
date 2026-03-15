@@ -119,6 +119,7 @@ Layout algorithms (Knuth-Plass line breaking, pagination, table layout) are impl
 | `subsetter` | ^0.2 | Font subsetting (embed only used glyphs) | MIT/Apache-2.0 |
 | `miniz_oxide` | ^0.8 | Deflate compression for PDF streams | MIT/Apache-2.0 |
 | `image` | ^0.25 | Image decoding (PNG, JPEG) | MIT/Apache-2.0 |
+| `lopdf` | ^0.34 | PDF reading/editing (optional, `pdf-editing` feature) | MIT |
 
 **Why pdf-writer?**
 - Pure Rust, no C dependencies
@@ -130,6 +131,14 @@ Layout algorithms (Knuth-Plass line breaking, pagination, table layout) are impl
 - Companion to `pdf-writer` -- same authors
 - Subsets TrueType/OpenType fonts to include only used glyphs
 - Critical for reasonable PDF file sizes
+
+**Why lopdf?**
+- Reads and modifies existing PDF files (pdf-writer is write-only)
+- Supports page manipulation (delete, rotate, merge, reorder)
+- AcroForm field reading and writing
+- Annotation addition to existing PDFs
+- Pure Rust, WASM-compatible
+- Behind `pdf-editing` feature flag (not pulled in by default)
 
 ### s1-convert
 | Dependency | Version | Purpose | License |
@@ -203,7 +212,7 @@ s1engine (facade)
 |-- s1-format-docx        (quick-xml, zip, base64)
 |-- s1-format-odt         (quick-xml, zip)
 |-- s1-format-txt         (encoding_rs)
-|-- s1-format-pdf         (pdf-writer, subsetter, miniz_oxide, image)
+|-- s1-format-pdf         (pdf-writer, subsetter, miniz_oxide, image, [lopdf])
 |-- s1-layout             (fontdb)
 |-- s1-convert            (cfb)
 |-- s1-text               (rustybuzz, ttf-parser, fontdb, unicode-bidi, unicode-linebreak)
@@ -211,8 +220,15 @@ s1engine (facade)
 +-- [dev] proptest, pretty_assertions
 ```
 
-**Total external runtime dependencies**: ~16 crates (not counting transitive deps)
+**Total external runtime dependencies**: ~17 crates (not counting transitive deps)
 **C/C++ libraries**: 0 -- entire stack is pure Rust
+
+### Editor (npm)
+| Dependency | Version | Purpose | License |
+|---|---|---|---|
+| `pdfjs-dist` | ^5.5 | PDF rendering in browser (canvas + text layer) | Apache-2.0 |
+| `vite` | ^5.0 | Development server and build tool | MIT |
+| `@playwright/test` | ^1.58 | End-to-end testing | Apache-2.0 |
 
 ---
 
@@ -228,7 +244,8 @@ All dependencies use MIT, Apache-2.0, or MIT/Apache-2.0 dual license, which are 
 |---|---|---|
 | `quick-xml` | `roxmltree`, `xmltree` | `quick-xml` supports both read and write; streaming API for large files |
 | `zip` | `rc-zip` | `zip` is more mature and widely used |
-| `pdf-writer` | `printpdf`, `lopdf` | `pdf-writer` is lower-level, smaller, proven by Typst |
+| `pdf-writer` | `printpdf` | `pdf-writer` is lower-level, smaller, proven by Typst (write-only) |
+| `lopdf` | `pdf-rs` | `lopdf` has read+write, page manipulation, form support; `pdf-rs` is read-only |
 | `rustybuzz` | `harfbuzz-rs` | `rustybuzz` is pure Rust, works on WASM, no C build deps |
 | `ttf-parser` | `freetype-rs` | `ttf-parser` is pure Rust, zero-copy; FreeType requires C build |
 | `unicode-bidi` | ICU / `icu4x` | Smaller, focused; full ICU is overkill for just BiDi |

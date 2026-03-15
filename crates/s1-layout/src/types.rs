@@ -14,6 +14,8 @@ pub struct LayoutDocument {
     pub pages: Vec<LayoutPage>,
     /// Bookmarks with resolved page positions.
     pub bookmarks: Vec<LayoutBookmark>,
+    /// Annotations (comments, highlights) with resolved page positions.
+    pub annotations: Vec<LayoutAnnotation>,
 }
 
 /// A bookmark with its resolved position in the laid-out document.
@@ -25,6 +27,41 @@ pub struct LayoutBookmark {
     pub page_index: usize,
     /// Y position on the page (in points from top).
     pub y_position: f64,
+}
+
+/// The type of a layout annotation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LayoutAnnotationType {
+    /// A document comment (sticky note).
+    Comment,
+    /// A text highlight.
+    Highlight,
+}
+
+/// An annotation with its resolved position in the laid-out document.
+///
+/// Produced by scanning `CommentStart`/`CommentEnd` nodes and highlight
+/// formatting in the document model after layout is complete.
+#[derive(Debug, Clone)]
+pub struct LayoutAnnotation {
+    /// Annotation type.
+    pub annotation_type: LayoutAnnotationType,
+    /// Source node ID (e.g., CommentStart node).
+    pub source_id: NodeId,
+    /// 0-based page index where this annotation starts.
+    pub page_index: usize,
+    /// Bounding rectangles on the page (in points from top-left).
+    /// A comment may span multiple lines, producing multiple rects.
+    pub rects: Vec<Rect>,
+    /// Comment or annotation text content.
+    pub content: String,
+    /// Author name.
+    pub author: String,
+    /// Date string (ISO 8601 or similar).
+    pub date: String,
+    /// Optional highlight/annotation color.
+    pub color: Option<Color>,
 }
 
 /// A single laid-out page.

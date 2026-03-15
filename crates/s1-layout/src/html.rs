@@ -727,6 +727,7 @@ mod tests {
         LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 
@@ -742,10 +743,11 @@ mod tests {
                 header: None,
                 footer: None,
                 footnotes: vec![],
-            floating_images: vec![],
+                floating_images: vec![],
                 section_index: 0,
             }],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(html.contains("s1-document"));
@@ -793,6 +795,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page1, page2],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         let page_count = html.matches("s1-page").count();
@@ -866,6 +869,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -963,6 +967,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -1002,6 +1007,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -1126,6 +1132,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -1204,6 +1211,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -1233,6 +1241,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
 
         let html = layout_to_html(&doc);
@@ -1326,6 +1335,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(
@@ -1398,6 +1408,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(
@@ -1470,6 +1481,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(
@@ -1542,6 +1554,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(html.contains("<ins"), "missing <ins> tag: {html}");
@@ -1614,6 +1627,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(html.contains("<del"), "missing <del> tag: {html}");
@@ -1686,6 +1700,7 @@ mod tests {
         let doc = LayoutDocument {
             pages: vec![page],
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let html = layout_to_html(&doc);
         assert!(

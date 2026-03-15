@@ -48,6 +48,7 @@ fn truncated_zip_header() {
     // ZIP magic followed by truncation
     let data = b"PK\x03\x04";
     assert!(engine.open_as(data, Format::Docx).is_err());
+    #[cfg(feature = "odt")]
     assert!(engine.open_as(data, Format::Odt).is_err());
 }
 
@@ -154,6 +155,7 @@ fn docx_with_huge_attribute_values() {
 // ─── ODT hostile inputs ─────────────────────────────────────────────
 
 #[test]
+#[cfg(feature = "odt")]
 fn odt_with_missing_content_xml() {
     use std::io::{Cursor, Write};
     let buf = Vec::new();
@@ -169,6 +171,7 @@ fn odt_with_missing_content_xml() {
 }
 
 #[test]
+#[cfg(feature = "odt")]
 fn odt_with_malformed_content_xml() {
     use std::io::{Cursor, Write};
     let buf = Vec::new();
@@ -185,6 +188,7 @@ fn odt_with_malformed_content_xml() {
 // ─── TXT hostile inputs ─────────────────────────────────────────────
 
 #[test]
+#[cfg(feature = "txt")]
 fn txt_with_mixed_encodings() {
     let engine = Engine::new();
     // UTF-16 BOM followed by invalid UTF-16
@@ -194,6 +198,7 @@ fn txt_with_mixed_encodings() {
 }
 
 #[test]
+#[cfg(feature = "txt")]
 fn txt_with_very_long_lines() {
     let engine = Engine::new();
     let long_line = "a".repeat(100_000);
@@ -232,7 +237,9 @@ fn export_empty_document_all_formats() {
     let doc = engine.create();
 
     assert!(doc.export(Format::Docx).is_ok());
+    #[cfg(feature = "odt")]
     assert!(doc.export(Format::Odt).is_ok());
+    #[cfg(feature = "txt")]
     assert!(doc.export(Format::Txt).is_ok());
 }
 

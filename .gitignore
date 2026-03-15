@@ -16,3 +16,6 @@ Thumbs.db
 *.bak
 
 editor/node_modules
+
+# Relay server data (persisted room state)
+data/

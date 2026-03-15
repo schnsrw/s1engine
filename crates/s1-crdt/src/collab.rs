@@ -59,7 +59,7 @@ impl CollabDocument {
     /// Create a new empty collaborative document.
     ///
     /// The initial document structure (root, body) uses replica 0 so that all
-    /// replicas start with identical node IDs. New nodes created via [`next_id`]
+    /// replicas start with identical node IDs. New nodes created via [`CollabDocument::next_id`]
     /// will use the given `replica_id`.
     pub fn new(replica_id: u64) -> Self {
         // Always use replica 0 for initial structure so all replicas are identical
@@ -1104,7 +1104,10 @@ mod tests {
 
         // Empty doc should have small estimated size
         let empty_size = doc.estimated_size_bytes();
-        assert!(empty_size < 1000, "empty doc size should be small: {empty_size}");
+        assert!(
+            empty_size < 1000,
+            "empty doc size should be small: {empty_size}"
+        );
 
         // Add some operations via setup_text_doc
         let text_id = setup_text_doc(&mut doc);
@@ -1112,7 +1115,10 @@ mod tests {
             .unwrap();
 
         let size_with_ops = doc.estimated_size_bytes();
-        assert!(size_with_ops > empty_size, "size should grow with operations");
+        assert!(
+            size_with_ops > empty_size,
+            "size should grow with operations"
+        );
     }
 
     #[test]
@@ -1134,7 +1140,10 @@ mod tests {
         assert!(compacted, "compaction should have been triggered");
 
         let size_after = doc.op_log_size();
-        assert!(size_after < size_before, "op log should be smaller after compaction");
+        assert!(
+            size_after < size_before,
+            "op log should be smaller after compaction"
+        );
     }
 
     #[test]
@@ -1142,6 +1151,9 @@ mod tests {
         let mut doc = CollabDocument::new(1);
         // Very large threshold — should not compact
         let compacted = doc.compact_if_oversized(10_000_000, None, 10_000);
-        assert!(!compacted, "compaction should not be triggered for small doc");
+        assert!(
+            !compacted,
+            "compaction should not be triggered for small doc"
+        );
     }
 }

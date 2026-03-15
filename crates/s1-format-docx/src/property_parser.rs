@@ -574,10 +574,7 @@ pub fn parse_row_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap, 
             Ok(Event::Empty(e)) => {
                 if e.local_name().as_ref() == b"tblHeader" {
                     // Row is a table header row
-                    attrs.set(
-                        AttributeKey::TableHeaderRow,
-                        AttributeValue::Bool(true),
-                    );
+                    attrs.set(AttributeKey::TableHeaderRow, AttributeValue::Bool(true));
                 }
             }
             Ok(Event::End(e)) if e.local_name().as_ref() == b"trPr" => break,
@@ -1260,12 +1257,24 @@ mod tests {
         let mut reader = Reader::from_str(xml);
         skip_to_start(&mut reader, b"pPr");
         let attrs = parse_paragraph_properties(&mut reader).unwrap();
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionType).as_deref(), Some("PropertyChange"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionType).as_deref(),
+            Some("PropertyChange")
+        );
         assert_eq!(attrs.get_i64(&AttributeKey::RevisionId), Some(10));
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(), Some("Alice"));
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionDate).as_deref(), Some("2026-01-01T12:00:00Z"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(),
+            Some("Alice")
+        );
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionDate).as_deref(),
+            Some("2026-01-01T12:00:00Z")
+        );
         // Current alignment should still be parsed
-        assert_eq!(attrs.get_alignment(&AttributeKey::Alignment), Some(Alignment::Center));
+        assert_eq!(
+            attrs.get_alignment(&AttributeKey::Alignment),
+            Some(Alignment::Center)
+        );
     }
 
     #[test]
@@ -1274,9 +1283,15 @@ mod tests {
         let mut reader = Reader::from_str(xml);
         skip_to_start(&mut reader, b"tcPr");
         let attrs = parse_cell_properties(&mut reader).unwrap();
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionType).as_deref(), Some("PropertyChange"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionType).as_deref(),
+            Some("PropertyChange")
+        );
         assert_eq!(attrs.get_i64(&AttributeKey::RevisionId), Some(20));
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(), Some("Bob"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(),
+            Some("Bob")
+        );
         // Cell width should still be parsed
         assert!(attrs.get(&AttributeKey::CellWidth).is_some());
     }
@@ -1287,10 +1302,19 @@ mod tests {
         let mut reader = Reader::from_str(xml);
         skip_to_start(&mut reader, b"tblPr");
         let attrs = parse_table_properties(&mut reader).unwrap();
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionType).as_deref(), Some("PropertyChange"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionType).as_deref(),
+            Some("PropertyChange")
+        );
         assert_eq!(attrs.get_i64(&AttributeKey::RevisionId), Some(30));
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(), Some("Carol"));
-        assert_eq!(attrs.get_alignment(&AttributeKey::TableAlignment), Some(Alignment::Center));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(),
+            Some("Carol")
+        );
+        assert_eq!(
+            attrs.get_alignment(&AttributeKey::TableAlignment),
+            Some(Alignment::Center)
+        );
     }
 
     #[test]
@@ -1299,9 +1323,15 @@ mod tests {
         let mut reader = Reader::from_str(xml);
         skip_to_start(&mut reader, b"trPr");
         let attrs = parse_row_properties(&mut reader).unwrap();
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionType).as_deref(), Some("PropertyChange"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionType).as_deref(),
+            Some("PropertyChange")
+        );
         assert_eq!(attrs.get_i64(&AttributeKey::RevisionId), Some(40));
-        assert_eq!(attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(), Some("Dave"));
+        assert_eq!(
+            attrs.get_string(&AttributeKey::RevisionAuthor).as_deref(),
+            Some("Dave")
+        );
         assert_eq!(attrs.get_bool(&AttributeKey::TableHeaderRow), Some(true));
     }
 }

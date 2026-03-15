@@ -19,7 +19,7 @@ s1engine = { workspace = true, features = ["layout", "pdf", "crdt"] }
 s1-model = { workspace = true }
 s1-layout = { workspace = true }
 s1-text = { workspace = true }
-s1-format-pdf = { workspace = true }
+s1-format-pdf = { workspace = true, features = ["pdf-editing"] }
 s1-crdt = { workspace = true }
 s1-ops = { workspace = true }
 wasm-bindgen = "0.2"

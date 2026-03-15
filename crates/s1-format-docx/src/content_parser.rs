@@ -12,7 +12,9 @@ use s1_model::{
 };
 
 use crate::error::DocxError;
-use crate::property_parser::{parse_cell_properties, parse_row_properties, parse_run_properties, parse_table_properties};
+use crate::property_parser::{
+    parse_cell_properties, parse_row_properties, parse_run_properties, parse_table_properties,
+};
 use crate::section_parser::{parse_section_properties, RawSectionProperties};
 use crate::xml_util::{emu_to_points, get_attr, mime_for_extension};
 

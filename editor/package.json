@@ -1,5 +1,5 @@
 {
-  "name": "folio-editor",
+  "name": "s1-editor",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -14,5 +14,8 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.5.207"
   }
 }

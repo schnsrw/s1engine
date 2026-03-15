@@ -117,11 +117,7 @@ impl TombstoneTracker {
             all_tombstones.push((deleted_by.lamport, true, (node_id, char_id)));
         }
         for (&node_id, &deleted_by) in &self.tree_tombstones {
-            all_tombstones.push((
-                deleted_by.lamport,
-                false,
-                (node_id, OpId::new(0, 0)),
-            ));
+            all_tombstones.push((deleted_by.lamport, false, (node_id, OpId::new(0, 0))));
         }
 
         // Sort by lamport timestamp (oldest first)

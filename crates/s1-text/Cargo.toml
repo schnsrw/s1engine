@@ -10,6 +10,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["embedded-font"]
+embedded-font = []
+
 [dependencies]
 s1-model = { workspace = true }
 thiserror = { workspace = true }

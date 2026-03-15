@@ -10,6 +10,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+pdf-editing = ["dep:lopdf"]
+
 [dependencies]
 s1-model = { workspace = true }
 s1-layout = { workspace = true }
@@ -19,7 +23,9 @@ pdf-writer = "0.14"
 subsetter = "0.2"
 miniz_oxide = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+lopdf = { version = "0.34", optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 fontdb = "0.23"
+lopdf = "0.34"

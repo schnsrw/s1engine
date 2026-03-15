@@ -82,10 +82,7 @@ pub fn shape_text_with_script(
     // Convert font features — use default features (kern, liga, clig, calt)
     // merged with any caller-provided features
     let default_features = crate::script::default_shaping_features();
-    let all_features: Vec<&FontFeature> = default_features
-        .iter()
-        .chain(features.iter())
-        .collect();
+    let all_features: Vec<&FontFeature> = default_features.iter().chain(features.iter()).collect();
     let rb_features: Vec<rustybuzz::Feature> = all_features
         .iter()
         .map(|f| {

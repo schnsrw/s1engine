@@ -146,6 +146,7 @@ fn docx_roundtrip_preserves_text() {
 }
 
 #[test]
+#[cfg(feature = "odt")]
 fn odt_roundtrip_preserves_text() {
     let doc = DocumentBuilder::new()
         .heading(1, "ODT Title")
@@ -166,6 +167,7 @@ fn odt_roundtrip_preserves_text() {
 }
 
 #[test]
+#[cfg(feature = "txt")]
 fn txt_roundtrip_preserves_text() {
     let doc = DocumentBuilder::new()
         .text("Line one")
@@ -188,6 +190,7 @@ fn txt_roundtrip_preserves_text() {
 }
 
 #[test]
+#[cfg(feature = "odt")]
 fn cross_format_docx_to_odt_preserves_text() {
     let doc = DocumentBuilder::new()
         .heading(1, "Cross-Format Test")
@@ -264,14 +267,20 @@ fn builder_output_exports_to_all_formats() {
     assert!(!docx.unwrap().is_empty());
 
     // ODT
-    let odt = doc.export(Format::Odt);
-    assert!(odt.is_ok(), "ODT export must succeed");
-    assert!(!odt.unwrap().is_empty());
+    #[cfg(feature = "odt")]
+    {
+        let odt = doc.export(Format::Odt);
+        assert!(odt.is_ok(), "ODT export must succeed");
+        assert!(!odt.unwrap().is_empty());
+    }
 
     // TXT
-    let txt = doc.export(Format::Txt);
-    assert!(txt.is_ok(), "TXT export must succeed");
-    assert!(!txt.unwrap().is_empty());
+    #[cfg(feature = "txt")]
+    {
+        let txt = doc.export(Format::Txt);
+        assert!(txt.is_ok(), "TXT export must succeed");
+        assert!(!txt.unwrap().is_empty());
+    }
 }
 
 // ─── Tree Integrity After Operations ────────────────────────────────
@@ -324,14 +333,20 @@ fn format_detection_is_consistent() {
     assert_eq!(Format::detect(&docx), Format::Docx);
 
     // ODT bytes also start with ZIP magic, but detect should handle
-    let odt = doc.export(Format::Odt).unwrap();
-    let detected = Format::detect(&odt);
-    // Both DOCX and ODT are ZIP files; detection may return either
-    assert!(detected == Format::Docx || detected == Format::Odt);
+    #[cfg(feature = "odt")]
+    {
+        let odt = doc.export(Format::Odt).unwrap();
+        let detected = Format::detect(&odt);
+        // Both DOCX and ODT are ZIP files; detection may return either
+        assert!(detected == Format::Docx || detected == Format::Odt);
+    }
 
     // TXT is detected as TXT
-    let txt = doc.export(Format::Txt).unwrap();
-    assert_eq!(Format::detect(&txt), Format::Txt);
+    #[cfg(feature = "txt")]
+    {
+        let txt = doc.export(Format::Txt).unwrap();
+        assert_eq!(Format::detect(&txt), Format::Txt);
+    }
 }
 
 // ─── Unicode Preservation ───────────────────────────────────────────
@@ -410,6 +425,7 @@ fn paragraph_ids_excludes_header_footer_paragraphs() {
 
 /// Text must be preserved across a full DOCX -> ODT -> TXT conversion chain.
 #[test]
+#[cfg(all(feature = "odt", feature = "txt"))]
 fn cross_format_docx_odt_txt_text_preservation() {
     let original_text = "Hello from the document builder";
 
@@ -535,18 +551,21 @@ fn builder_metadata_survives_all_formats() {
     );
 
     // ODT round-trip
-    let odt_bytes = doc.export(Format::Odt).unwrap();
-    let from_odt = engine.open_as(&odt_bytes, Format::Odt).unwrap();
-    assert_eq!(
-        from_odt.metadata().title.as_deref(),
-        Some("My Title"),
-        "Title must survive ODT round-trip"
-    );
-    assert_eq!(
-        from_odt.metadata().creator.as_deref(),
-        Some("Jane Doe"),
-        "Author must survive ODT round-trip"
-    );
+    #[cfg(feature = "odt")]
+    {
+        let odt_bytes = doc.export(Format::Odt).unwrap();
+        let from_odt = engine.open_as(&odt_bytes, Format::Odt).unwrap();
+        assert_eq!(
+            from_odt.metadata().title.as_deref(),
+            Some("My Title"),
+            "Title must survive ODT round-trip"
+        );
+        assert_eq!(
+            from_odt.metadata().creator.as_deref(),
+            Some("Jane Doe"),
+            "Author must survive ODT round-trip"
+        );
+    }
 }
 
 /// An empty document (created via `Engine::create()`) must export
@@ -563,19 +582,25 @@ fn empty_document_exports_all_formats() {
         docx_result.err()
     );
 
-    let odt_result = doc.export(Format::Odt);
-    assert!(
-        odt_result.is_ok(),
-        "Empty doc ODT export failed: {:?}",
-        odt_result.err()
-    );
+    #[cfg(feature = "odt")]
+    {
+        let odt_result = doc.export(Format::Odt);
+        assert!(
+            odt_result.is_ok(),
+            "Empty doc ODT export failed: {:?}",
+            odt_result.err()
+        );
+    }
 
-    let txt_result = doc.export(Format::Txt);
-    assert!(
-        txt_result.is_ok(),
-        "Empty doc TXT export failed: {:?}",
-        txt_result.err()
-    );
+    #[cfg(feature = "txt")]
+    {
+        let txt_result = doc.export(Format::Txt);
+        assert!(
+            txt_result.is_ok(),
+            "Empty doc TXT export failed: {:?}",
+            txt_result.err()
+        );
+    }
 }
 
 /// Attempting to open plain text bytes as DOCX must return an error,

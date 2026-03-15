@@ -14,8 +14,27 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     target: 'esnext',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Keep WASM bindings in their own chunk
+          if (id.includes('wasm-pkg')) {
+            return 'wasm';
+          }
+          // Vendor chunk for node_modules (KaTeX, pdfjs-dist, etc.)
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        },
+      },
+    },
   },
+  assetsInclude: ['**/*.wasm'],
   optimizeDeps: {
     exclude: ['s1engine_wasm'],
+  },
+  worker: {
+    format: 'es',
   },
 });

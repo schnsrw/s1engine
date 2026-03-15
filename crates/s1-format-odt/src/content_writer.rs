@@ -208,10 +208,7 @@ fn write_body(
                         family: "paragraph".to_string(),
                     },
                 );
-                xml.push_str(&format!(
-                    r#"<text:p text:style-name="{}"/>"#,
-                    style_name
-                ));
+                xml.push_str(&format!(r#"<text:p text:style-name="{}"/>"#, style_name));
             }
             NodeType::ColumnBreak => {
                 close_list_stack(&mut list_depth, &mut list_item_open, &mut xml);
@@ -226,10 +223,7 @@ fn write_body(
                         family: "paragraph".to_string(),
                     },
                 );
-                xml.push_str(&format!(
-                    r#"<text:p text:style-name="{}"/>"#,
-                    style_name
-                ));
+                xml.push_str(&format!(r#"<text:p text:style-name="{}"/>"#, style_name));
             }
             _ => {}
         }
@@ -546,7 +540,16 @@ fn write_footnote(
     counter: &mut u32,
     images: &mut Vec<ImageEntry>,
 ) {
-    write_note(doc, ref_node, "footnote", NodeType::FootnoteBody, xml, auto_styles, counter, images);
+    write_note(
+        doc,
+        ref_node,
+        "footnote",
+        NodeType::FootnoteBody,
+        xml,
+        auto_styles,
+        counter,
+        images,
+    );
 }
 
 /// Write an endnote reference and its body as `<text:note>`.
@@ -558,7 +561,16 @@ fn write_endnote(
     counter: &mut u32,
     images: &mut Vec<ImageEntry>,
 ) {
-    write_note(doc, ref_node, "endnote", NodeType::EndnoteBody, xml, auto_styles, counter, images);
+    write_note(
+        doc,
+        ref_node,
+        "endnote",
+        NodeType::EndnoteBody,
+        xml,
+        auto_styles,
+        counter,
+        images,
+    );
 }
 
 /// Write a footnote or endnote as `<text:note>`.
@@ -582,7 +594,13 @@ fn write_note(
     let note_number = ref_node
         .attributes
         .get(&note_num_key)
-        .and_then(|v| if let AttributeValue::Int(n) = v { Some(*n) } else { None })
+        .and_then(|v| {
+            if let AttributeValue::Int(n) = v {
+                Some(*n)
+            } else {
+                None
+            }
+        })
         .unwrap_or(1);
 
     // Find the matching body node under the document root
@@ -602,7 +620,13 @@ fn write_note(
             let child_num = child
                 .attributes
                 .get(&note_num_key)
-                .and_then(|v| if let AttributeValue::Int(n) = v { Some(*n) } else { None })
+                .and_then(|v| {
+                    if let AttributeValue::Int(n) = v {
+                        Some(*n)
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(0);
             if child_num == note_number {
                 body_node = Some(child);
@@ -611,10 +635,7 @@ fn write_note(
         }
     }
 
-    xml.push_str(&format!(
-        r#"<text:note text:note-class="{}">"#,
-        note_class
-    ));
+    xml.push_str(&format!(r#"<text:note text:note-class="{}">"#, note_class));
     xml.push_str(&format!(
         "<text:note-citation>{}</text:note-citation>",
         note_number

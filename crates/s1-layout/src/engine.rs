@@ -171,7 +171,7 @@ impl<'a> LayoutEngine<'a> {
                             ));
                             page_section_indices.push(current_section_idx);
                             page_index += 1;
-                    page_floats.clear();
+                            page_floats.clear();
                         }
                     }
                     SectionBreakType::OddPage => {
@@ -186,7 +186,7 @@ impl<'a> LayoutEngine<'a> {
                             ));
                             page_section_indices.push(current_section_idx);
                             page_index += 1;
-                    page_floats.clear();
+                            page_floats.clear();
                         }
                     }
                     _ => {
@@ -257,16 +257,11 @@ impl<'a> LayoutEngine<'a> {
                     }
 
                     // 2. Square/Tight/Through floats: narrow content rect
-                    let para_rect = Self::adjust_rect_for_floats(
-                        content_rect, current_y, &page_floats,
-                    );
+                    let para_rect =
+                        Self::adjust_rect_for_floats(content_rect, current_y, &page_floats);
 
-                    let block = self.layout_paragraph_cached(
-                        *node_id,
-                        &para_style,
-                        para_rect,
-                        current_y,
-                    )?;
+                    let block =
+                        self.layout_paragraph_cached(*node_id, &para_style, para_rect, current_y)?;
 
                     let block_height = block.bounds.height;
                     let space_after = sanitize_pt(para_style.space_after);
@@ -294,7 +289,7 @@ impl<'a> LayoutEngine<'a> {
                             ));
                             page_section_indices.push(current_section_idx);
                             page_index += 1;
-                    page_floats.clear();
+                            page_floats.clear();
                             current_column = 0;
                             let full_rect = page_layout.content_rect();
                             content_rect = Self::column_content_rect(
@@ -433,7 +428,7 @@ impl<'a> LayoutEngine<'a> {
                                     ));
                                     page_section_indices.push(current_section_idx);
                                     page_index += 1;
-                    page_floats.clear();
+                                    page_floats.clear();
                                     current_column = 0;
                                     let full_rect = page_layout.content_rect();
                                     content_rect = Self::column_content_rect(
@@ -494,12 +489,11 @@ impl<'a> LayoutEngine<'a> {
                                     std::mem::take(&mut page_blocks),
                                     current_section_idx,
                                 );
-                                new_page.floating_images =
-                                    std::mem::take(&mut floating_images);
+                                new_page.floating_images = std::mem::take(&mut floating_images);
                                 pages.push(new_page);
                                 page_section_indices.push(current_section_idx);
                                 page_index += 1;
-                    page_floats.clear();
+                                page_floats.clear();
                                 current_column = 0;
                                 let full_rect = page_layout.content_rect();
                                 content_rect = Self::column_content_rect(
@@ -511,8 +505,7 @@ impl<'a> LayoutEngine<'a> {
                                 current_y = content_rect.y;
                             }
 
-                            let block =
-                                self.layout_image(*node_id, content_rect, current_y)?;
+                            let block = self.layout_image(*node_id, content_rect, current_y)?;
                             let block_height = block.bounds.height;
                             page_blocks.push(block);
                             current_y += block_height;
@@ -533,7 +526,7 @@ impl<'a> LayoutEngine<'a> {
                         ));
                         page_section_indices.push(current_section_idx);
                         page_index += 1;
-                    page_floats.clear();
+                        page_floats.clear();
                         current_column = 0;
                         let full_rect = page_layout.content_rect();
                         content_rect = Self::column_content_rect(
@@ -568,7 +561,7 @@ impl<'a> LayoutEngine<'a> {
                         ));
                         page_section_indices.push(current_section_idx);
                         page_index += 1;
-                    page_floats.clear();
+                        page_floats.clear();
                         current_column = 0;
                         let full_rect = page_layout.content_rect();
                         content_rect = Self::column_content_rect(
@@ -634,8 +627,14 @@ impl<'a> LayoutEngine<'a> {
 
         // Collect bookmarks from pages
         let bookmarks = self.collect_bookmarks(&pages);
+        // Collect annotations (comments, highlights) from pages
+        let annotations = self.collect_annotations(&pages);
 
-        Ok(LayoutDocument { pages, bookmarks })
+        Ok(LayoutDocument {
+            pages,
+            bookmarks,
+            annotations,
+        })
     }
 
     /// Resolve page layout for a specific section index.
@@ -1368,12 +1367,11 @@ impl<'a> LayoutEngine<'a> {
             .node(run_id)
             .map(|n| n.attributes.get(&AttributeKey::FontSize).is_some())
             .unwrap_or(false);
-        let font_size =
-            if (run_style.superscript || run_style.subscript) && !has_explicit_size {
-                run_style.font_size * 0.65
-            } else {
-                run_style.font_size
-            };
+        let font_size = if (run_style.superscript || run_style.subscript) && !has_explicit_size {
+            run_style.font_size * 0.65
+        } else {
+            run_style.font_size
+        };
 
         // F1.2: Detect script for script-specific shaping
         let script_runs = s1_text::split_by_script(&text);
@@ -1384,7 +1382,13 @@ impl<'a> LayoutEngine<'a> {
         let (mut glyphs, metrics) = if let Some(fid) = font_id {
             if let Some(font) = self.font_db.load_font(fid) {
                 let shaped = s1_text::shaping::shape_text_with_script(
-                    &text, &font, font_size, &[], None, direction, rb_script,
+                    &text,
+                    &font,
+                    font_size,
+                    &[],
+                    None,
+                    direction,
+                    rb_script,
                 )?;
                 let metrics = font.metrics(font_size);
                 (shaped, Some(metrics))
@@ -1613,12 +1617,11 @@ impl<'a> LayoutEngine<'a> {
             .node(source_id)
             .map(|n| n.attributes.get(&AttributeKey::FontSize).is_some())
             .unwrap_or(false);
-        let font_size =
-            if (run_style.superscript || run_style.subscript) && !has_explicit_size {
-                run_style.font_size * 0.65
-            } else {
-                run_style.font_size
-            };
+        let font_size = if (run_style.superscript || run_style.subscript) && !has_explicit_size {
+            run_style.font_size * 0.65
+        } else {
+            run_style.font_size
+        };
 
         // F1.2: Detect script for script-specific shaping
         let script_runs = s1_text::split_by_script(text);
@@ -1629,7 +1632,13 @@ impl<'a> LayoutEngine<'a> {
         let (mut glyphs, metrics, actual_font_id) = if let Some(fid) = font_id {
             if let Some(font) = self.font_db.load_font(fid) {
                 let shaped = s1_text::shaping::shape_text_with_script(
-                    text, &font, font_size, &[], None, direction, rb_script,
+                    text,
+                    &font,
+                    font_size,
+                    &[],
+                    None,
+                    direction,
+                    rb_script,
                 )?;
                 let metrics = font.metrics(font_size);
                 (shaped, Some(metrics), Some(fid))
@@ -1645,8 +1654,7 @@ impl<'a> LayoutEngine<'a> {
         // falls back to general linear scan.
         if actual_font_id.is_some() && glyphs.iter().any(|g| g.glyph_id == 0) {
             let chars: Vec<char> = text.chars().collect();
-            let char_byte_offsets: Vec<usize> =
-                text.char_indices().map(|(i, _)| i).collect();
+            let char_byte_offsets: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
             // Get the dominant script for script-aware fallback
             let dominant_script = script_runs
                 .first()
@@ -1681,8 +1689,7 @@ impl<'a> LayoutEngine<'a> {
                             if let Some(gid) = fb_font.glyph_index(ch) {
                                 glyph.glyph_id = gid;
                                 if let Some(advance) = fb_font.glyph_hor_advance(gid) {
-                                    let scale =
-                                        font_size / fb_font.units_per_em() as f64;
+                                    let scale = font_size / fb_font.units_per_em() as f64;
                                     glyph.x_advance = advance as f64 * scale;
                                 }
                             }
@@ -1784,10 +1791,8 @@ impl<'a> LayoutEngine<'a> {
                         let font_id = run_info.font_id.unwrap_or(FontId(fontdb::ID::dummy()));
 
                         // Use the sub-range of glyphs and text for this box
-                        let sub_glyphs =
-                            run_info.glyphs[*glyph_start..*glyph_end].to_vec();
-                        let sub_text =
-                            run_info.text[*text_byte_start..*text_byte_end].to_string();
+                        let sub_glyphs = run_info.glyphs[*glyph_start..*glyph_end].to_vec();
+                        let sub_text = run_info.text[*text_byte_start..*text_byte_end].to_string();
 
                         line_runs.push(GlyphRun {
                             source_id: run_info.source_id,
@@ -2033,10 +2038,8 @@ impl<'a> LayoutEngine<'a> {
                     }
 
                     // Remaining part
-                    let remaining_advance: f64 = glyphs[prev_glyph..]
-                        .iter()
-                        .map(|g| g.x_advance)
-                        .sum();
+                    let remaining_advance: f64 =
+                        glyphs[prev_glyph..].iter().map(|g| g.x_advance).sum();
                     let remaining_chars = text[prev_byte..].chars().count();
                     let remaining_spacing = if remaining_chars > 1 {
                         (remaining_chars as f64 - 1.0) * run_info.character_spacing
@@ -2066,10 +2069,8 @@ impl<'a> LayoutEngine<'a> {
                         .map(|i| i + 1)
                         .unwrap_or(g_start);
 
-                    let group_advance: f64 = glyphs[g_start..g_end]
-                        .iter()
-                        .map(|g| g.x_advance)
-                        .sum();
+                    let group_advance: f64 =
+                        glyphs[g_start..g_end].iter().map(|g| g.x_advance).sum();
                     let group_text = &text[*group_start..*group_end];
                     let group_chars = group_text.chars().count();
                     let spacing_contribution = if group_chars > 1 {
@@ -2269,9 +2270,7 @@ impl<'a> LayoutEngine<'a> {
 
                         let (border_top, border_bottom, border_left, border_right) = {
                             // Use cell borders if present, otherwise inherit from table
-                            let effective = cell_borders
-                                .as_ref()
-                                .or(table_borders.as_ref());
+                            let effective = cell_borders.as_ref().or(table_borders.as_ref());
                             if let Some(borders) = effective {
                                 (
                                     borders.top.as_ref().and_then(format_border_css_opt),
@@ -2452,19 +2451,35 @@ impl<'a> LayoutEngine<'a> {
                 let w = n
                     .attributes
                     .get(&AttributeKey::ImageWidth)
-                    .and_then(|v| if let AttributeValue::Float(d) = v { Some(*d) } else { None })
+                    .and_then(|v| {
+                        if let AttributeValue::Float(d) = v {
+                            Some(*d)
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or(100.0);
                 let h = n
                     .attributes
                     .get(&AttributeKey::ImageHeight)
-                    .and_then(|v| if let AttributeValue::Float(d) = v { Some(*d) } else { None })
+                    .and_then(|v| {
+                        if let AttributeValue::Float(d) = v {
+                            Some(*d)
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or(100.0);
                 (w, h)
             })
             .unwrap_or((100.0, 100.0));
 
         // Constrain to page width
-        let scale = if width > page_layout.width { page_layout.width / width } else { 1.0 };
+        let scale = if width > page_layout.width {
+            page_layout.width / width
+        } else {
+            1.0
+        };
         let final_w = width * scale;
         let final_h = height * scale;
 
@@ -2473,18 +2488,36 @@ impl<'a> LayoutEngine<'a> {
 
         let h_offset_emu = node
             .and_then(|n| n.attributes.get(&AttributeKey::ImageHorizontalOffset))
-            .and_then(|v| if let AttributeValue::Int(i) = v { Some(*i) } else { None })
+            .and_then(|v| {
+                if let AttributeValue::Int(i) = v {
+                    Some(*i)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(0);
         let v_offset_emu = node
             .and_then(|n| n.attributes.get(&AttributeKey::ImageVerticalOffset))
-            .and_then(|v| if let AttributeValue::Int(i) = v { Some(*i) } else { None })
+            .and_then(|v| {
+                if let AttributeValue::Int(i) = v {
+                    Some(*i)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(0);
 
         let h_relative = node
-            .and_then(|n| n.attributes.get_string(&AttributeKey::ImageHorizontalRelativeFrom))
+            .and_then(|n| {
+                n.attributes
+                    .get_string(&AttributeKey::ImageHorizontalRelativeFrom)
+            })
             .unwrap_or("column");
         let v_relative = node
-            .and_then(|n| n.attributes.get_string(&AttributeKey::ImageVerticalRelativeFrom))
+            .and_then(|n| {
+                n.attributes
+                    .get_string(&AttributeKey::ImageVerticalRelativeFrom)
+            })
             .unwrap_or("paragraph");
 
         // Compute absolute X position
@@ -2567,7 +2600,10 @@ impl<'a> LayoutEngine<'a> {
         // Parse distance from text (stored as "distT,distB,distL,distR" in EMU)
         const EMU_PER_PT: f64 = 914400.0 / 72.0;
         let (dist_top, dist_bottom, dist_left, dist_right) = node
-            .and_then(|n| n.attributes.get_string(&AttributeKey::ImageDistanceFromText))
+            .and_then(|n| {
+                n.attributes
+                    .get_string(&AttributeKey::ImageDistanceFromText)
+            })
             .map(|s| {
                 let parts: Vec<f64> = s
                     .split(',')
@@ -3097,6 +3133,185 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
             }
+        }
+    }
+
+    /// Collect annotations (comments, highlights) from laid-out pages.
+    ///
+    /// Scans for `CommentStart` / `CommentEnd` node pairs and highlight
+    /// formatting on glyph runs. Each comment's bounding rectangle is
+    /// resolved to page coordinates.
+    fn collect_annotations(&self, pages: &[LayoutPage]) -> Vec<LayoutAnnotation> {
+        let mut annotations = Vec::new();
+
+        // 1. Collect comment annotations by scanning for CommentStart nodes
+        let mut comment_starts: Vec<(NodeId, usize, f64)> = Vec::new(); // (node_id, page_index, y)
+        for page in pages {
+            for block in &page.blocks {
+                self.collect_comment_starts_from_block(block, page.index, &mut comment_starts);
+            }
+            if let Some(header) = &page.header {
+                self.collect_comment_starts_from_block(header, page.index, &mut comment_starts);
+            }
+            if let Some(footer) = &page.footer {
+                self.collect_comment_starts_from_block(footer, page.index, &mut comment_starts);
+            }
+        }
+
+        // For each CommentStart, find the matching CommentBody and build a LayoutAnnotation
+        for (comment_start_id, page_index, y_pos) in &comment_starts {
+            if let Some(node) = self.doc.node(*comment_start_id) {
+                let comment_id = node
+                    .attributes
+                    .get_string(&AttributeKey::CommentId)
+                    .unwrap_or("")
+                    .to_string();
+                let author = node
+                    .attributes
+                    .get_string(&AttributeKey::CommentAuthor)
+                    .unwrap_or("")
+                    .to_string();
+                let date = node
+                    .attributes
+                    .get_string(&AttributeKey::CommentDate)
+                    .unwrap_or("")
+                    .to_string();
+
+                // Find the CommentBody with matching comment ID (child of document root)
+                let content = self.find_comment_body_text(&comment_id);
+
+                annotations.push(LayoutAnnotation {
+                    annotation_type: LayoutAnnotationType::Comment,
+                    source_id: *comment_start_id,
+                    page_index: *page_index,
+                    rects: vec![Rect::new(0.0, *y_pos, 24.0, 24.0)],
+                    content,
+                    author,
+                    date,
+                    color: None,
+                });
+            }
+        }
+
+        // 2. Collect highlight annotations from glyph runs with highlight_color
+        for page in pages {
+            for block in &page.blocks {
+                self.collect_highlights_from_block(block, page.index, &mut annotations);
+            }
+        }
+
+        annotations
+    }
+
+    /// Recursively scan a block for CommentStart nodes.
+    fn collect_comment_starts_from_block(
+        &self,
+        block: &LayoutBlock,
+        page_index: usize,
+        starts: &mut Vec<(NodeId, usize, f64)>,
+    ) {
+        match &block.kind {
+            LayoutBlockKind::Paragraph { .. } | LayoutBlockKind::Image { .. } => {
+                if let Some(node) = self.doc.node(block.source_id) {
+                    for &child_id in &node.children {
+                        if let Some(child) = self.doc.node(child_id) {
+                            if child.node_type == NodeType::CommentStart {
+                                starts.push((child_id, page_index, block.bounds.y));
+                            }
+                        }
+                    }
+                }
+            }
+            LayoutBlockKind::Table { rows, .. } => {
+                for row in rows {
+                    for cell in &row.cells {
+                        for cell_block in &cell.blocks {
+                            self.collect_comment_starts_from_block(cell_block, page_index, starts);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Find the text content of a CommentBody node matching a comment ID.
+    fn find_comment_body_text(&self, comment_id: &str) -> String {
+        let root_id = self.doc.root_id();
+        if let Some(root) = self.doc.node(root_id) {
+            for &child_id in &root.children {
+                if let Some(child) = self.doc.node(child_id) {
+                    if child.node_type == NodeType::CommentBody {
+                        let cid = child
+                            .attributes
+                            .get_string(&AttributeKey::CommentId)
+                            .unwrap_or("");
+                        if cid == comment_id {
+                            return self.extract_text_content(child_id);
+                        }
+                    }
+                }
+            }
+        }
+        String::new()
+    }
+
+    /// Extract plain text from a node and its descendants.
+    fn extract_text_content(&self, node_id: NodeId) -> String {
+        let mut text = String::new();
+        if let Some(node) = self.doc.node(node_id) {
+            if let Some(t) = &node.text_content {
+                text.push_str(t);
+            }
+            for &child_id in &node.children {
+                text.push_str(&self.extract_text_content(child_id));
+            }
+        }
+        text
+    }
+
+    /// Collect highlight annotations from glyph runs in a block.
+    fn collect_highlights_from_block(
+        &self,
+        block: &LayoutBlock,
+        page_index: usize,
+        annotations: &mut Vec<LayoutAnnotation>,
+    ) {
+        match &block.kind {
+            LayoutBlockKind::Paragraph { lines, .. } => {
+                for line in lines {
+                    for run in &line.runs {
+                        if let Some(ref color) = run.highlight_color {
+                            // Build a rect for this highlighted run
+                            let run_rect = Rect::new(
+                                block.bounds.x + run.x_offset,
+                                block.bounds.y + line.baseline_y - run.font_size,
+                                run.width,
+                                line.height,
+                            );
+                            annotations.push(LayoutAnnotation {
+                                annotation_type: LayoutAnnotationType::Highlight,
+                                source_id: run.source_id,
+                                page_index,
+                                rects: vec![run_rect],
+                                content: String::new(),
+                                author: String::new(),
+                                date: String::new(),
+                                color: Some(*color),
+                            });
+                        }
+                    }
+                }
+            }
+            LayoutBlockKind::Table { rows, .. } => {
+                for row in rows {
+                    for cell in &row.cells {
+                        for cell_block in &cell.blocks {
+                            self.collect_highlights_from_block(cell_block, page_index, annotations);
+                        }
+                    }
+                }
+            }
+            LayoutBlockKind::Image { .. } => {}
         }
     }
 
@@ -6080,10 +6295,9 @@ mod tests {
             AttributeKey::ImageHorizontalOffset,
             AttributeValue::Int(4_445_000),
         );
-        img_node.attributes.set(
-            AttributeKey::ImageVerticalOffset,
-            AttributeValue::Int(0),
-        );
+        img_node
+            .attributes
+            .set(AttributeKey::ImageVerticalOffset, AttributeValue::Int(0));
         img_node.attributes.set(
             AttributeKey::ImageHorizontalRelativeFrom,
             AttributeValue::String("column".to_string()),
@@ -6101,8 +6315,12 @@ mod tests {
         doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
             .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "This text should wrap around the floating image"))
-            .unwrap();
+        doc.insert_node(
+            run_id,
+            0,
+            Node::text(text_id, "This text should wrap around the floating image"),
+        )
+        .unwrap();
 
         let font_db = FontDatabase::new();
         let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
@@ -6115,9 +6333,10 @@ mod tests {
         assert_eq!(page.floating_images.len(), 1, "expected 1 floating image");
 
         // The paragraph should be narrower than full content width (468pt for letter)
-        let para_block = page.blocks.iter().find(|b| {
-            matches!(b.kind, LayoutBlockKind::Paragraph { .. })
-        });
+        let para_block = page
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, LayoutBlockKind::Paragraph { .. }));
         assert!(para_block.is_some(), "expected a paragraph block");
         let pb = para_block.unwrap();
         assert!(
@@ -6155,14 +6374,12 @@ mod tests {
             AttributeKey::ImageWrapType,
             AttributeValue::String("topAndBottom".to_string()),
         );
-        img_node.attributes.set(
-            AttributeKey::ImageHorizontalOffset,
-            AttributeValue::Int(0),
-        );
-        img_node.attributes.set(
-            AttributeKey::ImageVerticalOffset,
-            AttributeValue::Int(0),
-        );
+        img_node
+            .attributes
+            .set(AttributeKey::ImageHorizontalOffset, AttributeValue::Int(0));
+        img_node
+            .attributes
+            .set(AttributeKey::ImageVerticalOffset, AttributeValue::Int(0));
         img_node.attributes.set(
             AttributeKey::ImageHorizontalRelativeFrom,
             AttributeValue::String("column".to_string()),
@@ -6188,9 +6405,10 @@ mod tests {
         let result = engine.layout().unwrap();
 
         let page = &result.pages[0];
-        let para_block = page.blocks.iter().find(|b| {
-            matches!(b.kind, LayoutBlockKind::Paragraph { .. })
-        });
+        let para_block = page
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, LayoutBlockKind::Paragraph { .. }));
         assert!(para_block.is_some());
         let pb = para_block.unwrap();
 
@@ -6230,14 +6448,12 @@ mod tests {
             AttributeKey::ImageWrapType,
             AttributeValue::String("none".to_string()),
         );
-        img_node.attributes.set(
-            AttributeKey::ImageHorizontalOffset,
-            AttributeValue::Int(0),
-        );
-        img_node.attributes.set(
-            AttributeKey::ImageVerticalOffset,
-            AttributeValue::Int(0),
-        );
+        img_node
+            .attributes
+            .set(AttributeKey::ImageHorizontalOffset, AttributeValue::Int(0));
+        img_node
+            .attributes
+            .set(AttributeKey::ImageVerticalOffset, AttributeValue::Int(0));
         img_node.attributes.set(
             AttributeKey::ImageHorizontalRelativeFrom,
             AttributeValue::String("column".to_string()),
@@ -6263,9 +6479,10 @@ mod tests {
         let result = engine.layout().unwrap();
 
         let page = &result.pages[0];
-        let para_block = page.blocks.iter().find(|b| {
-            matches!(b.kind, LayoutBlockKind::Paragraph { .. })
-        });
+        let para_block = page
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, LayoutBlockKind::Paragraph { .. }));
         assert!(para_block.is_some());
         let pb = para_block.unwrap();
 
@@ -6311,14 +6528,12 @@ mod tests {
             AttributeKey::ImageWrapType,
             AttributeValue::String("square".to_string()),
         );
-        img_node.attributes.set(
-            AttributeKey::ImageHorizontalOffset,
-            AttributeValue::Int(0),
-        );
-        img_node.attributes.set(
-            AttributeKey::ImageVerticalOffset,
-            AttributeValue::Int(0),
-        );
+        img_node
+            .attributes
+            .set(AttributeKey::ImageHorizontalOffset, AttributeValue::Int(0));
+        img_node
+            .attributes
+            .set(AttributeKey::ImageVerticalOffset, AttributeValue::Int(0));
         img_node.attributes.set(
             AttributeKey::ImageHorizontalRelativeFrom,
             AttributeValue::String("column".to_string()),
@@ -6336,17 +6551,22 @@ mod tests {
         doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
             .unwrap();
         let text_id = doc.next_id();
-        doc.insert_node(run_id, 0, Node::text(text_id, "Wrapping on the right side of the image"))
-            .unwrap();
+        doc.insert_node(
+            run_id,
+            0,
+            Node::text(text_id, "Wrapping on the right side of the image"),
+        )
+        .unwrap();
 
         let font_db = FontDatabase::new();
         let mut engine = LayoutEngine::new(&doc, &font_db, LayoutConfig::default());
         let result = engine.layout().unwrap();
 
         let page = &result.pages[0];
-        let para_block = page.blocks.iter().find(|b| {
-            matches!(b.kind, LayoutBlockKind::Paragraph { .. })
-        });
+        let para_block = page
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, LayoutBlockKind::Paragraph { .. }));
         assert!(para_block.is_some());
         let pb = para_block.unwrap();
 

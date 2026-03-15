@@ -9,7 +9,8 @@ use pdf_writer::types::{FontFlags, TextRenderingMode};
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
 use s1_layout::{
-    LayoutBlock, LayoutBlockKind, LayoutBookmark, LayoutDocument, LayoutLine, LayoutTableRow,
+    LayoutAnnotation, LayoutAnnotationType, LayoutBlock, LayoutBlockKind, LayoutBookmark,
+    LayoutDocument, LayoutLine, LayoutTableRow,
 };
 use s1_model::DocumentMetadata;
 use s1_text::{FontDatabase, FontId};
@@ -96,6 +97,13 @@ fn write_pdf_internal(
     let mut page_refs = Vec::new();
 
     for page in &layout.pages {
+        // Collect annotations for this page
+        let page_annotations: Vec<&LayoutAnnotation> = layout
+            .annotations
+            .iter()
+            .filter(|a| a.page_index == page.index)
+            .collect();
+
         let page_ref = write_page(
             &mut pdf,
             &mut alloc,
@@ -103,6 +111,7 @@ fn write_pdf_internal(
             page_tree_ref,
             &font_map,
             &image_map,
+            &page_annotations,
         )?;
         page_refs.push(page_ref);
     }
@@ -385,13 +394,7 @@ fn embed_images(
                 &mut img_idx,
             )?;
         }
-        collect_and_embed_images(
-            pdf,
-            alloc,
-            &page.footnotes,
-            &mut image_map,
-            &mut img_idx,
-        )?;
+        collect_and_embed_images(pdf, alloc, &page.footnotes, &mut image_map, &mut img_idx)?;
         collect_and_embed_images(
             pdf,
             alloc,
@@ -546,6 +549,7 @@ fn write_page(
     page_tree_ref: Ref,
     font_map: &HashMap<FontId, PdfFont>,
     image_map: &HashMap<String, PdfImage>,
+    page_annotations: &[&LayoutAnnotation],
 ) -> Result<Ref, PdfError> {
     let page_ref = alloc.next();
     let content_ref = alloc.next();
@@ -653,6 +657,103 @@ fn write_page(
         annot.finish();
     }
 
+    // Write document-model annotations (comments, highlights) as PDF annotations
+    for layout_annot in page_annotations {
+        let annot_ref = alloc.next();
+        annot_refs.push(annot_ref);
+
+        match layout_annot.annotation_type {
+            LayoutAnnotationType::Comment => {
+                // Sticky note (Text annotation)
+                let first_rect = layout_annot
+                    .rects
+                    .first()
+                    .copied()
+                    .unwrap_or(s1_layout::Rect::new(72.0, 72.0, 24.0, 24.0));
+                // Convert from top-left to PDF bottom-left coordinates
+                let pdf_y = page.height - first_rect.y - first_rect.height;
+                let rect = Rect::new(
+                    first_rect.x as f32,
+                    pdf_y as f32,
+                    (first_rect.x + first_rect.width) as f32,
+                    (pdf_y + first_rect.height) as f32,
+                );
+
+                let mut annot = pdf.annotation(annot_ref);
+                annot.subtype(pdf_writer::types::AnnotationType::Text);
+                annot.rect(rect);
+                annot.contents(TextStr(&layout_annot.content));
+                // Set author via /T entry
+                if !layout_annot.author.is_empty() {
+                    annot.pair(Name(b"T"), TextStr(&layout_annot.author));
+                }
+                // Yellow color for sticky note
+                annot.color_rgb(1.0, 0.8, 0.0);
+                annot.pair(Name(b"Open"), false);
+                annot.finish();
+            }
+            LayoutAnnotationType::Highlight => {
+                // Highlight annotation — uses QuadPoints for precise text marking
+                if layout_annot.rects.is_empty() {
+                    continue;
+                }
+
+                // Compute bounding rect (union of all highlight rects)
+                let mut min_x = f64::MAX;
+                let mut min_y = f64::MAX;
+                let mut max_x = f64::MIN;
+                let mut max_y = f64::MIN;
+                let mut quad_points: Vec<f32> = Vec::new();
+
+                for r in &layout_annot.rects {
+                    let pdf_bottom = page.height - r.y - r.height;
+                    let pdf_top = page.height - r.y;
+
+                    min_x = min_x.min(r.x);
+                    min_y = min_y.min(pdf_bottom);
+                    max_x = max_x.max(r.x + r.width);
+                    max_y = max_y.max(pdf_top);
+
+                    // QuadPoints order per PDF spec
+                    quad_points.extend_from_slice(&[
+                        r.x as f32,
+                        pdf_top as f32,
+                        (r.x + r.width) as f32,
+                        pdf_top as f32,
+                        r.x as f32,
+                        pdf_bottom as f32,
+                        (r.x + r.width) as f32,
+                        pdf_bottom as f32,
+                    ]);
+                }
+
+                let rect = Rect::new(min_x as f32, min_y as f32, max_x as f32, max_y as f32);
+
+                let mut annot = pdf.annotation(annot_ref);
+                annot.subtype(pdf_writer::types::AnnotationType::Highlight);
+                annot.rect(rect);
+                annot.quad_points(quad_points);
+
+                // Set highlight color from the layout annotation
+                if let Some(color) = &layout_annot.color {
+                    annot.color_rgb(
+                        color.r as f32 / 255.0,
+                        color.g as f32 / 255.0,
+                        color.b as f32 / 255.0,
+                    );
+                } else {
+                    // Default yellow highlight
+                    annot.color_rgb(1.0, 0.92, 0.23);
+                }
+                annot.finish();
+            }
+            _ => {
+                // Unknown annotation type — skip
+                continue;
+            }
+        }
+    }
+
     // Write page object
     let mut page_obj = pdf.page(page_ref);
     page_obj.parent(page_tree_ref);
@@ -729,8 +830,7 @@ fn render_block(
                 if let Some(first_line) = lines.first() {
                     if let Some(first_run) = first_line.runs.first() {
                         if let Some(pdf_font) = font_map.get(&first_run.font_id) {
-                            let marker_y =
-                                page_height - block.bounds.y - first_line.baseline_y;
+                            let marker_y = page_height - block.bounds.y - first_line.baseline_y;
                             let marker_x = block.bounds.x - 15.0; // Position left of text
                             content.set_fill_rgb(0.0, 0.0, 0.0);
                             content.begin_text();
@@ -1199,7 +1299,12 @@ fn parse_css_border(border: &str) -> (f32, f32, f32, f32) {
     let parts: Vec<&str> = border.split_whitespace().collect();
     let width = parts
         .first()
-        .and_then(|s| s.trim_end_matches("px").trim_end_matches("pt").parse::<f32>().ok())
+        .and_then(|s| {
+            s.trim_end_matches("px")
+                .trim_end_matches("pt")
+                .parse::<f32>()
+                .ok()
+        })
         .unwrap_or(0.5);
 
     let (r, g, b) = parts
@@ -1666,6 +1771,7 @@ mod tests {
         let layout = LayoutDocument {
             pages: Vec::new(),
             bookmarks: Vec::new(),
+            annotations: Vec::new(),
         };
         let usage = collect_font_usage(&layout);
         assert!(usage.is_empty());

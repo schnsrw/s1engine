@@ -10,6 +10,7 @@ export const state = {
   resizing: null,
   syncTimer: null,
   lastSelInfo: null,
+  _selectAll: false,
   syncedTextCache: new Map(),
   // Table context menu
   ctxTable: null,
@@ -38,6 +39,8 @@ export const state = {
   slashQuery: '',
   // Comment threading replies (in-memory)
   commentReplies: [],
+  // Resolved comments (in-memory Set of comment IDs)
+  resolvedComments: new Set(),
   // Pending formats for collapsed-cursor formatting (E-01 fix)
   pendingFormats: {},
   // Collaboration
@@ -69,6 +72,38 @@ export const state = {
   // Populated on full render and updated on per-node render.
   // Cleared on full re-render so stale references don't linger.
   nodeIdToElement: new Map(),
+  // E8.1: Virtual scroll RAF throttle handle
+  _vsRAF: null,
+  // E8.1: Last scroll position for rapid scroll detection
+  _vsLastScrollTop: 0,
+  // E8.3: Layout cache — stores paginated HTML to avoid redundant WASM calls
+  _layoutCache: null,
+  // E8.3: Layout dirty flag — set true on structural changes, cleared after re-layout
+  _layoutDirty: true,
+  // E8.3: Layout debounce timer
+  _layoutDebounceTimer: null,
+  // E8.3: Lazy page observers (IntersectionObserver for pages view)
+  _lazyPageObserver: null,
+  // E8.4: Image data release — maps nodeId to original src for off-screen images
+  _offscreenImageSrcs: new Map(),
+  // E8.4: Performance warning shown flag (avoid repeated warnings)
+  _perfWarningShown: false,
+  // E6.3: IME composition in progress — blocks WASM sync until compositionend
+  _composing: false,
+  // E5.4: Editing mode — 'editing' | 'suggesting' | 'viewing'
+  editingMode: 'editing',
+  // E9.5: TOC style — 'default' | 'dotted' | 'dashed' | 'no-page-numbers'
+  tocStyle: 'default',
+  // PDF viewer state
+  pdfViewer: null,
+  pdfBytes: null,
+  pdfCurrentPage: 1,
+  pdfZoom: 1.0,
+  pdfTool: 'select',
+  pdfAnnotations: [],
+  pdfModified: false,
+  pdfTextEdits: [],
+  pdfFormFields: [],
 };
 
 export const $ = (id) => document.getElementById(id);

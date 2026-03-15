@@ -6,6 +6,9 @@
 //!
 //! Tests degrade gracefully: if a fixture file is missing, the test is skipped
 //! rather than failed.
+//!
+//! These tests require all format features (docx, odt, txt, md) to be enabled.
+#![cfg(all(feature = "docx", feature = "odt", feature = "txt", feature = "md"))]
 
 use std::path::Path;
 use std::time::Instant;

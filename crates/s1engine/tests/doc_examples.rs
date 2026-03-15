@@ -94,12 +94,16 @@ fn readme_builder_pattern() {
     assert!(doc.style_by_id("Heading1").is_some());
     assert!(doc.style_by_id("Heading2").is_some());
 
-    // Export to both DOCX and ODT (as shown in the API_DESIGN.md example)
+    // Export to DOCX (as shown in the API_DESIGN.md example)
     let docx_bytes = doc.export(Format::Docx).unwrap();
     assert!(!docx_bytes.is_empty());
 
-    let odt_bytes = doc.export(Format::Odt).unwrap();
-    assert!(!odt_bytes.is_empty());
+    // ODT export requires the odt feature
+    #[cfg(feature = "odt")]
+    {
+        let odt_bytes = doc.export(Format::Odt).unwrap();
+        assert!(!odt_bytes.is_empty());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -248,21 +252,27 @@ fn api_design_format_conversion() {
     let engine = Engine::new();
     let doc = engine.open(&docx_bytes).unwrap();
 
-    // Export to ODT
-    let odt_bytes = doc.export(Format::Odt).unwrap();
-    assert!(!odt_bytes.is_empty());
+    // Export to ODT (requires odt feature)
+    #[cfg(feature = "odt")]
+    {
+        let odt_bytes = doc.export(Format::Odt).unwrap();
+        assert!(!odt_bytes.is_empty());
 
-    // Verify ODT content preserved
-    let odt_doc = engine.open_as(&odt_bytes, Format::Odt).unwrap();
-    let odt_text = odt_doc.to_plain_text();
-    assert!(odt_text.contains("Report Title"));
-    assert!(odt_text.contains("First paragraph of the report."));
+        // Verify ODT content preserved
+        let odt_doc = engine.open_as(&odt_bytes, Format::Odt).unwrap();
+        let odt_text = odt_doc.to_plain_text();
+        assert!(odt_text.contains("Report Title"));
+        assert!(odt_text.contains("First paragraph of the report."));
+    }
 
-    // Export to TXT
-    let txt = doc.export_string(Format::Txt).unwrap();
-    assert!(txt.contains("Report Title"));
-    assert!(txt.contains("First paragraph of the report."));
-    assert!(txt.contains("Second paragraph with details."));
+    // Export to TXT (requires txt feature)
+    #[cfg(feature = "txt")]
+    {
+        let txt = doc.export_string(Format::Txt).unwrap();
+        assert!(txt.contains("Report Title"));
+        assert!(txt.contains("First paragraph of the report."));
+        assert!(txt.contains("Second paragraph with details."));
+    }
 }
 
 // ---------------------------------------------------------------------------

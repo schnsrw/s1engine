@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**PDF Editor**
+- PDF viewing in Folio editor via PDF.js (open, zoom, page navigation, text selection)
+- PDF annotation tools: highlight, comment, freehand draw, text box
+- PDF text editing: double-click to inline-edit text (overlay approach)
+- PDF page thumbnails sidebar with scroll tracking
+- PDF editor Rust crate (`s1-format-pdf` with `pdf-editing` feature via lopdf)
+- WASM `WasmPdfEditor` class: page manipulation, annotations, form fields, text overlay
+- Document model annotations exported to PDF (comments as sticky notes, highlights with quad points)
+- `LayoutAnnotation` type in `s1-layout` for resolved comment/highlight positions
+
+**Editor Improvements**
+- PDF-specific toolbar (replaces doc toolbar when viewing PDFs)
+- Inline comment input (replaces browser `prompt()`)
+- Proper PDF download (non-corrupted Blob export)
+
+**Documentation**
+- Rewrote README.md for open-source readability
+- Added CONTRIBUTING.md with setup, workflow, and architecture rules
+- Added SECURITY.md with vulnerability reporting and security measures
+
+### Changed
+- Removed Pages and Text views from editor (simplified to Editor + PDF views)
+- File picker now accepts `.pdf` files
+- Editor menubar hidden when viewing PDFs
+
+### Fixed
+- PDF.js `standardFontDataUrl` warning resolved
+- ArrayBuffer detach error when opening PDFs
+- PDF sidebar thumbnails now track scroll position
+
 ## [1.0.0] - 2026-03-13
 
 ### Changed

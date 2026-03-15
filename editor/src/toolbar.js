@@ -121,6 +121,23 @@ function _updateToolbarStateImpl() {
     // List button active state
     setToggle('btnBulletList', paraFmt.listFormat === 'bullet');
     setToggle('btnNumberList', paraFmt.listFormat === 'decimal');
+
+    // E7.2: Announce page change when cursor moves to a different page
+    if (info.startEl) {
+      const pageEl = info.startEl.closest?.('.doc-page');
+      if (pageEl) {
+        const pageNum = parseInt(pageEl.dataset.page) || 1;
+        if (pageNum !== state.activePageNum) {
+          state.activePageNum = pageNum;
+          const totalPages = state.pageElements?.length || 1;
+          const a11y = $('a11yLive');
+          if (a11y) {
+            a11y.textContent = `Page ${pageNum} of ${totalPages}`;
+            setTimeout(() => { if (a11y.textContent === `Page ${pageNum} of ${totalPages}`) a11y.textContent = ''; }, 1500);
+          }
+        }
+      }
+    }
   } catch (_) {}
 }
 

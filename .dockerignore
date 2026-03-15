@@ -1,0 +1,32 @@
+# Build artifacts
+target/
+editor/node_modules/
+editor/dist/
+editor/wasm-pkg/
+demo/pkg/
+
+# Version control
+.git/
+.github/
+
+# Documentation (not needed in image)
+docs/
+*.md
+
+# Test fixtures
+testdocs/
+tests/
+editor/test-docs/
+editor/test-results/
+editor/playwright-report/
+editor/playwright.config.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

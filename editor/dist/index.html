@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>s1 editor</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a73e8">
+  <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto+Mono:wght@400&display=swap" rel="stylesheet">
+  <!-- KaTeX — equation rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script type="module" crossorigin src="/assets/index-q4pjmLMT.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Cp8hv33o.css">
+</head>
+<body>
+<div class="app" id="app">
+  <!-- Title Bar -->
+  <div class="menubar">
+    <div class="logo">
+      <img src="/assets/logo-CBlYF38a.svg" alt="s1" width="28" height="28">
+      <span class="logo-text">s1 editor</span>
+    </div>
+    <div class="sep"></div>
+    <input class="doc-name" id="docName" value="Untitled Document" spellcheck="false">
+    <div class="spacer"></div>
+    <button class="menu-btn menubar-collapsible-1024" id="btnPages" title="Toggle pages panel"><span class="msi">view_sidebar</span></button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnCommentsToggle" title="Toggle comments panel"><span class="msi">comment</span></button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnHistory" title="Version History"><span class="msi">history</span></button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnShare" title="Start a collaboration session"><span class="msi">share</span> Share</button>
+    <div class="collab-status" id="collabStatus" style="display:none">
+      <div class="collab-indicator" id="collabIndicator" title="Connection status"></div>
+      <span class="collab-peer-count" id="collabPeerCount"></span>
+    </div>
+    <div class="sep"></div>
+    <div class="wasm-status">
+      <div class="wasm-dot" id="wasmDot"></div>
+      <span class="wasm-label" id="wasmLabel">loading...</span>
+    </div>
+  </div>
+
+  <!-- Menu Bar (File / Edit / View / Insert / Format / Tools) -->
+  <div class="app-menubar" id="appMenubar" role="menubar" aria-label="Menu bar">
+    <div class="app-menu-item" data-menu="fileMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="0">File</button>
+      <div class="app-menu-dropdown" id="fileMenu" role="menu" aria-label="File">
+        <button class="app-menu-entry" id="btnNew" role="menuitem" tabindex="-1"><span class="msi">note_add</span> New <span class="shortcut">Ctrl+N</span></button>
+        <button class="app-menu-entry" id="btnOpen" role="menuitem" tabindex="-1"><span class="msi">folder_open</span> Open <span class="shortcut">Ctrl+O</span></button>
+        <button class="app-menu-entry" id="btnTemplate" role="menuitem" tabindex="-1"><span class="msi">description</span> New from Template...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" data-fmt="docx" role="menuitem" tabindex="-1"><span class="msi">download</span> Export as DOCX</button>
+        <button class="app-menu-entry" data-fmt="odt" role="menuitem" tabindex="-1"><span class="msi">download</span> Export as ODT</button>
+        <button class="app-menu-entry" data-fmt="pdf" role="menuitem" tabindex="-1"><span class="msi">download</span> Export as PDF</button>
+        <button class="app-menu-entry" data-fmt="txt" role="menuitem" tabindex="-1"><span class="msi">download</span> Export as Plain Text</button>
+        <button class="app-menu-entry" data-fmt="md" role="menuitem" tabindex="-1"><span class="msi">download</span> Export as Markdown</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="btnPrint" role="menuitem" tabindex="-1"><span class="msi">print</span> Print <span class="shortcut">Ctrl+P</span></button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="btnSaveTemplate" role="menuitem" tabindex="-1"><span class="msi">bookmark_add</span> Save as Template...</button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="editMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Edit</button>
+      <div class="app-menu-dropdown" id="editMenu" role="menu" aria-label="Edit">
+        <button class="app-menu-entry" id="menuUndo" role="menuitem" tabindex="-1"><span class="msi">undo</span> Undo <span class="shortcut">Ctrl+Z</span></button>
+        <button class="app-menu-entry" id="menuRedo" role="menuitem" tabindex="-1"><span class="msi">redo</span> Redo <span class="shortcut">Ctrl+Y</span></button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuFind" role="menuitem" tabindex="-1"><span class="msi">search</span> Find & Replace <span class="shortcut">Ctrl+F</span></button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="viewMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">View</button>
+      <div class="app-menu-dropdown" id="viewMenu" role="menu" aria-label="View">
+        <button class="app-menu-entry tab-menu-entry" data-view="editor" role="menuitem" tabindex="-1"><span class="msi">edit</span> Editor</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuShowPages" role="menuitem" tabindex="-1"><span class="msi">view_sidebar</span> Pages Panel</button>
+        <button class="app-menu-entry" id="menuShowComments" role="menuitem" tabindex="-1"><span class="msi">comment</span> Comments Panel</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuZoomIn" role="menuitem" tabindex="-1"><span class="msi">zoom_in</span> Zoom In <span class="shortcut">Ctrl++</span></button>
+        <button class="app-menu-entry" id="menuZoomOut" role="menuitem" tabindex="-1"><span class="msi">zoom_out</span> Zoom Out <span class="shortcut">Ctrl+-</span></button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuPrintPreview" role="menuitem" tabindex="-1"><span class="msi">preview</span> Print Preview</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <label class="app-menu-entry" id="menuCanvasMode" role="menuitem" tabindex="-1" style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Render document using HTML5 Canvas for pixel-accurate glyph placement">
+          <span class="msi">brush</span> Canvas Mode
+          <input type="checkbox" id="canvasModeToggle" style="margin-left:auto;cursor:pointer" title="Toggle canvas-based rendering">
+        </label>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="insertMenuBar">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Insert</button>
+      <div class="app-menu-dropdown" id="insertMenuBar" role="menu" aria-label="Insert">
+        <button class="app-menu-entry" id="miTable" role="menuitem" tabindex="-1"><span class="msi">table</span> Table...</button>
+        <button class="app-menu-entry" id="miImage" role="menuitem" tabindex="-1"><span class="msi">image</span> Image...</button>
+        <button class="app-menu-entry" id="miLink" role="menuitem" tabindex="-1"><span class="msi">link</span> Hyperlink...</button>
+        <button class="app-menu-entry" id="miComment" role="menuitem" tabindex="-1"><span class="msi">add_comment</span> Comment...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="miTOC" role="menuitem" tabindex="-1"><span class="msi">toc</span> Table of Contents</button>
+        <button class="app-menu-entry" id="miHR" role="menuitem" tabindex="-1"><span class="msi">horizontal_rule</span> Horizontal Rule</button>
+        <button class="app-menu-entry" id="miPageBreak" role="menuitem" tabindex="-1"><span class="msi">insert_page_break</span> Page Break</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="miHeaderFooter" role="menuitem" tabindex="-1"><span class="msi">vertical_split</span> Headers &amp; Footers...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="miEquation" role="menuitem" tabindex="-1"><span class="msi">functions</span> Equation... <span class="shortcut">Ctrl+Shift+E</span></button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="miDrawing" role="menuitem" tabindex="-1"><span class="msi">draw</span> Drawing...</button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="formatMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Format</button>
+      <div class="app-menu-dropdown" id="formatMenu" role="menu" aria-label="Format">
+        <button class="app-menu-entry" id="menuBold" role="menuitem" tabindex="-1"><span class="msi">format_bold</span> Bold <span class="shortcut">Ctrl+B</span></button>
+        <button class="app-menu-entry" id="menuItalic" role="menuitem" tabindex="-1"><span class="msi">format_italic</span> Italic <span class="shortcut">Ctrl+I</span></button>
+        <button class="app-menu-entry" id="menuUnderline" role="menuitem" tabindex="-1"><span class="msi">format_underlined</span> Underline <span class="shortcut">Ctrl+U</span></button>
+        <button class="app-menu-entry" id="menuStrike" role="menuitem" tabindex="-1"><span class="msi">strikethrough_s</span> Strikethrough</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuClearFormat" role="menuitem" tabindex="-1"><span class="msi">format_clear</span> Clear formatting</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuPageSetup" role="menuitem" tabindex="-1"><span class="msi">description</span> Page Setup...</button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="toolsMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Tools</button>
+      <div class="app-menu-dropdown" id="toolsMenu" role="menu" aria-label="Tools">
+        <button class="app-menu-entry" id="btnSpellCheck" role="menuitem" tabindex="-1"><span class="msi">spellcheck</span> Spell check</button>
+        <button class="app-menu-entry" id="menuCustomDict" role="menuitem" tabindex="-1"><span class="msi">book</span> Custom Dictionary...</button>
+        <button class="app-menu-entry" id="menuAutoCorrect" role="menuitem" tabindex="-1"><span class="msi">auto_fix_high</span> Auto-Correct...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="btnComments" role="menuitem" tabindex="-1"><span class="msi">comment</span> Comments</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuDarkMode" role="menuitem" tabindex="-1"><span class="msi">dark_mode</span> Dark mode</button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="helpMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Help</button>
+      <div class="app-menu-dropdown" id="helpMenu" role="menu" aria-label="Help">
+        <button class="app-menu-entry" id="menuShortcuts" role="menuitem" tabindex="-1"><span class="msi">keyboard</span> Keyboard Shortcuts <span class="shortcut">Ctrl+/</span></button>
+        <button class="app-menu-entry" id="menuFeatureTour" role="menuitem" tabindex="-1"><span class="msi">explore</span> Feature Tour</button>
+        <button class="app-menu-entry" id="menuWhatsNew" role="menuitem" tabindex="-1"><span class="msi">new_releases</span> What's New</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuUsageStats" role="menuitem" tabindex="-1"><span class="msi">bar_chart</span> Usage Statistics</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuAbout" role="menuitem" tabindex="-1"><span class="msi">info</span> About s1engine Editor</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden file inputs (used by JS) -->
+  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf" hidden>
+  <input type="file" id="imageInput" accept="image/*" hidden>
+
+  <!-- Toolbar -->
+  <div class="toolbar" id="toolbar" role="toolbar" aria-label="Formatting toolbar">
+    <!-- Undo/Redo -->
+    <button class="tb-btn" id="btnUndo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><span class="msi">undo</span></button>
+    <button class="tb-btn" id="btnRedo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><span class="msi">redo</span></button>
+    <div class="tb-sep" role="separator"></div>
+
+    <!-- Zoom -->
+    <button class="tb-btn tb-collapsible-768" id="tbZoomOut" title="Zoom out" aria-label="Zoom out"><span class="msi">zoom_out</span></button>
+    <span class="tb-zoom-value tb-collapsible-768" id="tbZoomValue">100%</span>
+    <button class="tb-btn tb-collapsible-768" id="tbZoomIn" title="Zoom in" aria-label="Zoom in"><span class="msi">zoom_in</span></button>
+    <div class="tb-sep tb-collapsible-768" role="separator"></div>
+
+    <!-- Style Gallery -->
+    <div class="style-gallery tb-collapsible-768" id="styleGallery">
+      <button class="style-gallery-btn" id="styleGalleryBtn" title="Paragraph style" aria-label="Paragraph style" aria-haspopup="true" aria-expanded="false">
+        <span class="style-gallery-label" id="styleGalleryLabel">Normal</span>
+        <span class="msi msi-sm">expand_more</span>
+      </button>
+      <div class="style-gallery-panel" id="styleGalleryPanel" role="listbox" aria-label="Paragraph styles">
+        <div class="style-gallery-item active" role="option" data-style="normal" aria-selected="true">
+          <span class="style-preview style-preview-normal">Normal</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="title" aria-selected="false">
+          <span class="style-preview style-preview-title">Title</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="subtitle" aria-selected="false">
+          <span class="style-preview style-preview-subtitle">Subtitle</span>
+        </div>
+        <div class="style-gallery-sep"></div>
+        <div class="style-gallery-item" role="option" data-style="heading1" aria-selected="false">
+          <span class="style-preview style-preview-h1">Heading 1</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="heading2" aria-selected="false">
+          <span class="style-preview style-preview-h2">Heading 2</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="heading3" aria-selected="false">
+          <span class="style-preview style-preview-h3">Heading 3</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="heading4" aria-selected="false">
+          <span class="style-preview style-preview-h4">Heading 4</span>
+        </div>
+        <div class="style-gallery-sep"></div>
+        <div class="style-gallery-item" role="option" data-style="quote" aria-selected="false">
+          <span class="style-preview style-preview-quote">Quote</span>
+        </div>
+        <div class="style-gallery-item" role="option" data-style="code" aria-selected="false">
+          <span class="style-preview style-preview-code">Code</span>
+        </div>
+      </div>
+    </div>
+    <div class="tb-sep" role="separator"></div>
+
+    <!-- Font -->
+    <select class="tb-select tb-collapsible-768" id="fontFamily" title="Font family" aria-label="Font family" style="min-width:120px">
+      <option value="">Default</option>
+      <option value="Arial" style="font-family:Arial">Arial</option>
+      <option value="Times New Roman" style="font-family:'Times New Roman'">Times New Roman</option>
+      <option value="Georgia" style="font-family:Georgia">Georgia</option>
+      <option value="Courier New" style="font-family:'Courier New'">Courier New</option>
+      <option value="Verdana" style="font-family:Verdana">Verdana</option>
+      <option value="Trebuchet MS" style="font-family:'Trebuchet MS'">Trebuchet MS</option>
+      <option value="Garamond" style="font-family:Garamond">Garamond</option>
+      <option value="Palatino" style="font-family:Palatino">Palatino</option>
+      <option value="Tahoma" style="font-family:Tahoma">Tahoma</option>
+      <option value="Comic Sans MS" style="font-family:'Comic Sans MS'">Comic Sans MS</option>
+    </select>
+
+    <!-- Font size -->
+    <input class="tb-input tb-collapsible-768" id="fontSize" type="number" min="6" max="96" value="12" title="Font size (pt)" aria-label="Font size">
+    <div class="tb-sep tb-collapsible-768" role="separator"></div>
+
+    <!-- Bold / Italic / Underline / Strikethrough -->
+    <button class="tb-btn" id="btnBold" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><span class="msi">format_bold</span></button>
+    <button class="tb-btn" id="btnItalic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><span class="msi">format_italic</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnUnderline" title="Underline (Ctrl+U)" aria-label="Underline" aria-pressed="false"><span class="msi">format_underlined</span></button>
+    <button class="tb-btn tb-collapsible-1024" id="btnStrike" title="Strikethrough" aria-label="Strikethrough" aria-pressed="false"><span class="msi">strikethrough_s</span></button>
+    <div class="tb-sep tb-collapsible-1024" role="separator"></div>
+
+    <!-- Superscript / Subscript -->
+    <button class="tb-btn tb-collapsible-1024" id="btnSuperscript" title="Superscript" aria-label="Superscript" aria-pressed="false"><span class="msi">superscript</span></button>
+    <button class="tb-btn tb-collapsible-1024" id="btnSubscript" title="Subscript" aria-label="Subscript" aria-pressed="false"><span class="msi">subscript</span></button>
+    <div class="tb-sep tb-collapsible-1024" role="separator"></div>
+
+    <!-- Text color -->
+    <div class="color-btn tb-btn tb-collapsible-1024" title="Text color" aria-label="Text color">
+      <span class="msi">format_color_text</span>
+      <div class="color-swatch" id="colorSwatch" style="background:#000"></div>
+      <input type="color" id="colorPicker" value="#000000" aria-label="Choose text color">
+    </div>
+
+    <!-- Highlight -->
+    <div class="color-btn tb-btn tb-collapsible-1024" title="Highlight color" aria-label="Highlight color">
+      <span class="msi">ink_highlighter</span>
+      <input type="color" id="highlightPicker" value="#fef08a" aria-label="Choose highlight color">
+    </div>
+
+    <!-- Clear formatting -->
+    <button class="tb-btn tb-collapsible-1024" id="btnClearFormat" title="Clear formatting" aria-label="Clear formatting"><span class="msi">format_clear</span></button>
+    <div class="tb-sep tb-collapsible-1024" role="separator"></div>
+
+    <!-- Alignment -->
+    <button class="tb-btn tb-collapsible-480" id="btnAlignL" title="Left align" aria-label="Align left" aria-pressed="true"><span class="msi">format_align_left</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnAlignC" title="Center align" aria-label="Align center" aria-pressed="false"><span class="msi">format_align_center</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnAlignR" title="Right align" aria-label="Align right" aria-pressed="false"><span class="msi">format_align_right</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnAlignJ" title="Justify" aria-label="Justify" aria-pressed="false"><span class="msi">format_align_justify</span></button>
+    <div class="tb-sep tb-collapsible-480" role="separator"></div>
+
+    <!-- Line spacing -->
+    <select class="tb-select tb-select-narrow tb-collapsible-1024" id="lineSpacing" title="Line spacing" aria-label="Line spacing" style="min-width:48px">
+      <option value="1.0">1</option>
+      <option value="1.15" selected>1.15</option>
+      <option value="1.5">1.5</option>
+      <option value="2.0">2</option>
+      <option value="2.5">2.5</option>
+      <option value="3.0">3</option>
+    </select>
+
+    <!-- Indent / Outdent -->
+    <button class="tb-btn tb-collapsible-1024" id="btnOutdent" title="Decrease indent" aria-label="Decrease indent"><span class="msi">format_indent_decrease</span></button>
+    <button class="tb-btn tb-collapsible-1024" id="btnIndent" title="Increase indent" aria-label="Increase indent"><span class="msi">format_indent_increase</span></button>
+    <div class="tb-sep tb-collapsible-1024" role="separator"></div>
+
+    <!-- Lists -->
+    <button class="tb-btn tb-collapsible-480" id="btnBulletList" title="Bulleted list" aria-label="Bulleted list" aria-pressed="false"><span class="msi">format_list_bulleted</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnNumberList" title="Numbered list" aria-label="Numbered list" aria-pressed="false"><span class="msi">format_list_numbered</span></button>
+    <div class="tb-sep tb-collapsible-480" role="separator"></div>
+
+    <!-- Insert (toolbar shortcut) -->
+    <div class="insert-dropdown">
+      <button class="tb-btn tb-btn-wide" id="btnInsertMenu" title="Insert" aria-label="Insert menu" aria-haspopup="true" aria-expanded="false">
+        <span class="msi">add</span> Insert
+      </button>
+      <div class="insert-menu" id="insertMenu" role="menu">
+        <button class="ctx-item" data-action="table" role="menuitem"><span class="msi ctx-icon">table</span> Table...</button>
+        <button class="ctx-item" data-action="image" role="menuitem"><span class="msi ctx-icon">image</span> Image...</button>
+        <button class="ctx-item" data-action="link" role="menuitem"><span class="msi ctx-icon">link</span> Hyperlink...</button>
+        <button class="ctx-item" data-action="comment" role="menuitem"><span class="msi ctx-icon">add_comment</span> Comment...</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" data-action="toc" role="menuitem"><span class="msi ctx-icon">toc</span> Table of Contents</button>
+        <button class="ctx-item" data-action="hr" role="menuitem"><span class="msi ctx-icon">horizontal_rule</span> Horizontal Rule</button>
+        <button class="ctx-item" data-action="pagebreak" role="menuitem"><span class="msi ctx-icon">insert_page_break</span> Page Break</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" data-action="headerfooter" role="menuitem"><span class="msi ctx-icon">vertical_split</span> Headers &amp; Footers...</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" data-action="drawing" role="menuitem"><span class="msi ctx-icon">draw</span> Drawing...</button>
+      </div>
+    </div>
+    <div class="tb-sep" role="separator"></div>
+
+    <!-- Find -->
+    <button class="tb-btn tb-collapsible-1024" id="btnFind" title="Find & Replace (Ctrl+F)" aria-label="Find and replace"><span class="msi">search</span></button>
+
+    <!-- More (overflow) menu — visible at narrow widths -->
+    <div class="more-dropdown" id="moreDropdown">
+      <button class="tb-btn tb-more-btn" id="btnMore" title="More formatting options" aria-label="More formatting options" aria-haspopup="true" aria-expanded="false"><span class="msi">more_horiz</span></button>
+      <div class="more-menu" id="moreMenu" role="menu" aria-label="More toolbar options">
+        <!-- Formatting options (shown when toolbar items are collapsed) -->
+        <button class="ctx-item more-item more-item-1024" data-more="strikethrough" role="menuitem" title="Toggle strikethrough"><span class="msi ctx-icon">strikethrough_s</span> Strikethrough</button>
+        <button class="ctx-item more-item more-item-1024" data-more="superscript" role="menuitem" title="Toggle superscript"><span class="msi ctx-icon">superscript</span> Superscript</button>
+        <button class="ctx-item more-item more-item-1024" data-more="subscript" role="menuitem" title="Toggle subscript"><span class="msi ctx-icon">subscript</span> Subscript</button>
+        <button class="ctx-item more-item more-item-1024" data-more="textColor" role="menuitem" title="Change text color"><span class="msi ctx-icon">format_color_text</span> Text Color...
+          <input type="color" id="moreColorPicker" value="#000000" aria-label="Choose text color" class="more-color-input">
+        </button>
+        <button class="ctx-item more-item more-item-1024" data-more="highlightColor" role="menuitem" title="Change highlight color"><span class="msi ctx-icon">ink_highlighter</span> Highlight Color...
+          <input type="color" id="moreHighlightPicker" value="#fef08a" aria-label="Choose highlight color" class="more-color-input">
+        </button>
+        <button class="ctx-item more-item more-item-1024" data-more="clearFormat" role="menuitem" title="Remove all formatting"><span class="msi ctx-icon">format_clear</span> Clear Formatting</button>
+        <div class="ctx-sep more-sep-1024"></div>
+        <!-- Layout options -->
+        <button class="ctx-item more-item" data-more="lineSpacing" role="menuitem" title="Cycle line spacing"><span class="msi ctx-icon">format_line_spacing</span> Line Spacing</button>
+        <button class="ctx-item more-item" data-more="indent" role="menuitem" title="Increase indent"><span class="msi ctx-icon">format_indent_increase</span> Increase Indent</button>
+        <button class="ctx-item more-item" data-more="outdent" role="menuitem" title="Decrease indent"><span class="msi ctx-icon">format_indent_decrease</span> Decrease Indent</button>
+        <div class="ctx-sep"></div>
+        <!-- Alignment (shown when alignment buttons are collapsed at 480px) -->
+        <button class="ctx-item more-item more-item-480" data-more="alignLeft" role="menuitem" title="Align left"><span class="msi ctx-icon">format_align_left</span> Align Left</button>
+        <button class="ctx-item more-item more-item-480" data-more="alignCenter" role="menuitem" title="Align center"><span class="msi ctx-icon">format_align_center</span> Align Center</button>
+        <button class="ctx-item more-item more-item-480" data-more="alignRight" role="menuitem" title="Align right"><span class="msi ctx-icon">format_align_right</span> Align Right</button>
+        <button class="ctx-item more-item more-item-480" data-more="alignJustify" role="menuitem" title="Justify text"><span class="msi ctx-icon">format_align_justify</span> Justify</button>
+        <div class="ctx-sep more-sep-480"></div>
+        <!-- Tools -->
+        <button class="ctx-item more-item" data-more="find" role="menuitem" title="Open find and replace"><span class="msi ctx-icon">search</span> Find & Replace</button>
+        <button class="ctx-item more-item" data-more="spellcheck" role="menuitem" title="Toggle spell check"><span class="msi ctx-icon">spellcheck</span> Spell Check</button>
+        <button class="ctx-item more-item" data-more="comments" role="menuitem" title="Toggle comments panel"><span class="msi ctx-icon">comment</span> Comments</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item more-item" data-more="history" role="menuitem" title="Open version history"><span class="msi ctx-icon">history</span> History</button>
+        <button class="ctx-item more-item" data-more="share" role="menuitem" title="Start collaboration session"><span class="msi ctx-icon">share</span> Share</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab Bar (hidden by default, used for JS compatibility) -->
+  <div class="tabbar" id="tabbar" style="display:none">
+    <button class="tab active" data-view="editor">Editor</button>
+  </div>
+
+  <!-- Track Changes Bar -->
+  <div class="tc-bar" id="tcBar">
+    <span class="msi tc-bar-icon">rate_review</span>
+    <span id="tcCount">0 tracked changes</span>
+    <div class="spacer"></div>
+    <button class="tc-btn accept" id="btnAcceptAll"><span class="msi tc-btn-icon">check</span> Accept All</button>
+    <button class="tc-btn reject" id="btnRejectAll"><span class="msi tc-btn-icon">close</span> Reject All</button>
+  </div>
+
+  <!-- Welcome Screen -->
+  <div class="welcome" id="welcomeScreen">
+    <img src="/assets/logo-CBlYF38a.svg" alt="s1 editor" width="80" height="80" class="welcome-logo">
+    <h2>Welcome to s1 editor</h2>
+    <p>A professional document editor powered by s1engine — full DOCX, ODT, PDF, and Markdown support with real-time formatting.</p>
+    <div class="actions">
+      <button class="big-btn primary" id="welcomeNew"><span class="msi">note_add</span> New Document</button>
+      <button class="big-btn" id="welcomeOpen"><span class="msi">folder_open</span> Open File</button>
+    </div>
+    <div class="drop-zone" id="dropZone">
+      <span class="msi drop-icon">upload_file</span>
+      <span>Drop a DOCX, ODT, PDF, TXT, or Markdown file here</span>
+    </div>
+  </div>
+
+  <!-- Editor Wrapper — Pages sidebar | Canvas | Comments panel -->
+  <div class="editor-wrapper" id="editorWrapper">
+
+    <!-- Pages Sidebar (left) -->
+    <div class="pages-panel" id="pagesPanel" role="complementary" aria-label="Page thumbnails">
+      <div class="pages-header">
+        <h3>Pages</h3>
+        <button class="pages-close" id="pagesPanelClose" aria-label="Close pages panel" title="Close pages panel"><span class="msi">close</span></button>
+      </div>
+      <div class="pages-list" id="pagesList"></div>
+    </div>
+
+    <!-- Editor Canvas (center) -->
+    <div class="canvas" id="editorCanvas">
+      <div class="ruler" id="ruler" aria-hidden="true"></div>
+      <div id="pageContainer" role="document" aria-label="Document content"></div>
+    <div class="find-bar" id="findBar">
+      <div class="find-row">
+        <span class="msi find-icon">search</span>
+        <input class="find-input" id="findInput" placeholder="Find in document..." autocomplete="off">
+        <button class="find-option-btn" id="findMatchCase" title="Match case (Alt+C)">Aa</button>
+        <button class="find-option-btn" id="findWholeWord" title="Whole words (Alt+W)">W</button>
+        <span class="find-count" id="findCount"></span>
+        <button class="find-btn" id="findPrev" title="Previous match"><span class="msi">keyboard_arrow_up</span></button>
+        <button class="find-btn" id="findNext" title="Next match"><span class="msi">keyboard_arrow_down</span></button>
+        <button class="find-close" id="findClose" title="Close"><span class="msi">close</span></button>
+      </div>
+      <div class="find-row">
+        <span class="msi find-icon">find_replace</span>
+        <input class="find-input" id="replaceInput" placeholder="Replace with...">
+        <button class="find-btn" id="replaceBtn">Replace</button>
+        <button class="find-btn primary" id="replaceAllBtn">All</button>
+      </div>
+    </div>
+  </div>
+
+    <!-- Comments Panel (right, docked) -->
+    <div class="comments-panel" id="commentsPanel" role="complementary" aria-label="Comments">
+      <div class="comments-header">
+        <h3>Comments</h3>
+        <button class="comments-close" id="commentsClose" aria-label="Close comments panel"><span class="msi">close</span></button>
+      </div>
+      <div class="comments-list" id="commentsList"></div>
+    </div>
+
+  </div><!-- end .editor-wrapper -->
+
+  <!-- PDF View -->
+  <div class="pdf-view" id="pdfView">
+    <div class="pdf-toolbar" id="pdfToolbar">
+      <div class="pdf-toolbar-group">
+        <button class="tb-btn" id="pdfPrevPage" title="Previous page"><span class="msi">navigate_before</span></button>
+        <span class="pdf-page-info" id="pdfPageInfo">1 / 1</span>
+        <button class="tb-btn" id="pdfNextPage" title="Next page"><span class="msi">navigate_next</span></button>
+      </div>
+      <div class="pdf-toolbar-group">
+        <button class="tb-btn" id="pdfZoomOut" title="Zoom out"><span class="msi">remove</span></button>
+        <select class="pdf-zoom-select" id="pdfZoomSelect" title="Zoom level">
+          <option value="0.5">50%</option>
+          <option value="0.75">75%</option>
+          <option value="1" selected>100%</option>
+          <option value="1.25">125%</option>
+          <option value="1.5">150%</option>
+          <option value="2">200%</option>
+          <option value="fit-page">Fit Page</option>
+          <option value="fit-width">Fit Width</option>
+        </select>
+        <button class="tb-btn" id="pdfZoomIn" title="Zoom in"><span class="msi">add</span></button>
+      </div>
+      <div class="pdf-toolbar-group pdf-tools">
+        <button class="tb-btn pdf-tool-btn active" id="pdfToolSelect" data-tool="select" title="Select text" aria-pressed="true" aria-label="Select text"><span class="msi">near_me</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolHighlight" data-tool="highlight" title="Highlight text" aria-label="Highlight text"><span class="msi">border_color</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolComment" data-tool="comment" title="Add comment" aria-label="Add comment"><span class="msi">add_comment</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolDraw" data-tool="draw" title="Free draw" aria-label="Free draw"><span class="msi">draw</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolText" data-tool="text" title="Add text box" aria-label="Add text box"><span class="msi">title</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolRedact" data-tool="redact" title="Redact area" aria-label="Redact area"><span class="msi">visibility_off</span></button>
+      </div>
+      <div class="pdf-toolbar-group">
+        <button class="tb-btn" id="pdfSave" title="Download PDF" aria-label="Download PDF"><span class="msi">download</span></button>
+      </div>
+    </div>
+    <div class="pdf-body">
+      <div class="pdf-sidebar" id="pdfSidebar">
+        <div class="pdf-sidebar-header">
+          <span class="pdf-sidebar-title">Pages</span>
+        </div>
+        <div class="pdf-sidebar-content" id="pdfSidebarContent"></div>
+      </div>
+      <div class="pdf-canvas-container" id="pdfCanvasContainer">
+        <!-- PDF pages rendered here -->
+      </div>
+      <div class="pdf-annotations-panel" id="pdfAnnotationsPanel">
+        <div class="pdf-annot-header">
+          <h3>Annotations</h3>
+          <button class="pdf-annot-close" id="pdfAnnotClose" title="Close panel"><span class="msi">close</span></button>
+        </div>
+        <div class="pdf-annot-list" id="pdfAnnotList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Sidebar -->
+  <div class="history-panel" id="historyPanel" role="complementary" aria-label="History">
+    <div class="history-header">
+      <h3>History</h3>
+      <button class="history-close" id="historyClose" aria-label="Close history panel"><span class="msi">close</span></button>
+    </div>
+    <div class="history-tabs">
+      <button class="history-tab active" data-tab="undo">Undo History</button>
+      <button class="history-tab" data-tab="versions">Versions</button>
+    </div>
+    <div class="history-tab-content" id="undoHistoryTab">
+      <div class="history-list" id="undoHistoryList" style="padding:4px 0"></div>
+    </div>
+    <div class="history-tab-content" id="versionsTab" style="display:none">
+      <div class="history-list" id="historyList"></div>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="statusbar" id="statusbar" role="status" aria-live="polite">
+    <select class="editing-mode-select" id="editingModeSelect" title="Editing mode: choose Editing, Suggesting, or Viewing">
+      <option value="editing">Editing</option>
+      <option value="suggesting">Suggesting</option>
+      <option value="viewing">Viewing</option>
+    </select>
+    <div class="status-sep"></div>
+    <span id="statusInfo">Ready</span>
+    <!-- E5.2: Peer presence dots -->
+    <div class="status-peer-container" id="statusBarPeers" style="display:none"></div>
+    <!-- E5.3: Sync status indicator -->
+    <span class="collab-sync-status" id="collabSyncStatus" style="display:none">Offline</span>
+    <div class="spacer"></div>
+    <div class="status-views" aria-label="View mode">
+      <button class="status-view-btn active" data-view="editor" title="Editor view"><span class="msi">edit</span></button>
+    </div>
+    <div class="status-sep"></div>
+    <div class="zoom-controls" aria-label="Zoom">
+      <button class="zoom-btn" id="zoomOut" title="Zoom out" aria-label="Zoom out"><span class="msi">zoom_out</span></button>
+      <div class="zoom-value-wrap">
+        <button class="zoom-value" id="zoomValue" title="Zoom presets" aria-haspopup="true" aria-expanded="false">100%</button>
+        <div class="zoom-dropdown" id="zoomDropdown" role="menu" aria-label="Zoom presets">
+          <button class="zoom-preset" data-zoom="50" role="menuitem">50%</button>
+          <button class="zoom-preset" data-zoom="75" role="menuitem">75%</button>
+          <button class="zoom-preset" data-zoom="100" role="menuitem">100%</button>
+          <button class="zoom-preset" data-zoom="125" role="menuitem">125%</button>
+          <button class="zoom-preset" data-zoom="150" role="menuitem">150%</button>
+          <button class="zoom-preset" data-zoom="200" role="menuitem">200%</button>
+          <div class="zoom-preset-sep"></div>
+          <button class="zoom-preset" data-zoom="fit-width" role="menuitem">Fit Width</button>
+          <button class="zoom-preset" data-zoom="fit-page" role="menuitem">Fit Page</button>
+        </div>
+      </div>
+      <button class="zoom-btn" id="zoomIn" title="Zoom in" aria-label="Zoom in"><span class="msi">zoom_in</span></button>
+    </div>
+    <div class="status-sep"></div>
+    <button class="zoom-btn" id="btnDarkMode" title="Toggle dark mode" aria-label="Toggle dark mode"><span class="msi">dark_mode</span></button>
+    <div class="status-sep"></div>
+    <!-- E10.5: Error indicator (hidden by default) -->
+    <button class="error-indicator" id="errorIndicator" style="display:none" title="Errors occurred — click for details" aria-label="View error details">
+      <span class="msi" style="font-size:14px;color:var(--red,#d93025)">error</span>
+      <span class="error-badge">0</span>
+    </button>
+    <div class="status-sep"></div>
+    <span id="statusFormat"></span>
+  </div>
+</div>
+
+<!-- Export dropdown (hidden, used by legacy JS) -->
+<div class="dropdown-menu" id="exportMenu" style="display:none">
+  <button class="dropdown-item" data-fmt="docx">DOCX</button>
+  <button class="dropdown-item" data-fmt="odt">ODT</button>
+  <button class="dropdown-item" data-fmt="txt">TXT</button>
+  <button class="dropdown-item" data-fmt="md">MD</button>
+  <button class="dropdown-item" data-fmt="pdf">PDF</button>
+</div>
+
+<!-- Table Insert Modal -->
+<div class="modal-overlay" id="tableModal" role="dialog" aria-modal="true" aria-label="Insert Table">
+  <div class="modal">
+    <h3><span class="msi modal-icon">table</span> Insert Table</h3>
+    <label>Rows: <input type="number" id="tableRows" value="3" min="1" max="50"></label>
+    <label>Columns: <input type="number" id="tableCols" value="3" min="1" max="20"></label>
+    <div class="modal-actions">
+      <button id="tableCancelBtn">Cancel</button>
+      <button class="primary" id="tableInsertBtn">Insert</button>
+    </div>
+  </div>
+</div>
+
+<!-- Comment Insert Modal -->
+<div class="modal-overlay" id="commentModal" role="dialog" aria-modal="true" aria-label="Add Comment">
+  <div class="modal">
+    <h3><span class="msi modal-icon">add_comment</span> Add Comment</h3>
+    <label>Comment: <textarea id="commentText" rows="3" placeholder="Write your comment..." style="width:100%;resize:vertical;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></textarea></label>
+    <label>Author: <input type="text" id="commentAuthor" value="User" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
+    <div class="modal-actions">
+      <button id="commentCancelBtn">Cancel</button>
+      <button class="primary" id="commentInsertBtn">Add Comment</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hyperlink Insert Modal -->
+<div class="modal-overlay" id="linkModal" role="dialog" aria-modal="true" aria-label="Insert Hyperlink">
+  <div class="modal">
+    <h3><span class="msi modal-icon">link</span> Insert Hyperlink</h3>
+    <label>URL: <input type="url" id="linkUrl" placeholder="https://example.com" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
+    <div class="modal-actions">
+      <button id="linkCancelBtn">Cancel</button>
+      <button class="primary" id="linkInsertBtn">Insert Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image Alt Text Modal -->
+<div class="modal-overlay" id="altTextModal" role="dialog" aria-modal="true" aria-label="Image Alt Text">
+  <div class="modal">
+    <h3><span class="msi modal-icon">image</span> Image Alt Text</h3>
+    <label>Description: <input type="text" id="altTextInput" placeholder="Describe this image..." style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
+    <div class="modal-actions">
+      <button id="altTextCancelBtn">Cancel</button>
+      <button class="primary" id="altTextSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Header/Footer Modal -->
+<div class="modal-overlay" id="headerFooterModal" role="dialog" aria-modal="true" aria-label="Headers & Footers">
+  <div class="modal" style="max-width:500px">
+    <h3><span class="msi modal-icon">vertical_split</span> Headers &amp; Footers</h3>
+    <div class="modal-field">
+      <label for="headerText">Header text</label>
+      <input type="text" id="headerText" placeholder="Enter header text..." autocomplete="off" title="Text to display in the page header" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+    </div>
+    <div class="modal-field">
+      <label for="footerText">Footer text</label>
+      <input type="text" id="footerText" placeholder="Enter footer text..." autocomplete="off" title="Text to display in the page footer" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+    </div>
+    <div class="modal-field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="footerPageNum" title="Show page numbers centered in the footer">
+      <label for="footerPageNum">Show page numbers in footer</label>
+    </div>
+    <div class="modal-field" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="differentFirstPage" title="Use different header/footer on the first page">
+      <label for="differentFirstPage">Different first page</label>
+    </div>
+    <div class="modal-actions">
+      <button id="hfCancelBtn" title="Cancel and close">Cancel</button>
+      <button id="hfApplyBtn" class="primary" title="Apply header and footer settings">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Table Context Menu -->
+<div class="ctx-menu" id="tableContextMenu">
+  <button class="ctx-item" id="cmInsertRowAbove"><span class="msi ctx-icon">add</span> Insert Row Above</button>
+  <button class="ctx-item" id="cmInsertRowBelow"><span class="msi ctx-icon">add</span> Insert Row Below</button>
+  <button class="ctx-item" id="cmDeleteRow"><span class="msi ctx-icon">delete</span> Delete Row</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="cmInsertColLeft"><span class="msi ctx-icon">add</span> Insert Column Left</button>
+  <button class="ctx-item" id="cmInsertColRight"><span class="msi ctx-icon">add</span> Insert Column Right</button>
+  <button class="ctx-item" id="cmDeleteCol"><span class="msi ctx-icon">delete</span> Delete Column</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="cmCellBg"><span class="msi ctx-icon">format_color_fill</span> Cell Background...
+    <input type="color" id="cmCellBgPicker" value="#ffffff" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
+  </button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="cmTableProps"><span class="msi ctx-icon">settings</span> Table Properties...</button>
+</div>
+
+<!-- Table Properties Modal (E4.3) -->
+<div class="modal-overlay" id="tablePropsModal" role="dialog" aria-modal="true" aria-label="Table Properties">
+  <div class="modal" style="max-width:420px">
+    <h3><span class="msi modal-icon">table</span> Table Properties</h3>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Table Width</legend>
+        <div style="display:flex;align-items:center;gap:8px">
+          <select id="tpWidthMode" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+            <option value="auto">Auto</option>
+            <option value="percent">Percentage</option>
+            <option value="fixed">Fixed (px)</option>
+          </select>
+          <input type="number" id="tpWidthValue" value="100" min="10" max="2000" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:none">
+          <span id="tpWidthUnit" style="font-size:12px;color:var(--text-muted);display:none">%</span>
+        </div>
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Borders</legend>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="tp-border-btn active" data-borders="all" title="All borders"><span class="msi" style="font-size:18px">border_all</span></button>
+          <button class="tp-border-btn" data-borders="outer" title="Outer borders only"><span class="msi" style="font-size:18px">border_outer</span></button>
+          <button class="tp-border-btn" data-borders="none" title="No borders"><span class="msi" style="font-size:18px">border_clear</span></button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <label style="font-size:12px;color:var(--text-secondary);min-width:50px">Color:</label>
+          <input type="color" id="tpBorderColor" value="#000000" style="width:32px;height:24px;border:1px solid var(--border);border-radius:2px;cursor:pointer">
+          <label style="font-size:12px;color:var(--text-secondary);margin-left:8px">Width:</label>
+          <select id="tpBorderWidth" style="padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+            <option value="1">1px</option>
+            <option value="2">2px</option>
+            <option value="3">3px</option>
+          </select>
+        </div>
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Alignment</legend>
+        <div style="display:flex;gap:6px">
+          <button class="tp-align-btn active" data-align="left" title="Align left"><span class="msi" style="font-size:18px">format_align_left</span></button>
+          <button class="tp-align-btn" data-align="center" title="Align center"><span class="msi" style="font-size:18px">format_align_center</span></button>
+          <button class="tp-align-btn" data-align="right" title="Align right"><span class="msi" style="font-size:18px">format_align_right</span></button>
+        </div>
+      </fieldset>
+    </div>
+    <div class="modal-actions">
+      <button id="tpCancelBtn">Cancel</button>
+      <button class="primary" id="tpApplyBtn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image Context Menu -->
+<div class="ctx-menu" id="imageContextMenu">
+  <button class="ctx-item" id="imAlignLeft" title="Align image to the left"><span class="msi ctx-icon">format_align_left</span> Align Left</button>
+  <button class="ctx-item" id="imAlignCenter" title="Center the image"><span class="msi ctx-icon">format_align_center</span> Align Center</button>
+  <button class="ctx-item" id="imAlignRight" title="Align image to the right"><span class="msi ctx-icon">format_align_right</span> Align Right</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="imAltText" title="Set alternative text for accessibility"><span class="msi ctx-icon">text_fields</span> Alt Text...</button>
+  <button class="ctx-item" id="imReplace" title="Replace with a different image"><span class="msi ctx-icon">swap_horiz</span> Replace Image...</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="imDelete" title="Delete this image" style="color:var(--danger)"><span class="msi ctx-icon">delete</span> Delete Image</button>
+</div>
+
+<!-- Shape Picker (E9.4) -->
+<div class="modal-overlay" id="shapePicker" role="dialog" aria-modal="true" aria-label="Insert Drawing">
+  <div class="modal" style="max-width:400px">
+    <h3><span class="msi modal-icon">draw</span> Insert Shape</h3>
+    <div class="shape-picker-grid">
+      <button class="shape-picker-btn" data-shape="rectangle" title="Rectangle"><svg width="36" height="36" viewBox="0 0 36 36"><rect x="4" y="8" width="28" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Rectangle</span></button>
+      <button class="shape-picker-btn" data-shape="oval" title="Oval / Circle"><svg width="36" height="36" viewBox="0 0 36 36"><ellipse cx="18" cy="18" rx="14" ry="10" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Oval</span></button>
+      <button class="shape-picker-btn" data-shape="line" title="Line"><svg width="36" height="36" viewBox="0 0 36 36"><line x1="4" y1="32" x2="32" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Line</span></button>
+      <button class="shape-picker-btn" data-shape="arrow" title="Arrow"><svg width="36" height="36" viewBox="0 0 36 36"><defs><marker id="sp-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="currentColor"/></marker></defs><line x1="4" y1="28" x2="30" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" marker-end="url(#sp-arrow)"/></svg><span>Arrow</span></button>
+      <button class="shape-picker-btn" data-shape="textbox" title="Text Box"><svg width="36" height="36" viewBox="0 0 36 36"><rect x="4" y="8" width="28" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><text x="11" y="23" font-size="12" fill="currentColor" font-family="sans-serif">Aa</text></svg><span>Text Box</span></button>
+      <button class="shape-picker-btn" data-shape="callout" title="Callout"><svg width="36" height="36" viewBox="0 0 36 36"><polygon points="4,4 32,4 32,22 16,22 10,30 10,22 4,22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Callout</span></button>
+    </div>
+    <div class="modal-actions">
+      <button class="shape-picker-close">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shape Properties Panel (E9.4) -->
+<div class="shape-props-panel" id="shapePropsPanel">
+  <div class="shape-props-header">
+    <span class="shape-props-title">Shape Properties</span>
+    <button class="shape-props-close" title="Close properties panel"><span class="msi" style="font-size:16px">close</span></button>
+  </div>
+  <div class="shape-props-body">
+    <label title="Fill color">Fill <input type="color" id="shapeFillColor" value="#cfe2f3" title="Shape fill color"></label>
+    <label title="Stroke color">Stroke <input type="color" id="shapeStrokeColor" value="#1a73e8" title="Shape stroke/border color"></label>
+    <label title="Stroke width">Width <select id="shapeStrokeWidth" title="Stroke width in pixels"><option value="1">1px</option><option value="2" selected>2px</option><option value="3">3px</option><option value="4">4px</option><option value="5">5px</option></select></label>
+    <label title="Shape opacity">Opacity <input type="range" id="shapeOpacity" min="0" max="100" value="100" title="Shape opacity (0-100%)"> <span id="shapeOpacityVal">100%</span></label>
+  </div>
+</div>
+
+<!-- Shape Context Menu (E9.4) -->
+<div class="ctx-menu" id="shapeContextMenu" style="display:none">
+  <button class="ctx-item" id="scmProperties" title="Open shape properties panel"><span class="msi ctx-icon">tune</span> Shape Properties...</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="scmBringFront" title="Bring shape to front"><span class="msi ctx-icon">flip_to_front</span> Bring to Front</button>
+  <button class="ctx-item" id="scmSendBack" title="Send shape to back"><span class="msi ctx-icon">flip_to_back</span> Send to Back</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="scmDuplicate" title="Duplicate selected shape"><span class="msi ctx-icon">content_copy</span> Duplicate Shape</button>
+  <button class="ctx-item" id="scmGroup" title="Group selected shapes" style="display:none"><span class="msi ctx-icon">group_work</span> Group</button>
+  <button class="ctx-item" id="scmUngroup" title="Ungroup selected shapes" style="display:none"><span class="msi ctx-icon">workspaces</span> Ungroup</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="scmDelete" title="Delete selected shape" style="color:var(--danger)"><span class="msi ctx-icon">delete</span> Delete Shape</button>
+</div>
+
+<!-- Shape Drawing Toast (E9.4) -->
+<div class="shape-toast" id="shapeToast"></div>
+
+<!-- Slash Command Menu -->
+<div class="slash-menu" id="slashMenu" style="display:none" role="listbox" aria-label="Slash commands"></div>
+
+<!-- Keyboard Shortcuts Dialog (E7.4) -->
+<div class="modal-overlay" id="shortcutsModal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="modal" style="max-width:540px;max-height:80vh;overflow-y:auto">
+    <h3><span class="msi modal-icon">keyboard</span> Keyboard Shortcuts</h3>
+    <div class="shortcuts-grid">
+      <div class="shortcuts-section">
+        <h4>Editing</h4>
+        <div class="shortcut-row"><span>Undo</span><kbd>Ctrl+Z</kbd></div>
+        <div class="shortcut-row"><span>Redo</span><kbd>Ctrl+Y</kbd></div>
+        <div class="shortcut-row"><span>Cut</span><kbd>Ctrl+X</kbd></div>
+        <div class="shortcut-row"><span>Copy</span><kbd>Ctrl+C</kbd></div>
+        <div class="shortcut-row"><span>Paste</span><kbd>Ctrl+V</kbd></div>
+        <div class="shortcut-row"><span>Select All</span><kbd>Ctrl+A</kbd></div>
+        <div class="shortcut-row"><span>Find & Replace</span><kbd>Ctrl+F</kbd></div>
+        <div class="shortcut-row"><span>Line Break</span><kbd>Shift+Enter</kbd></div>
+        <div class="shortcut-row"><span>Delete Word Left</span><kbd>Ctrl+Backspace</kbd></div>
+        <div class="shortcut-row"><span>Delete Word Right</span><kbd>Ctrl+Delete</kbd></div>
+        <div class="shortcut-row"><span>Insert Comment</span><kbd>Ctrl+Alt+M</kbd></div>
+        <div class="shortcut-row"><span>Insert Equation</span><kbd>Ctrl+Shift+E</kbd></div>
+        <div class="shortcut-row"><span>Insert Footnote</span><kbd>Ctrl+Alt+F</kbd></div>
+        <div class="shortcut-row"><span>Insert Endnote</span><kbd>Ctrl+Alt+D</kbd></div>
+      </div>
+      <div class="shortcuts-section">
+        <h4>Formatting</h4>
+        <div class="shortcut-row"><span>Bold</span><kbd>Ctrl+B</kbd></div>
+        <div class="shortcut-row"><span>Italic</span><kbd>Ctrl+I</kbd></div>
+        <div class="shortcut-row"><span>Underline</span><kbd>Ctrl+U</kbd></div>
+        <div class="shortcut-row"><span>Strikethrough</span><kbd>Alt+Shift+5</kbd></div>
+        <div class="shortcut-row"><span>Superscript</span><kbd>Ctrl+.</kbd></div>
+        <div class="shortcut-row"><span>Subscript</span><kbd>Ctrl+,</kbd></div>
+        <div class="shortcut-row"><span>Clear Formatting</span><kbd>Ctrl+\</kbd></div>
+      </div>
+      <div class="shortcuts-section">
+        <h4>Paragraphs</h4>
+        <div class="shortcut-row"><span>Align Left</span><kbd>Ctrl+L</kbd></div>
+        <div class="shortcut-row"><span>Align Center</span><kbd>Ctrl+E</kbd></div>
+        <div class="shortcut-row"><span>Align Right</span><kbd>Ctrl+R</kbd></div>
+        <div class="shortcut-row"><span>Justify</span><kbd>Ctrl+J</kbd></div>
+        <div class="shortcut-row"><span>Indent</span><kbd>Tab</kbd></div>
+        <div class="shortcut-row"><span>Outdent</span><kbd>Shift+Tab</kbd></div>
+      </div>
+      <div class="shortcuts-section">
+        <h4>File</h4>
+        <div class="shortcut-row"><span>New Document</span><kbd>Ctrl+N</kbd></div>
+        <div class="shortcut-row"><span>Open</span><kbd>Ctrl+O</kbd></div>
+        <div class="shortcut-row"><span>Save</span><kbd>Ctrl+S</kbd></div>
+        <div class="shortcut-row"><span>Print</span><kbd>Ctrl+P</kbd></div>
+        <div class="shortcut-row"><span>Zoom In</span><kbd>Ctrl++</kbd></div>
+        <div class="shortcut-row"><span>Zoom Out</span><kbd>Ctrl+-</kbd></div>
+        <div class="shortcut-row"><span>Reset Zoom</span><kbd>Ctrl+0</kbd></div>
+      </div>
+      <div class="shortcuts-section">
+        <h4>Slash Commands</h4>
+        <div class="shortcut-row"><span>Type <code>/</code> at start of paragraph for quick insert</span></div>
+        <div class="shortcut-row"><span>/heading1..4, /bullet, /numbered, /table, /hr, /pagebreak, /quote, /code</span></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" id="shortcutsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Share / Collaboration Modal (E5.1) -->
+<div class="modal-overlay share-modal" id="shareModal" role="dialog" aria-modal="true" aria-label="Share Document">
+  <div class="modal" style="max-width:480px">
+    <div class="share-modal-header">
+      <h3><span class="msi modal-icon">group</span> Share & Collaborate</h3>
+      <button class="share-modal-close" id="shareModalClose" aria-label="Close"><span class="msi">close</span></button>
+    </div>
+    <div class="share-modal-body">
+      <!-- Shareable URL -->
+      <label class="share-field-label">Share link</label>
+      <div class="share-url-row">
+        <input type="text" id="shareUrlInput" class="share-url-input" readonly title="Shareable link for this collaboration session">
+        <button class="share-copy-btn" id="shareCopyBtn" title="Copy link to clipboard">Copy Link</button>
+      </div>
+
+      <!-- Display name -->
+      <label class="share-field-label">Your name</label>
+      <input type="text" id="shareNameInput" class="share-text-input" placeholder="Display name" title="Your display name visible to other collaborators">
+
+      <!-- Relay server -->
+      <label class="share-field-label">Relay server</label>
+      <input type="text" id="shareRelayInput" class="share-text-input" placeholder="ws://localhost:8787" title="WebSocket relay server address">
+
+      <!-- Permission level (UI only — encoded in share URL) -->
+      <label class="share-field-label">Default permission</label>
+      <select id="sharePermission" class="share-select" title="Permission level for people who join via the share link">
+        <option value="edit">Can edit</option>
+        <option value="comment">Can comment</option>
+        <option value="view">Can view</option>
+      </select>
+
+      <!-- Connected peers list -->
+      <label class="share-field-label">Connected peers</label>
+      <div class="share-peer-list" id="sharePeerList">
+        <div class="share-no-peers">No peers connected</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="shareCancelBtn">Cancel</button>
+      <button class="primary" id="shareStartBtn"><span class="msi" style="font-size:16px;vertical-align:middle">play_arrow</span> Start Session</button>
+    </div>
+  </div>
+</div>
+
+<!-- E7.2: Screen reader announcement region -->
+<div id="a11yLive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- Toast Notification Container (E5.3) -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- E9.2: Template Gallery Modal -->
+<div class="modal-overlay" id="templateModal" role="dialog" aria-modal="true" aria-label="New from Template">
+  <div class="modal" style="max-width:520px">
+    <h3><span class="msi modal-icon">description</span> New from Template</h3>
+    <div class="template-grid" id="templateGrid">
+      <button class="template-card" data-template="blank"><span class="msi template-icon">note_add</span><span class="template-name">Blank</span></button>
+      <button class="template-card" data-template="letter"><span class="msi template-icon">mail</span><span class="template-name">Letter</span></button>
+      <button class="template-card" data-template="resume"><span class="msi template-icon">person</span><span class="template-name">Resume</span></button>
+      <button class="template-card" data-template="report"><span class="msi template-icon">summarize</span><span class="template-name">Report</span></button>
+      <button class="template-card" data-template="meeting"><span class="msi template-icon">groups</span><span class="template-name">Meeting Notes</span></button>
+      <button class="template-card" data-template="essay"><span class="msi template-icon">school</span><span class="template-name">Essay</span></button>
+    </div>
+    <div class="modal-actions">
+      <button id="templateCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Page Setup Modal -->
+<div class="modal-overlay" id="pageSetupModal" role="dialog" aria-modal="true" aria-label="Page Setup">
+  <div class="modal" style="max-width:420px">
+    <h3><span class="msi modal-icon">description</span> Page Setup</h3>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Page Size</legend>
+        <select id="psPageSize" title="Page size" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+          <option value="letter">Letter (8.5 x 11 in)</option>
+          <option value="a4">A4 (8.27 x 11.69 in)</option>
+          <option value="legal">Legal (8.5 x 14 in)</option>
+        </select>
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Orientation</legend>
+        <div style="display:flex;gap:16px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-primary);cursor:pointer">
+            <input type="radio" name="psOrientation" value="portrait" checked> Portrait
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-primary);cursor:pointer">
+            <input type="radio" name="psOrientation" value="landscape"> Landscape
+          </label>
+        </div>
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Margins (inches)</legend>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            Top:
+            <input type="number" id="psMarginTop" value="1" min="0" max="5" step="0.25" title="Top margin in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            Bottom:
+            <input type="number" id="psMarginBottom" value="1" min="0" max="5" step="0.25" title="Bottom margin in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            Left:
+            <input type="number" id="psMarginLeft" value="1" min="0" max="5" step="0.25" title="Left margin in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+            Right:
+            <input type="number" id="psMarginRight" value="1" min="0" max="5" step="0.25" title="Right margin in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+          </label>
+        </div>
+      </fieldset>
+    </div>
+    <div class="modal-actions">
+      <button id="psCancelBtn" title="Cancel page setup changes">Cancel</button>
+      <button class="primary" id="psApplyBtn" title="Apply page setup changes">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- E10.4: Welcome Dialog (first-run onboarding) -->
+<div class="modal-overlay" id="welcomeModal" role="dialog" aria-modal="true" aria-label="Welcome to s1 Editor">
+  <div class="modal" style="max-width:500px">
+    <h3><span class="msi modal-icon">description</span> Welcome to s1 Editor</h3>
+    <p style="font-size:14px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6">A collaborative document editor powered by s1engine.</p>
+    <div class="welcome-features">
+      <div class="welcome-feature-item">
+        <span class="msi welcome-feature-icon">format_bold</span>
+        <div><strong>Rich Formatting</strong> -- Bold, italic, fonts, colors, and more</div>
+      </div>
+      <div class="welcome-feature-item">
+        <span class="msi welcome-feature-icon">group</span>
+        <div><strong>Real-time Collaboration</strong> -- Edit with others in real-time</div>
+      </div>
+      <div class="welcome-feature-item">
+        <span class="msi welcome-feature-icon">track_changes</span>
+        <div><strong>Track Changes</strong> -- Review and accept/reject edits</div>
+      </div>
+      <div class="welcome-feature-item">
+        <span class="msi welcome-feature-icon">download</span>
+        <div><strong>Export Options</strong> -- Save as DOCX, PDF, ODT, or TXT</div>
+      </div>
+      <div class="welcome-feature-item">
+        <span class="msi welcome-feature-icon">keyboard</span>
+        <div><strong>Keyboard Shortcuts</strong> -- Press Ctrl+/ for all shortcuts</div>
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:12px;color:var(--text-muted);cursor:pointer">
+      <input type="checkbox" id="welcomeDontShow"> Don't show again
+    </label>
+    <div class="modal-actions">
+      <button class="primary" id="welcomeGetStarted" title="Dismiss welcome dialog and start editing">Get Started</button>
+    </div>
+  </div>
+</div>
+
+<!-- E10.4: Feature Tour Overlay -->
+<div id="tourOverlay" class="tour-overlay" style="display:none">
+  <div id="tourTooltip" class="tour-tooltip" role="dialog" aria-label="Feature tour step">
+    <div class="tour-step-text" id="tourStepText"></div>
+    <div class="tour-step-counter" id="tourStepCounter"></div>
+    <div class="tour-actions">
+      <button class="tour-skip-btn" id="tourSkipBtn" title="Skip the feature tour">Skip</button>
+      <button class="tour-next-btn" id="tourNextBtn" title="Go to next step">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- E10.4: What's New Modal -->
+<div class="modal-overlay" id="whatsNewModal" role="dialog" aria-modal="true" aria-label="What's New">
+  <div class="modal" style="max-width:460px">
+    <h3><span class="msi modal-icon">new_releases</span> What's New</h3>
+    <div class="whats-new-list">
+      <div class="whats-new-item">
+        <span class="whats-new-badge">New</span>
+        <strong>Real-time Collaboration</strong>
+        <p>Edit documents simultaneously with others using WebSocket-based collaboration.</p>
+      </div>
+      <div class="whats-new-item">
+        <span class="whats-new-badge">New</span>
+        <strong>Track Changes</strong>
+        <p>Review insertions and deletions with accept/reject controls.</p>
+      </div>
+      <div class="whats-new-item">
+        <span class="whats-new-badge">New</span>
+        <strong>Table of Contents</strong>
+        <p>Auto-generated TOC from document headings via Insert menu.</p>
+      </div>
+      <div class="whats-new-item">
+        <span class="whats-new-badge">New</span>
+        <strong>Dark Mode</strong>
+        <p>Toggle dark mode from Tools menu or system preference.</p>
+      </div>
+      <div class="whats-new-item">
+        <span class="whats-new-badge">New</span>
+        <strong>Feature Tour</strong>
+        <p>Guided tour of the editor UI -- access from Help menu anytime.</p>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" id="whatsNewCloseBtn" title="Close What's New dialog">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- E9.3: Equation Editor Modal -->
+<div class="modal-overlay" id="equationModal" role="dialog" aria-modal="true" aria-label="Insert Equation">
+  <div class="modal" style="max-width:520px">
+    <h3><span class="msi modal-icon">functions</span> Insert Equation</h3>
+    <div class="modal-field">
+      <label for="equationInput">LaTeX source</label>
+      <textarea id="equationInput" rows="3" placeholder="e.g. E = mc^2" autocomplete="off" spellcheck="false" title="Enter LaTeX equation source" style="width:100%;resize:vertical;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:'Roboto Mono','Courier New',monospace;font-size:13px;outline:none;background:var(--bg-app);color:var(--text-primary)"></textarea>
+    </div>
+    <div class="modal-field">
+      <label>Preview</label>
+      <div id="equationPreview" class="eq-preview" title="Equation preview"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="eqCancelBtn" title="Cancel and close">Cancel</button>
+      <button class="primary" id="eqInsertBtn" title="Insert equation into document">Insert</button>
+    </div>
+  </div>
+</div>
+
+<!-- E9.1: Custom Dictionary Modal -->
+<div class="modal-overlay" id="dictModal" role="dialog" aria-modal="true" aria-label="Custom Dictionary">
+  <div class="modal" style="max-width:400px">
+    <h3><span class="msi modal-icon">book</span> Custom Dictionary</h3>
+    <div class="modal-field">
+      <label for="dictWordInput">Add word</label>
+      <div style="display:flex;gap:6px">
+        <input type="text" id="dictWordInput" placeholder="Enter a word..." autocomplete="off" title="Type a word to add to your custom dictionary" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+        <button id="dictAddBtn" class="primary" title="Add word to dictionary" style="padding:6px 14px;font-size:13px">Add</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Words in dictionary</label>
+      <div id="dictWordList" class="dict-word-list" title="Your custom dictionary words"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="dictCloseBtn" title="Close dictionary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- E9.1: Auto-Correct Modal -->
+<div class="modal-overlay" id="autoCorrectModal" role="dialog" aria-modal="true" aria-label="Auto-Correct Settings">
+  <div class="modal" style="max-width:480px">
+    <h3><span class="msi modal-icon">auto_fix_high</span> Auto-Correct</h3>
+    <div class="modal-field" style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <input type="checkbox" id="acEnabledToggle" title="Enable or disable auto-correct">
+      <label for="acEnabledToggle" style="margin:0">Enable auto-correct</label>
+    </div>
+    <div class="modal-field">
+      <label>Add new replacement</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="text" id="acReplaceInput" placeholder="Replace..." autocomplete="off" title="Word to replace" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+        <span style="color:var(--text-muted);font-size:18px">&#8594;</span>
+        <input type="text" id="acWithInput" placeholder="With..." autocomplete="off" title="Replacement word" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+        <button id="acAddBtn" class="primary" title="Add replacement rule" style="padding:6px 14px;font-size:13px">Add</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Replacement rules</label>
+      <div id="acRuleList" class="ac-rule-list" title="Auto-correct replacement rules"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="acCloseBtn" title="Close auto-correct settings">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF Signature Modal -->
+<div class="modal-overlay" id="pdfSignatureModal" role="dialog" aria-modal="true" aria-label="Create Signature">
+  <div class="modal modal-lg">
+    <h3><span class="msi modal-icon">draw</span> Create Signature</h3>
+    <div class="sig-tabs">
+      <button class="sig-tab active" data-tab="draw">Draw</button>
+      <button class="sig-tab" data-tab="type">Type</button>
+      <button class="sig-tab" data-tab="upload">Upload</button>
+    </div>
+    <div class="sig-tab-content" id="sigDrawTab">
+      <canvas id="sigDrawCanvas" width="400" height="150"></canvas>
+      <div class="sig-controls">
+        <div class="sig-colors">
+          <button class="sig-color active" data-color="#000000" style="background:#000" title="Black"></button>
+          <button class="sig-color" data-color="#1a73e8" style="background:#1a73e8" title="Blue"></button>
+          <button class="sig-color" data-color="#d93025" style="background:#d93025" title="Red"></button>
+        </div>
+        <button class="sig-clear-btn" id="sigDrawClear">Clear</button>
+      </div>
+    </div>
+    <div class="sig-tab-content" id="sigTypeTab" style="display:none">
+      <input type="text" class="sig-type-input" id="sigTypeInput" placeholder="Your name">
+      <div class="sig-font-preview" id="sigFontPreview"></div>
+      <select class="sig-font-select" id="sigFontSelect">
+        <option value="cursive">Script</option>
+        <option value="'Brush Script MT', cursive">Formal</option>
+        <option value="'Courier New', monospace">Print</option>
+      </select>
+    </div>
+    <div class="sig-tab-content" id="sigUploadTab" style="display:none">
+      <div class="sig-upload-area" id="sigUploadArea">
+        <span class="msi">upload_file</span>
+        <span>Click or drop an image</span>
+        <input type="file" id="sigUploadInput" accept="image/*">
+      </div>
+      <div class="sig-upload-preview" id="sigUploadPreview"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="sigCancelBtn">Cancel</button>
+      <button class="primary" id="sigApplyBtn">Place Signature</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF Page Management Modal -->
+<div class="modal-overlay" id="pdfPageModal" role="dialog" aria-modal="true" aria-label="Page Management">
+  <div class="modal modal-lg">
+    <h3><span class="msi modal-icon">view_module</span> Page Management</h3>
+    <div class="pdf-page-grid" id="pdfPageGrid"></div>
+    <div class="modal-actions">
+      <button id="pdfPageMergeBtn" title="Merge another PDF"><span class="msi">merge</span> Merge PDF</button>
+      <input type="file" id="pdfMergeInput" accept=".pdf" style="display:none">
+      <button id="pdfPageExtractBtn" title="Extract selected pages"><span class="msi">content_cut</span> Extract Selected</button>
+      <div class="spacer"></div>
+      <button id="pdfPageCancelBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF Digital Signature Modal -->
+<div class="modal-overlay" id="pdfDigitalSignModal" role="dialog" aria-modal="true" aria-label="Digital Signature">
+  <div class="modal">
+    <h3><span class="msi modal-icon">verified_user</span> Sign Document</h3>
+    <label>Certificate file (.p12/.pfx)
+      <input type="file" id="digSignCertInput" accept=".p12,.pfx">
+    </label>
+    <label>Certificate password
+      <input type="password" class="dig-sign-password" id="digSignPassword" placeholder="Enter password">
+    </label>
+    <div class="dig-sign-cert-info" id="digSignCertInfo" style="display:none"></div>
+    <label>Reason for signing
+      <select class="dig-sign-reason" id="digSignReason">
+        <option value="Approval">Approval</option>
+        <option value="Review">Review</option>
+        <option value="Completion">Completion</option>
+        <option value="">Custom...</option>
+      </select>
+    </label>
+    <div class="modal-actions">
+      <button id="digSignCancelBtn">Cancel</button>
+      <button class="primary" id="digSignApplyBtn">Sign & Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- E5.4: @mention dropdown for comment input -->
+<div class="mention-dropdown" id="mentionDropdown" style="display:none" role="listbox" aria-label="Mention a peer"></div>
+
+<!-- E10.5: Error Detail Modal -->
+<div class="modal-overlay" id="errorDetailModal" role="dialog" aria-modal="true" aria-label="Error Details">
+  <div class="modal" style="max-width:520px">
+    <h3><span class="msi modal-icon" style="color:var(--red,#d93025)">error</span> Error Details</h3>
+    <div id="errorDetailContent" style="font-family:var(--font-mono,'Roboto Mono',monospace);font-size:12px;background:var(--surface-dim,#f8f9fa);border:1px solid var(--border,#dadce0);border-radius:var(--radius-sm,4px);padding:10px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin-bottom:12px">No errors recorded.</div>
+    <div class="modal-actions">
+      <button id="errorClearBtn">Clear Errors</button>
+      <button class="primary" id="errorDetailCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- E10.5: Usage Statistics Modal -->
+<div class="modal-overlay" id="usageStatsModal" role="dialog" aria-modal="true" aria-label="Usage Statistics">
+  <div class="modal" style="max-width:480px">
+    <h3><span class="msi modal-icon">bar_chart</span> Usage Statistics</h3>
+    <p style="font-size:12px;color:var(--text-secondary,#5f6368);margin:0 0 12px">All data is stored locally. Nothing is sent over the network.</p>
+    <div id="usageStatsContent" style="max-height:320px;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border,#dadce0);text-align:left">
+            <th style="padding:6px 8px">Feature</th>
+            <th style="padding:6px 8px;text-align:right">Count</th>
+          </tr>
+        </thead>
+        <tbody id="usageStatsBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button id="usageStatsClearBtn">Clear Data</button>
+      <button class="primary" id="usageStatsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

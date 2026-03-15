@@ -1,22 +1,15 @@
 # s1engine
 
-A modular document engine built in Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats.
+A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based real-time collaboration, a page layout engine, and a fully-featured web editor.
 
-Designed as an embeddable SDK for building document editors, converters, and collaborative editing applications.
+## Highlights
 
-## Status
-
-**1.0.0** -- Stable API. All 7 phases complete. 1,051 tests passing.
-
-- DOCX, ODT, TXT, Markdown read/write with round-trip fidelity
-- DOC (legacy Word) support: FIB/piece table parsing, character/paragraph formatting, styles, fonts, tables, metadata
-- PDF export with font embedding, images, hyperlinks, bookmarks
-- Page layout engine with multi-section support, row-by-row table splitting, paginated HTML output
-- Track changes (read/write/accept/reject) for DOCX
-- CRDT-based collaborative editing (Fugue text, tree moves, LWW attributes, session hardening)
-- WASM bindings with paginated HTML rendering, PDF export, track changes UI
-- C FFI bindings with opaque handles
-- Pure Rust -- zero C/C++ dependencies
+- **Multi-format** — DOCX, ODT, PDF, TXT, Markdown, and legacy DOC (read)
+- **Pure Rust** — Zero C/C++ dependencies. Compiles to native, WASM, and C FFI
+- **Collaborative** — Fugue CRDT for real-time multi-user editing with conflict resolution
+- **Layout engine** — Pagination, text shaping (rustybuzz), font subsetting, PDF export
+- **Web editor included** — Production-grade browser editor (Folio) with toolbar, comments, track changes, and PDF viewer
+- **Embeddable** — Use as a Rust library, WASM module, or C shared library
 
 ## Architecture
 
@@ -34,8 +27,8 @@ Consumer Applications
 |  Collaborative          Core Document Model        |
 |  Editing (Fugue)        (zero external deps)       |
 |----------------------------------------------------|
-|  format-docx  format-odt  format-pdf  format-txt    |
-|  format-md                                          |
+|  format-docx  format-odt  format-pdf  format-txt   |
+|  format-md                                         |
 |----------------------------------------------------|
 |                s1-text (Pure Rust)                  |
 |        rustybuzz  ttf-parser  fontdb               |
@@ -44,70 +37,64 @@ Consumer Applications
 
 ## Quick Start
 
-### Open and Read
+### As a Rust Library
 
-```rust
-use s1engine::{Engine, Format};
+Add to your `Cargo.toml`:
 
-let engine = Engine::new();
+```toml
+[dependencies]
+s1engine = "1.0"
 
-// Open from bytes (format auto-detected)
-let data = std::fs::read("report.docx")?;
-let doc = engine.open(&data)?;
-
-println!("{}", doc.to_plain_text());
-println!("Title: {:?}", doc.metadata().title);
-println!("Paragraphs: {}", doc.paragraph_count());
+# Optional features
+# s1engine = { version = "1.0", features = ["pdf", "crdt", "convert"] }
 ```
 
-### Create a Document
-
-```rust
-use s1engine::{DocumentBuilder, Format};
-
-let doc = DocumentBuilder::new()
-    .title("My Report")
-    .author("Engineering")
-    .heading(1, "Introduction")
-    .paragraph(|p| {
-        p.text("This is ")
-         .bold("s1engine")
-         .text(" -- a document engine in Rust.")
-    })
-    .table(|t| {
-        t.row(|r| r.cell("Name").cell("Value"))
-         .row(|r| r.cell("Users").cell("15,000"))
-    })
-    .build();
-
-let docx_bytes = doc.export(Format::Docx)?;
-let odt_bytes = doc.export(Format::Odt)?;
-```
-
-### Open from File
+Open and read a document:
 
 ```rust
 use s1engine::Engine;
 
 let engine = Engine::new();
+let data = std::fs::read("report.docx")?;
+let doc = engine.open(&data)?;
+
+println!("{}", doc.to_plain_text());
+println!("Title: {:?}", doc.metadata().title);
+```
+
+Create a document programmatically:
+
+```rust
+use s1engine::{DocumentBuilder, Format};
+
+let doc = DocumentBuilder::new()
+    .title("Quarterly Report")
+    .author("Engineering")
+    .heading(1, "Introduction")
+    .paragraph(|p| {
+        p.text("Built with ")
+         .bold("s1engine")
+         .text(" — a document SDK in Rust.")
+    })
+    .table(|t| {
+        t.row(|r| r.cell("Metric").cell("Value"))
+         .row(|r| r.cell("Users").cell("15,000"))
+    })
+    .build();
+
+let docx = doc.export(Format::Docx)?;
+let pdf = doc.export(Format::Pdf)?;  // requires "pdf" feature
+```
+
+Convert between formats:
+
+```rust
+let engine = Engine::new();
 let doc = engine.open_file("input.docx")?;
-let output = doc.export(s1engine::Format::Odt)?;
-std::fs::write("output.odt", output)?;
+std::fs::write("output.odt", doc.export(Format::Odt)?)?;
 ```
 
-### Cargo Feature Flags
-
-```toml
-[dependencies]
-# Default: DOCX + ODT + TXT + Markdown
-s1engine = "1.0"
-
-# Minimal: just DOCX parsing
-s1engine = { version = "0.1", default-features = false, features = ["docx"] }
-
-# Full: everything including PDF export and CRDT
-s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
-```
+### Feature Flags
 
 | Feature | Description | Default |
 |---|---|---|
@@ -115,220 +102,175 @@ s1engine = { version = "0.1", features = ["pdf", "convert", "crdt"] }
 | `odt` | ODT (ODF) read/write | Yes |
 | `txt` | Plain text read/write | Yes |
 | `md` | Markdown read/write (GFM tables) | Yes |
-| `pdf` | PDF export (requires layout + text shaping) | No |
+| `pdf` | PDF export with font embedding | No |
 | `convert` | Format conversion pipelines | No |
-| `doc-legacy` | DOC binary parsing (FIB, piece table, formatting, tables, metadata) | No |
+| `doc-legacy` | Legacy DOC binary parsing | No |
 | `crdt` | CRDT collaboration primitives | No |
+
+## Web Editor (Folio)
+
+s1engine ships with **Folio**, a production-grade document editor that runs in the browser via WASM.
+
+### Features
+
+- Full WYSIWYG editing with multi-page layout
+- Toolbar with formatting, styles, tables, images, comments
+- Real-time collaboration via WebSocket relay
+- Track changes with accept/reject
+- PDF viewer with annotations (highlight, comment, draw, text)
+- Export to DOCX, ODT, PDF, TXT, Markdown
+- Dark mode, keyboard shortcuts, find & replace
+- Drag-and-drop file opening
+
+### Running the Editor
+
+```bash
+# Prerequisites: Rust, wasm-pack, Node.js 18+
+
+# Build WASM bindings
+make wasm
+
+# Start development server
+cd editor && npm install && npm run dev
+```
+
+Open `http://localhost:3000` in your browser.
+
+### Docker
+
+```bash
+# Build and run with Docker
+make docker-build
+make docker-run
+
+# Or use Docker Compose
+docker compose up
+```
+
+The editor is served at `http://localhost:8787`.
 
 ## Crate Structure
 
-| Crate | Description | Tests |
-|---|---|---|
-| `s1engine` | Facade -- high-level public API | 102 |
-| `s1-model` | Core document model (tree, nodes, attributes, styles) | 72 |
-| `s1-ops` | Operations, transactions, undo/redo | 48 |
-| `s1-format-docx` | DOCX reader/writer | 194 |
-| `s1-format-odt` | ODT reader/writer | 113 |
-| `s1-format-md` | Markdown reader/writer | 32 |
-| `s1-format-pdf` | PDF exporter | 21 |
-| `s1-format-txt` | Plain text reader/writer | 41 |
-| `s1-convert` | Format conversion (DOC binary + cross-format) | 15 |
-| `s1-layout` | Page layout engine (pagination, multi-section, paginated HTML) | 66 |
-| `s1-text` | Text shaping, fonts, Unicode (pure Rust) | 39 |
-| `s1-crdt` | CRDT algorithms for collaborative editing | 172 |
-| `ffi/wasm` | WASM bindings (wasm-bindgen) | 22 |
-| `ffi/c` | C FFI bindings (opaque handles) | 10 |
+| Crate | Description |
+|---|---|
+| `s1engine` | Facade — high-level public API |
+| `s1-model` | Core document model (zero external deps) |
+| `s1-ops` | Operations, transactions, undo/redo |
+| `s1-format-docx` | DOCX (OOXML) reader/writer |
+| `s1-format-odt` | ODT (ODF) reader/writer |
+| `s1-format-md` | Markdown reader/writer |
+| `s1-format-pdf` | PDF export + editing (via lopdf) |
+| `s1-format-txt` | Plain text reader/writer |
+| `s1-convert` | Format conversion (DOC binary + cross-format) |
+| `s1-layout` | Page layout, pagination, text shaping |
+| `s1-text` | Font loading, shaping, Unicode (pure Rust) |
+| `s1-crdt` | CRDT algorithms for collaboration |
+| `ffi/wasm` | WASM bindings (wasm-bindgen) |
+| `ffi/c` | C FFI bindings (cbindgen) |
 
-## Format Support Matrix
+## Building from Source
 
-Detailed per-feature support across all document formats. Classification key:
+### Prerequisites
 
-- **Full** -- read + write with round-trip fidelity
-- **Read** -- read only (data imported but not written back in this format)
-- **Write** -- write/export only
-- **Partial** -- some aspects work (see notes)
-- **Lossy** -- data survives but loses fidelity
-- **--** -- not supported
+- Rust 1.75+ (`rustup install stable`)
+- For WASM: `wasm-pack` (`cargo install wasm-pack`)
+- For editor: Node.js 18+ and npm
+- For Docker: Docker 20+
 
-### General
-
-| Capability | DOCX | ODT | MD | PDF | TXT | DOC (legacy) |
-|---|---|---|---|---|---|---|
-| Read | Yes | Yes | Yes | -- | Yes | Yes (FIB/piece table) |
-| Write | Yes | Yes | Yes | Export only | Yes | -- |
-| Round-trip | Yes | Yes | Partial | -- | Yes | -- |
-
-### Block-Level Content
-
-| Feature | DOCX | ODT | MD | PDF | TXT | DOC |
-|---|---|---|---|---|---|---|
-| Paragraphs (text) | Full | Full | Full | Write | Lossy | Full |
-| Paragraph alignment | Full | Full | -- | Write | -- | Partial |
-| Paragraph spacing | Full | Full | -- | Write | -- | Partial |
-| Paragraph indent | Full | Full | -- | Write | -- | Partial |
-| Headings / styles | Full | Full | Full | Write | Markers (`#`) | Partial |
-| Tables (basic) | Full | Full | Full (GFM) | Write | Lossy (tab-separated) | Partial |
-| Tables (merged cells) | Full | Full | -- | Write | -- | -- |
-| Tables (nested) | Full | -- | -- | Write | -- | -- |
-| Lists (bullet) | Full | Full | Full | -- | Markers (`- `) | -- |
-| Lists (numbered) | Full | Full | Full | -- | Markers (`1. `) | -- |
-| Lists (multilevel) | Full | Full | Partial (nested) | -- | Indent-based | -- |
-| Page breaks | Full | Full | -- | Write | -- | -- |
-| Sections (page size, margins) | Full | Full | -- | Write | -- | -- |
-| Sections (orientation) | Full | Full | -- | Write | -- | -- |
-| Headers / footers | Full | Full | -- | Write | -- | -- |
-| Table of contents | Full | Full | -- | -- | Lossy (text only) | -- |
-| Thematic breaks | -- | -- | Full | -- | `---` | -- |
-| Code blocks | -- | -- | Full | -- | -- | -- |
-
-### Inline / Character-Level Content
-
-| Feature | DOCX | ODT | MD | PDF | TXT | DOC |
-|---|---|---|---|---|---|---|
-| Bold / italic | Full | Full | Full | Write | -- | Partial |
-| Underline | Full | Full | -- | Write | -- | Partial |
-| Font family | Full | Full | -- | Write | -- | Partial |
-| Font size | Full | Full | -- | Write | -- | Partial |
-| Font color | Full | Full | -- | Write | -- | Partial |
-| Strikethrough | Full | Full | Full | -- | -- | -- |
-| Highlight color | Full | Full | -- | -- | -- | -- |
-| Superscript / subscript | Full | Full | -- | -- | -- | -- |
-| Character spacing | Full | Full | -- | -- | -- | -- |
-| Line breaks | Full | Full | Full | Write | -- | -- |
-| Tab characters | Full | Full | -- | Write | Lossy | Partial |
-| Inline code | -- | -- | Full | -- | -- | -- |
-| Images (inline) | Full | Full | -- | Write | -- | -- |
-| Images (floating/anchored) | Read | -- | -- | -- | -- | -- |
-| Hyperlinks (external) | Full | Full | Full | Write | -- | -- |
-| Hyperlinks (internal anchor) | Full | -- | -- | -- | -- | -- |
-| Bookmarks | Full | Full | -- | Write | -- | -- |
-
-### Document-Level Features
-
-| Feature | DOCX | ODT | MD | PDF | TXT | DOC |
-|---|---|---|---|---|---|---|
-| Metadata (title, author) | Full | Full | -- | Write | -- | Partial |
-| Comments | Full | Full | -- | -- | -- | -- |
-| Tab stops (custom positions) | Full | Full | -- | -- | -- | -- |
-| Paragraph borders | Full | Full | -- | -- | -- | -- |
-| Paragraph shading | Full | Full | -- | -- | -- | -- |
-| Style inheritance | Full | Full | -- | -- | -- | -- |
-
-### Notes
-
-- **DOCX**: Most complete format support. Handles `mc:AlternateContent`-wrapped drawings (common in Google Docs exports) and `fldChar` complex field format (used for page numbers in footers). Floating images are read into the model but written back as inline.
-- **ODT**: Superscript/subscript, character spacing, paragraph shading, hyperlinks (with URL), bookmarks (start/end/collapsed), tab stops, paragraph borders, comments (annotations with author/date), headers/footers (with page number/count fields), and sections (page size, margins, orientation). Page layout round-trips via `styles.xml` master pages.
-- **MD**: Markdown via pulldown-cmark. Supports CommonMark + GFM tables. Round-trip is partial -- Markdown-specific features (headings, bold, italic, strikethrough, links, lists, tables, code) round-trip well, but document-level features (metadata, page layout, images) are not representable in Markdown.
-- **PDF**: Export-only path: DocumentModel passes through the layout engine (`s1-layout`) before PDF generation. Supports font embedding with subsetting, table borders, image embedding, hyperlink annotations, and document outline (bookmarks).
-- **TXT**: Structural markers preserved: headings (`# `), bullet lists (`- `), numbered lists (`1. `), nested lists (indent), thematic breaks (`---`). Tables render as tab-separated columns. Encoding detection supports UTF-8, UTF-16 LE/BE (BOM), and Latin-1 fallback.
-- **DOC**: Legacy binary format read via FIB and piece table parsing (`s1-convert`). Supports character formatting (bold, italic, underline, font, size, color via CHPx/SPRM), paragraph formatting (alignment, spacing, indent via PAPx/SPRM), style sheet resolution (STSH), font table mapping (SttbfFfn), basic table detection (cell marks), and metadata extraction (SummaryInformation OLE2 stream). ANSI/Unicode piece handling.
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md) -- System design and decisions
-- [Specification](docs/SPECIFICATION.md) -- Detailed technical spec
-- [Roadmap](docs/ROADMAP.md) -- Development phases and milestones
-- [API Design](docs/API_DESIGN.md) -- Public API surface and examples
-- [Dependencies](docs/DEPENDENCIES.md) -- External libraries and rationale
-- [WASM Design](docs/WASM_DESIGN.md) -- WASM bindings API, rendering modes, font handling
-
-## Building
+### Build & Test
 
 ```bash
 # Build all crates
 cargo build --workspace
 
-# Test all crates
+# Run all tests
 cargo test --workspace
 
 # Lint
 cargo clippy --workspace -- -D warnings
 
-# Format
+# Format check
 cargo fmt --check
 ```
 
-No system libraries required. All dependencies are pure Rust.
-
-### Makefile
-
-Common tasks are available via `make`:
+### Makefile Targets
 
 ```bash
 make build          # Build all crates (debug)
 make build-release  # Build all crates (release)
 make test           # Run all tests
-make test-docx      # Run s1-format-docx tests only
-make clippy         # Run clippy linter
+make clippy         # Lint with clippy
 make fmt            # Format code
-make check          # Run all checks (fmt + clippy + tests)
-make wasm           # Build WASM bindings (debug, fast)
-make wasm-release   # Build WASM bindings (release, optimized)
-make demo           # Build WASM and start demo server at localhost:8080
-make demo-only      # Start demo server without rebuilding WASM
+make check          # fmt + clippy + tests
+make wasm           # Build WASM bindings (debug)
+make wasm-release   # Build WASM bindings (release)
+make demo           # Build WASM + start editor
+make docker-build   # Build Docker image
+make docker-run     # Run Docker container
 make clean          # Clean build artifacts
 ```
 
-### Scripts
+## Format Support
 
-```bash
-# Run all tests + clippy + formatting check
-./scripts/test.sh
+| Feature | DOCX | ODT | Markdown | PDF | TXT | DOC |
+|---|---|---|---|---|---|---|
+| Read | Full | Full | Full | View* | Full | Partial |
+| Write | Full | Full | Full | Export | Full | — |
+| Round-trip | Full | Full | Partial | — | Full | — |
+| Paragraphs | Full | Full | Full | Export | Lossy | Full |
+| Tables | Full | Full | GFM | Export | Tab-sep | Partial |
+| Images | Full | Full | — | Export | — | — |
+| Lists | Full | Full | Full | — | Markers | — |
+| Styles | Full | Full | — | Export | — | Partial |
+| Comments | Full | Full | — | — | — | — |
+| Headers/Footers | Full | Full | — | Export | — | — |
+| Hyperlinks | Full | Full | Full | Export | — | — |
+| Track Changes | Full | — | — | — | — | — |
 
-# Run tests for a single crate
-./scripts/test.sh s1-format-docx
+*PDF viewing is available in the Folio web editor via PDF.js integration.
 
-# Build WASM bindings (release)
-./scripts/build-wasm.sh
+## Documentation
 
-# Build WASM bindings (debug, faster)
-./scripts/build-wasm.sh --dev
-```
+| Document | Description |
+|---|---|
+| [Architecture](docs/ARCHITECTURE.md) | System design, crate structure, core decisions |
+| [Specification](docs/SPECIFICATION.md) | Detailed technical spec for every module |
+| [API Design](docs/API_DESIGN.md) | Public API surface, feature flags, examples |
+| [Roadmap](docs/ROADMAP.md) | Development phases and milestones |
+| [Dependencies](docs/DEPENDENCIES.md) | External libraries with rationale |
+| [WASM Design](docs/WASM_DESIGN.md) | WASM bindings, rendering modes, font handling |
+| [Contributing](CONTRIBUTING.md) | How to contribute to the project |
+| [Changelog](CHANGELOG.md) | Release history |
 
-### WASM Demo
+## Contributing
 
-A browser-based document viewer/converter demo is included. It lets you open DOCX/ODT/TXT/MD files and export to other formats.
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-```bash
-# Build WASM and start the demo server
-make demo
+**Quick overview:**
 
-# Or build and serve separately
-./scripts/build-wasm.sh
-make demo-only
-```
-
-Then open `http://localhost:8080` in your browser. The demo supports:
-
-- Opening documents (DOCX, ODT, TXT, Markdown, DOC) with drag-and-drop or file picker
-- **HTML tab** -- tree-based HTML rendering with formatting, tables, images, headers/footers
-- **Pages tab** -- paginated layout-engine view with page boundaries, shadows, and page navigation
-- Export to DOCX, ODT, TXT, Markdown, and PDF
-- PDF download via data URL
-- Track changes visualization (green underline / red strikethrough)
-- Format auto-detection from file contents
-
-See [WASM Design](docs/WASM_DESIGN.md) for the full WASM API reference, rendering modes, font handling, and limitations.
-
-## Roadmap
-
-| Phase | Status | Focus |
-|---|---|---|
-| 1. Foundation | Complete | Document model, operations, TXT, basic DOCX |
-| 2. Rich Documents | Complete | Tables, images, lists, full DOCX, ODT |
-| 3. Layout & Export | Complete | Text shaping, page layout, PDF export |
-| 4. Collaboration | Complete | Fugue CRDT, tree CRDT, awareness, serialization |
-| 5. Production | Complete | WASM, C FFI, hardening, docs, release |
-| 6. Fidelity | Complete | ODT improvements, Markdown, TXT markers, comments, headers/footers |
-| 7. Hardening | Complete | DOC binary parsing, paginated HTML, multi-section layout, track changes, CRDT hardening |
-
-See [ROADMAP.md](docs/ROADMAP.md) for detailed milestones.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Make your changes (follow the coding conventions in CLAUDE.md)
+4. Run `make check` to verify tests, clippy, and formatting
+5. Submit a pull request
 
 ## License
 
 Licensed under either of:
 
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- [MIT License](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
 
 at your option.
+
+## Acknowledgments
+
+s1engine uses these excellent pure-Rust libraries:
+
+- [rustybuzz](https://github.com/nicholasgasior/rustybuzz) — Text shaping (HarfBuzz port)
+- [ttf-parser](https://github.com/nicholasgasior/ttf-parser) — Font parsing
+- [fontdb](https://github.com/nicholasgasior/fontdb) — Font discovery
+- [pdf-writer](https://github.com/nicholasgasior/pdf-writer) — PDF generation
+- [lopdf](https://github.com/nicholasgasior/lopdf) — PDF reading/editing
+- [quick-xml](https://github.com/nicholasgasior/quick-xml) — XML parsing
+- [pulldown-cmark](https://github.com/nicholasgasior/pulldown-cmark) — Markdown parsing

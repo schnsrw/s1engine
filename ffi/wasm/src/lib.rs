@@ -296,6 +296,70 @@ impl WasmDocument {
         Ok(layout_to_html(&layout))
     }
 
+    /// Render the document layout as structured JSON for canvas-based rendering.
+    ///
+    /// Returns a JSON object with page, block, line, and glyph run data
+    /// including exact positions, font information, and styling. This enables
+    /// pixel-accurate canvas rendering as an alternative to DOM-based HTML.
+    ///
+    /// Uses fallback font metrics (no system fonts). For more accurate layout,
+    /// use `to_layout_json_with_fonts()` after loading fonts via
+    /// `WasmFontDatabase`.
+    pub fn to_layout_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let font_db = s1_text::FontDatabase::empty();
+        let layout = doc
+            .layout(&font_db)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(layout_document_to_json(&layout, model))
+    }
+
+    /// Render the document layout as structured JSON with a custom layout configuration.
+    ///
+    /// Use this to control page dimensions and margins.
+    pub fn to_layout_json_with_config(&self, config: &WasmLayoutConfig) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let font_db = s1_text::FontDatabase::empty();
+        let layout_config = config.to_layout_config();
+        let layout = doc
+            .layout_with_config(&font_db, layout_config)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(layout_document_to_json(&layout, model))
+    }
+
+    /// Render the document layout as structured JSON with loaded fonts.
+    ///
+    /// Use this when you have loaded fonts via `WasmFontDatabase` for
+    /// accurate text shaping and positioning.
+    pub fn to_layout_json_with_fonts(&self, font_db: &WasmFontDatabase) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let layout = doc
+            .layout(&font_db.inner)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(layout_document_to_json(&layout, model))
+    }
+
+    /// Render the document layout as structured JSON with loaded fonts and custom config.
+    ///
+    /// Combines custom page dimensions/margins with loaded font data for
+    /// the most accurate canvas rendering.
+    pub fn to_layout_json_with_fonts_and_config(
+        &self,
+        font_db: &WasmFontDatabase,
+        config: &WasmLayoutConfig,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let layout_config = config.to_layout_config();
+        let layout = doc
+            .layout_with_config(&font_db.inner, layout_config)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(layout_document_to_json(&layout, model))
+    }
+
     /// Get page break information from the layout engine as JSON.
     ///
     /// Returns `{"pages": [{"pageNum":1, "nodeIds":["0:5","0:12"], "footer":"Page 1", "header":"..."}, ...]}`.
@@ -819,23 +883,176 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Replace the text content of a paragraph's first run.
+    /// Replace the text content of a paragraph.
+    ///
+    /// For multi-run paragraphs, this first checks whether the total text
+    /// across all runs already matches `new_text`.  If so, it is a no-op
+    /// (preserving per-run formatting).  If the text has genuinely changed,
+    /// all extra runs are deleted and the remaining single run receives the
+    /// new text.
     pub fn set_paragraph_text(&mut self, node_id_str: &str, new_text: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
 
-        // Ensure Run+Text exist (creates them if paragraph is empty)
-        let (text_node_id, old_len) = ensure_run_and_text(doc, para_id)?;
+        // Gather the full existing text across ALL runs so we can detect
+        // whether anything actually changed.
+        let existing_text = extract_paragraph_text(doc.model(), para_id);
 
+        // If text hasn't changed, skip the mutation entirely.
+        // This preserves multi-run formatting after renderDocument().
+        if existing_text == new_text {
+            return Ok(());
+        }
+
+        // Collect runs with their text node IDs, text content, and char ranges
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+
+        let mut run_info: Vec<(NodeId, NodeId, String, usize, usize)> = Vec::new(); // (run_id, text_id, text, start_char, end_char)
+        let mut char_offset = 0usize;
+        for &child_id in &para.children {
+            if let Some(child) = doc.node(child_id) {
+                if child.node_type == NodeType::Run {
+                    // Find text node in this run
+                    for &text_child in &child.children {
+                        if let Some(tc) = doc.node(text_child) {
+                            if tc.node_type == NodeType::Text {
+                                let text = tc.text_content.as_deref().unwrap_or("").to_string();
+                                let len = text.chars().count();
+                                run_info.push((
+                                    child_id,
+                                    text_child,
+                                    text,
+                                    char_offset,
+                                    char_offset + len,
+                                ));
+                                char_offset += len;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if run_info.is_empty() {
+            // No runs — create one and set text
+            let (text_node_id, _) = ensure_run_and_text(doc, para_id)?;
+            if !new_text.is_empty() {
+                doc.apply(Operation::insert_text(text_node_id, 0, new_text))
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+            }
+            return Ok(());
+        }
+
+        // Try diff-based update to preserve multi-run formatting.
+        // Find the common prefix and suffix between old and new text.
+        let old_chars: Vec<char> = existing_text.chars().collect();
+        let new_chars: Vec<char> = new_text.chars().collect();
+        let old_len = old_chars.len();
+        let new_len = new_chars.len();
+
+        // Find common prefix length
+        let mut prefix_len = 0;
+        while prefix_len < old_len
+            && prefix_len < new_len
+            && old_chars[prefix_len] == new_chars[prefix_len]
+        {
+            prefix_len += 1;
+        }
+
+        // Find common suffix length (don't overlap with prefix)
+        let mut suffix_len = 0;
+        while suffix_len < (old_len - prefix_len)
+            && suffix_len < (new_len - prefix_len)
+            && old_chars[old_len - 1 - suffix_len] == new_chars[new_len - 1 - suffix_len]
+        {
+            suffix_len += 1;
+        }
+
+        let delete_start = prefix_len;
+        let delete_end = old_len - suffix_len;
+        let insert_text: String = new_chars[prefix_len..new_len - suffix_len].iter().collect();
+
+        // Find which run contains delete_start
+        #[allow(clippy::type_complexity)]
+        let find_run_at =
+            |char_pos: usize| -> Option<(usize, &(NodeId, NodeId, String, usize, usize))> {
+                for (i, info) in run_info.iter().enumerate() {
+                    if char_pos >= info.3 && char_pos <= info.4 {
+                        return Some((i, info));
+                    }
+                }
+                // If at the very end, use the last run
+                run_info.last().map(|info| (run_info.len() - 1, info))
+            };
+
+        // Simple case: edit is within a single run (common for typing)
+        if let Some((start_run_idx, _)) = find_run_at(delete_start) {
+            let end_run_idx = if delete_end <= delete_start {
+                start_run_idx
+            } else if let Some((idx, _)) = find_run_at(delete_end.saturating_sub(1)) {
+                idx
+            } else {
+                start_run_idx
+            };
+
+            if start_run_idx == end_run_idx {
+                // Edit is within a single run — apply insert/delete directly
+                let (_run_id, text_id, _run_text, run_start, _run_end) = &run_info[start_run_idx];
+                let offset_in_run = delete_start - run_start;
+                let delete_count = delete_end - delete_start;
+
+                let mut txn = Transaction::with_label("Sync paragraph text");
+                if delete_count > 0 {
+                    txn.push(Operation::delete_text(
+                        *text_id,
+                        offset_in_run,
+                        delete_count,
+                    ));
+                }
+                if !insert_text.is_empty() {
+                    txn.push(Operation::insert_text(
+                        *text_id,
+                        offset_in_run,
+                        &insert_text,
+                    ));
+                }
+                if !txn.is_empty() {
+                    doc.apply_transaction(&txn)
+                        .map_err(|e| JsError::new(&e.to_string()))?;
+                }
+                return Ok(());
+            }
+        }
+
+        // Complex case: edit spans multiple runs.
+        // Fall back to collapsing all runs into one (preserves text but loses formatting).
+        let run_children: Vec<NodeId> = run_info.iter().map(|r| r.0).collect();
         let mut txn = Transaction::with_label("Set paragraph text");
-        if old_len > 0 {
-            txn.push(Operation::delete_text(text_node_id, 0, old_len));
+
+        // Delete extra runs (in reverse order)
+        for &run_id in run_children[1..].iter().rev() {
+            txn.push(Operation::delete_node(run_id));
+        }
+
+        // Replace first run's text
+        let first_text_id = run_info[0].1;
+        let first_old_len = run_info[0].2.chars().count();
+        if first_old_len > 0 {
+            txn.push(Operation::delete_text(first_text_id, 0, first_old_len));
         }
         if !new_text.is_empty() {
-            txn.push(Operation::insert_text(text_node_id, 0, new_text));
+            txn.push(Operation::insert_text(first_text_id, 0, new_text));
         }
-        doc.apply_transaction(&txn)
-            .map_err(|e| JsError::new(&e.to_string()))
+
+        if !txn.is_empty() {
+            doc.apply_transaction(&txn)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+        }
+
+        Ok(())
     }
 
     /// Insert text at an offset in a paragraph's first text node.
@@ -3203,7 +3420,11 @@ impl WasmDocument {
         }
 
         /// Helper: apply paragraph-level formatting attributes to a paragraph node.
-        fn apply_para_format(doc: &mut s1engine::Document, para_id: NodeId, fmt: &PasteParagraphFormat) {
+        fn apply_para_format(
+            doc: &mut s1engine::Document,
+            para_id: NodeId,
+            fmt: &PasteParagraphFormat,
+        ) {
             let para_attrs = fmt.to_attribute_map();
             if !para_attrs.is_empty() {
                 let _ = doc.apply(Operation::set_attributes(para_id, para_attrs));
@@ -3313,7 +3534,13 @@ impl WasmDocument {
             }
 
             // Step 4: Format runs in the first (target) paragraph
-            format_para_runs(self, target_node_str, target_id, &first_para.runs, char_offset)?;
+            format_para_runs(
+                self,
+                target_node_str,
+                target_id,
+                &first_para.runs,
+                char_offset,
+            )?;
             let doc = self.doc_mut()?;
             apply_para_format(doc, target_id, &first_para.format);
         }
@@ -3994,7 +4221,10 @@ impl PasteParagraphFormat {
                 "2" | "double" => s1_model::LineSpacing::Double,
                 _ => s1_model::LineSpacing::Single,
             };
-            attrs.set(AttributeKey::LineSpacing, AttributeValue::LineSpacing(spacing));
+            attrs.set(
+                AttributeKey::LineSpacing,
+                AttributeValue::LineSpacing(spacing),
+            );
         }
         if let Some(il) = self.indent_left {
             attrs.set(AttributeKey::IndentLeft, AttributeValue::Float(il));
@@ -5679,21 +5909,29 @@ fn render_paragraph(
         format!(" style=\"{style}\"")
     };
 
-    let list_type_attr = list_info.as_ref().map(|li| {
-        let fmt_name = match li.num_format {
-            ListFormat::Bullet => "bullet",
-            ListFormat::Decimal => "decimal",
-            ListFormat::LowerAlpha => "lowerAlpha",
-            ListFormat::UpperAlpha => "upperAlpha",
-            ListFormat::LowerRoman => "lowerRoman",
-            ListFormat::UpperRoman => "upperRoman",
-            _ => "bullet",
-        };
-        format!(" data-list-type=\"{fmt_name}\" data-list-level=\"{}\"", li.level)
-    }).unwrap_or_default();
+    let list_type_attr = list_info
+        .as_ref()
+        .map(|li| {
+            let fmt_name = match li.num_format {
+                ListFormat::Bullet => "bullet",
+                ListFormat::Decimal => "decimal",
+                ListFormat::LowerAlpha => "lowerAlpha",
+                ListFormat::UpperAlpha => "upperAlpha",
+                ListFormat::LowerRoman => "lowerRoman",
+                ListFormat::UpperRoman => "upperRoman",
+                _ => "bullet",
+            };
+            format!(
+                " data-list-type=\"{fmt_name}\" data-list-level=\"{}\"",
+                li.level
+            )
+        })
+        .unwrap_or_default();
 
-    let nid_attr = format!(" data-node-id=\"{}:{}\"{}",
-        para_id.replica, para_id.counter, list_type_attr);
+    let nid_attr = format!(
+        " data-node-id=\"{}:{}\"{}",
+        para_id.replica, para_id.counter, list_type_attr
+    );
 
     // List marker prefix — use computed ordinal if available, fall back to start
     let list_marker = list_info.as_ref().map(|li| {
@@ -6624,14 +6862,20 @@ fn border_style_to_css(style: &s1_model::BorderStyle) -> &'static str {
 
 /// Emit CSS for individual border sides from a Borders struct, falling back to default if none.
 fn emit_border_css(borders: &s1_model::Borders, style: &mut String) {
-    let has_any = borders.top.is_some() || borders.bottom.is_some()
-        || borders.left.is_some() || borders.right.is_some();
+    let has_any = borders.top.is_some()
+        || borders.bottom.is_some()
+        || borders.left.is_some()
+        || borders.right.is_some();
     if !has_any {
         style.push_str("border:1px solid #dadce0;");
         return;
     }
-    for (side_name, side) in [("top", &borders.top), ("bottom", &borders.bottom),
-                               ("left", &borders.left), ("right", &borders.right)] {
+    for (side_name, side) in [
+        ("top", &borders.top),
+        ("bottom", &borders.bottom),
+        ("left", &borders.left),
+        ("right", &borders.right),
+    ] {
         if let Some(bs) = side {
             let css_style = border_style_to_css(&bs.style);
             if css_style == "none" {
@@ -6656,15 +6900,24 @@ fn render_table_cell(model: &DocumentModel, cell_id: NodeId, html: &mut String) 
     let mut style = String::new();
 
     // Cell borders — use actual border attributes from model if available
-    if let Some(AttributeValue::Borders(borders)) = cell.attributes.get(&AttributeKey::CellBorders) {
+    if let Some(AttributeValue::Borders(borders)) = cell.attributes.get(&AttributeKey::CellBorders)
+    {
         emit_border_css(borders, &mut style);
     } else {
         // Check parent table for table-level borders
-        let table_borders = cell.parent.and_then(|row_id| model.node(row_id))
+        let table_borders = cell
+            .parent
+            .and_then(|row_id| model.node(row_id))
             .and_then(|row| row.parent)
             .and_then(|table_id| model.node(table_id))
             .and_then(|table| table.attributes.get(&AttributeKey::TableBorders))
-            .and_then(|v| if let AttributeValue::Borders(b) = v { Some(b) } else { None });
+            .and_then(|v| {
+                if let AttributeValue::Borders(b) = v {
+                    Some(b)
+                } else {
+                    None
+                }
+            });
         if let Some(borders) = table_borders {
             emit_border_css(borders, &mut style);
         } else {
@@ -6793,6 +7046,322 @@ fn base64_encode(data: &[u8]) -> String {
         }
     }
     result
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// F4.3: Layout JSON serialization for canvas-based rendering
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Convert a `LayoutDocument` into a structured JSON string for canvas rendering.
+///
+/// Produces JSON with pages, blocks, lines, and glyph runs including exact
+/// positions, font info, and styling. Uses manual JSON building to avoid
+/// adding serde_json as a dependency.
+fn layout_document_to_json(layout: &s1_layout::LayoutDocument, model: &DocumentModel) -> String {
+    let mut json = String::with_capacity(4096);
+    json.push_str("{\"pages\":[");
+
+    for (pi, page) in layout.pages.iter().enumerate() {
+        if pi > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "{{\"index\":{},\"width\":{:.2},\"height\":{:.2},\"contentArea\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"sectionIndex\":{},",
+            page.index,
+            page.width,
+            page.height,
+            page.content_area.x,
+            page.content_area.y,
+            page.content_area.width,
+            page.content_area.height,
+            page.section_index,
+        ));
+
+        // Header
+        json.push_str("\"header\":");
+        if let Some(ref hdr) = page.header {
+            layout_block_to_json(hdr, model, &mut json);
+        } else {
+            json.push_str("null");
+        }
+        json.push(',');
+
+        // Footer
+        json.push_str("\"footer\":");
+        if let Some(ref ftr) = page.footer {
+            layout_block_to_json(ftr, model, &mut json);
+        } else {
+            json.push_str("null");
+        }
+        json.push(',');
+
+        // Blocks
+        json.push_str("\"blocks\":[");
+        for (bi, block) in page.blocks.iter().enumerate() {
+            if bi > 0 {
+                json.push(',');
+            }
+            layout_block_to_json(block, model, &mut json);
+        }
+        json.push_str("],");
+
+        // Floating images
+        json.push_str("\"floatingImages\":[");
+        for (fi, img) in page.floating_images.iter().enumerate() {
+            if fi > 0 {
+                json.push(',');
+            }
+            layout_block_to_json(img, model, &mut json);
+        }
+        json.push_str("],");
+
+        // Footnotes
+        json.push_str("\"footnotes\":[");
+        for (ni, note) in page.footnotes.iter().enumerate() {
+            if ni > 0 {
+                json.push(',');
+            }
+            layout_block_to_json(note, model, &mut json);
+        }
+        json.push_str("]}");
+    }
+
+    json.push_str("]}");
+    json
+}
+
+/// Serialize a single layout block to JSON.
+fn layout_block_to_json(block: &s1_layout::LayoutBlock, model: &DocumentModel, json: &mut String) {
+    let source = format!("{}:{}", block.source_id.replica, block.source_id.counter);
+    json.push_str(&format!(
+        "{{\"sourceId\":\"{}\",\"bounds\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},",
+        json_escape_string(&source),
+        block.bounds.x,
+        block.bounds.y,
+        block.bounds.width,
+        block.bounds.height,
+    ));
+
+    match &block.kind {
+        s1_layout::LayoutBlockKind::Paragraph {
+            lines,
+            text_align,
+            background_color,
+            border,
+            list_marker,
+            list_level,
+            space_before,
+            space_after,
+            indent_left,
+            indent_right,
+            indent_first_line,
+            line_height,
+            bidi,
+        } => {
+            json.push_str("\"type\":\"paragraph\",");
+
+            if let Some(align) = text_align {
+                json.push_str(&format!("\"textAlign\":\"{}\",", json_escape_string(align)));
+            }
+            if let Some(bg) = background_color {
+                json.push_str(&format!("\"backgroundColor\":\"#{}\",", bg.to_hex()));
+            }
+            if let Some(b) = border {
+                json.push_str(&format!("\"border\":\"{}\",", json_escape_string(b)));
+            }
+            if let Some(marker) = list_marker {
+                json.push_str(&format!(
+                    "\"listMarker\":\"{}\",",
+                    json_escape_string(marker)
+                ));
+            }
+            json.push_str(&format!(
+                "\"listLevel\":{},\"spaceBefore\":{:.2},\"spaceAfter\":{:.2},\"indentLeft\":{:.2},\"indentRight\":{:.2},\"indentFirstLine\":{:.2},",
+                list_level, space_before, space_after, indent_left, indent_right, indent_first_line,
+            ));
+            if let Some(lh) = line_height {
+                json.push_str(&format!("\"lineHeight\":{:.2},", lh));
+            }
+            json.push_str(&format!("\"bidi\":{},", bidi));
+
+            // Lines
+            json.push_str("\"lines\":[");
+            for (li, line) in lines.iter().enumerate() {
+                if li > 0 {
+                    json.push(',');
+                }
+                json.push_str(&format!(
+                    "{{\"baselineY\":{:.2},\"height\":{:.2},\"runs\":[",
+                    line.baseline_y, line.height,
+                ));
+                for (ri, run) in line.runs.iter().enumerate() {
+                    if ri > 0 {
+                        json.push(',');
+                    }
+                    glyph_run_to_json(run, model, json);
+                }
+                json.push_str("]}");
+            }
+            json.push_str("]}");
+        }
+        s1_layout::LayoutBlockKind::Table {
+            rows,
+            is_continuation,
+        } => {
+            json.push_str(&format!(
+                "\"type\":\"table\",\"isContinuation\":{},\"rows\":[",
+                is_continuation
+            ));
+            for (ri, row) in rows.iter().enumerate() {
+                if ri > 0 {
+                    json.push(',');
+                }
+                json.push_str(&format!(
+                    "{{\"bounds\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"isHeaderRow\":{},\"cells\":[",
+                    row.bounds.x, row.bounds.y, row.bounds.width, row.bounds.height,
+                    row.is_header_row,
+                ));
+                for (ci, cell) in row.cells.iter().enumerate() {
+                    if ci > 0 {
+                        json.push(',');
+                    }
+                    table_cell_to_json(cell, model, json);
+                }
+                json.push_str("]}");
+            }
+            json.push_str("]}");
+        }
+        s1_layout::LayoutBlockKind::Image {
+            media_id,
+            bounds,
+            image_data,
+            content_type,
+        } => {
+            json.push_str(&format!(
+                "\"type\":\"image\",\"mediaId\":\"{}\",\"imageBounds\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+                json_escape_string(media_id),
+                bounds.x, bounds.y, bounds.width, bounds.height,
+            ));
+            if let Some(ct) = content_type {
+                json.push_str(&format!(",\"contentType\":\"{}\"", json_escape_string(ct)));
+            }
+            if let (Some(data), Some(ct)) = (image_data, content_type) {
+                let b64 = base64_encode(data);
+                json.push_str(&format!(
+                    ",\"src\":\"data:{};base64,{}\"",
+                    json_escape_string(ct),
+                    b64
+                ));
+            }
+            json.push('}');
+        }
+        _ => {
+            // Unknown block kind — emit a minimal placeholder
+            json.push_str("\"type\":\"unknown\"}");
+        }
+    }
+}
+
+/// Serialize a glyph run to JSON.
+fn glyph_run_to_json(run: &s1_layout::GlyphRun, model: &DocumentModel, json: &mut String) {
+    let source = format!("{}:{}", run.source_id.replica, run.source_id.counter);
+    json.push_str(&format!(
+        "{{\"sourceId\":\"{}\",\"text\":\"{}\",\"x\":{:.2},\"fontSize\":{:.2},\"width\":{:.2},\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{},\"superscript\":{},\"subscript\":{},\"color\":\"#{}\",\"characterSpacing\":{:.2}",
+        json_escape_string(&source),
+        json_escape_string(&run.text),
+        run.x_offset,
+        run.font_size,
+        run.width,
+        run.bold,
+        run.italic,
+        run.underline,
+        run.strikethrough,
+        run.superscript,
+        run.subscript,
+        run.color.to_hex(),
+        run.character_spacing,
+    ));
+
+    // Resolve font family from the document model Run node attributes.
+    let font_family = model
+        .node(run.source_id)
+        .and_then(|n| n.attributes.get_string(&AttributeKey::FontFamily))
+        .unwrap_or("serif");
+    json.push_str(&format!(
+        ",\"fontFamily\":\"{}\"",
+        json_escape_string(font_family)
+    ));
+
+    if let Some(ref url) = run.hyperlink_url {
+        json.push_str(&format!(
+            ",\"hyperlinkUrl\":\"{}\"",
+            json_escape_string(url)
+        ));
+    }
+    if let Some(ref hl) = run.highlight_color {
+        json.push_str(&format!(",\"highlightColor\":\"#{}\"", hl.to_hex()));
+    }
+    if let Some(ref rev_type) = run.revision_type {
+        json.push_str(&format!(
+            ",\"revisionType\":\"{}\"",
+            json_escape_string(rev_type)
+        ));
+    }
+    if let Some(ref rev_author) = run.revision_author {
+        json.push_str(&format!(
+            ",\"revisionAuthor\":\"{}\"",
+            json_escape_string(rev_author)
+        ));
+    }
+    if let Some(ref img) = run.inline_image {
+        json.push_str(&format!(
+            ",\"inlineImage\":{{\"mediaId\":\"{}\",\"width\":{:.2},\"height\":{:.2}",
+            json_escape_string(&img.media_id),
+            img.width,
+            img.height,
+        ));
+        if let (Some(data), Some(ct)) = (&img.image_data, &img.content_type) {
+            let b64 = base64_encode(data);
+            json.push_str(&format!(
+                ",\"src\":\"data:{};base64,{}\"",
+                json_escape_string(ct),
+                b64
+            ));
+        }
+        json.push('}');
+    }
+    json.push('}');
+}
+
+/// Serialize a table cell to JSON.
+fn table_cell_to_json(cell: &s1_layout::LayoutTableCell, model: &DocumentModel, json: &mut String) {
+    json.push_str(&format!(
+        "{{\"bounds\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+        cell.bounds.x, cell.bounds.y, cell.bounds.width, cell.bounds.height,
+    ));
+    if let Some(ref bg) = cell.background_color {
+        json.push_str(&format!(",\"backgroundColor\":\"#{}\"", bg.to_hex()));
+    }
+    if let Some(ref bt) = cell.border_top {
+        json.push_str(&format!(",\"borderTop\":\"{}\"", json_escape_string(bt)));
+    }
+    if let Some(ref bb) = cell.border_bottom {
+        json.push_str(&format!(",\"borderBottom\":\"{}\"", json_escape_string(bb)));
+    }
+    if let Some(ref bl) = cell.border_left {
+        json.push_str(&format!(",\"borderLeft\":\"{}\"", json_escape_string(bl)));
+    }
+    if let Some(ref br) = cell.border_right {
+        json.push_str(&format!(",\"borderRight\":\"{}\"", json_escape_string(br)));
+    }
+    json.push_str(",\"blocks\":[");
+    for (bi, block) in cell.blocks.iter().enumerate() {
+        if bi > 0 {
+            json.push(',');
+        }
+        layout_block_to_json(block, model, json);
+    }
+    json.push_str("]}");
 }
 
 /// Detect the format of a document from its bytes.
@@ -7641,6 +8210,262 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+// ─── WasmPdfEditor — PDF reading/editing via lopdf ──────────────────────────
+
+/// PDF editor for reading, annotating, and modifying existing PDFs.
+#[wasm_bindgen]
+pub struct WasmPdfEditor {
+    inner: s1_format_pdf::PdfEditor,
+}
+
+#[wasm_bindgen]
+impl WasmPdfEditor {
+    /// Open a PDF from raw bytes.
+    pub fn open(data: &[u8]) -> Result<WasmPdfEditor, JsError> {
+        let editor =
+            s1_format_pdf::PdfEditor::open(data).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(WasmPdfEditor { inner: editor })
+    }
+
+    /// Get the number of pages.
+    pub fn page_count(&self) -> usize {
+        self.inner.page_count()
+    }
+
+    /// Add a white rectangle to cover content on a page (0-indexed).
+    pub fn add_white_rect(
+        &mut self,
+        page: usize,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_white_rect(
+                page,
+                s1_format_pdf::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            )
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add text overlay on a page at a given position (0-indexed).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_text_overlay(
+        &mut self,
+        page: usize,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        text: &str,
+        font_size: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_text_overlay(
+                page,
+                s1_format_pdf::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                text,
+                font_size,
+            )
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add a highlight annotation (0-indexed page, quad points as flat array).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_highlight_annotation(
+        &mut self,
+        page: usize,
+        quads: &[f64],
+        r: f32,
+        g: f32,
+        b: f32,
+        author: &str,
+        content: &str,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_highlight_annotation(page, quads, [r, g, b], author, content)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add a sticky note (text) annotation (0-indexed page).
+    pub fn add_text_annotation(
+        &mut self,
+        page: usize,
+        x: f64,
+        y: f64,
+        author: &str,
+        content: &str,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_text_annotation(page, x, y, author, content)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add an ink (freehand) annotation. Points is a flat array [x1,y1,x2,y2,...].
+    pub fn add_ink_annotation(
+        &mut self,
+        page: usize,
+        points: &[f64],
+        r: f32,
+        g: f32,
+        b: f32,
+        width: f64,
+    ) -> Result<(), JsError> {
+        let path: Vec<(f64, f64)> = points.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        self.inner
+            .add_ink_annotation(page, &[path], [r, g, b], width)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add a free text annotation (text box).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_freetext_annotation(
+        &mut self,
+        page: usize,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        text: &str,
+        font_size: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_freetext_annotation(
+                page,
+                s1_format_pdf::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                text,
+                font_size,
+            )
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Add a redaction annotation.
+    pub fn add_redaction(
+        &mut self,
+        page: usize,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .add_redaction(
+                page,
+                s1_format_pdf::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            )
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Apply all redaction annotations — permanently removes content.
+    pub fn apply_redactions(&mut self) -> Result<(), JsError> {
+        self.inner
+            .apply_redactions()
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Delete a page (0-indexed).
+    pub fn delete_page(&mut self, page: usize) -> Result<(), JsError> {
+        self.inner
+            .delete_page(page)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Move a page from one position to another (0-indexed).
+    pub fn move_page(&mut self, from: usize, to: usize) -> Result<(), JsError> {
+        self.inner
+            .move_page(from, to)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Rotate a page by degrees (must be a multiple of 90).
+    pub fn rotate_page(&mut self, page: usize, degrees: i32) -> Result<(), JsError> {
+        self.inner
+            .rotate_page(page, degrees)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Duplicate a page (0-indexed).
+    pub fn duplicate_page(&mut self, page: usize) -> Result<(), JsError> {
+        self.inner
+            .duplicate_page(page)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Extract specified pages (0-indexed) into a new PDF.
+    pub fn extract_pages(&mut self, pages: &[usize]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .extract_pages(pages)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Merge another PDF's pages at the end of this document.
+    pub fn merge(&mut self, other_data: &[u8]) -> Result<(), JsError> {
+        self.inner
+            .merge(other_data)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Get all form fields as JSON.
+    pub fn get_form_fields(&self) -> Result<String, JsError> {
+        let fields = self
+            .inner
+            .get_form_fields()
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let json_fields: Vec<String> = fields.iter().map(|f| {
+            format!(
+                r#"{{"name":"{}","field_type":"{:?}","page":{},"rect":{{"x":{},"y":{},"width":{},"height":{}}},"value":"{}","options":[{}]}}"#,
+                escape_json(&f.name),
+                f.field_type,
+                f.page,
+                f.rect.x, f.rect.y, f.rect.width, f.rect.height,
+                escape_json(&f.value),
+                f.options.iter().map(|o| format!("\"{}\"", escape_json(o))).collect::<Vec<_>>().join(","),
+            )
+        }).collect();
+        Ok(format!("[{}]", json_fields.join(",")))
+    }
+
+    /// Set a form field's value by name.
+    pub fn set_form_field_value(&mut self, field_name: &str, value: &str) -> Result<(), JsError> {
+        self.inner
+            .set_form_field_value(field_name, value)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Flatten the form.
+    pub fn flatten_form(&mut self) -> Result<(), JsError> {
+        self.inner
+            .flatten_form()
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Save the modified PDF to bytes.
+    pub fn save(&mut self) -> Result<Vec<u8>, JsError> {
+        self.inner.save().map_err(|e| JsError::new(&e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -7828,6 +8653,82 @@ mod tests {
         assert!(html.contains("Hello"), "should contain 'Hello'");
         assert!(html.contains("world"), "should contain 'world'");
         assert!(html.contains("Title"), "should contain heading text");
+    }
+
+    #[test]
+    fn test_layout_json_basic() {
+        let builder = WasmDocumentBuilder::new();
+        let doc = builder
+            .heading(1, "Title")
+            .text("Hello world")
+            .build()
+            .unwrap();
+        let json_str = doc.to_layout_json().unwrap();
+        // Verify it's valid JSON-ish (contains expected structure)
+        assert!(
+            json_str.starts_with("{\"pages\":["),
+            "should start with pages array"
+        );
+        assert!(
+            json_str.contains("\"type\":\"paragraph\""),
+            "should have paragraph blocks"
+        );
+        assert!(json_str.contains("\"Hello"), "should contain 'Hello' text");
+        assert!(json_str.contains("\"Title"), "should contain heading text");
+        assert!(json_str.contains("\"width\":"), "should have width fields");
+        assert!(
+            json_str.contains("\"height\":"),
+            "should have height fields"
+        );
+        assert!(json_str.contains("\"fontSize\":"), "should have font size");
+        assert!(
+            json_str.contains("\"fontFamily\":"),
+            "should have font family"
+        );
+        assert!(json_str.contains("\"bold\":"), "should have bold field");
+        assert!(json_str.contains("\"lines\":"), "should have lines array");
+        assert!(json_str.contains("\"runs\":"), "should have runs array");
+        assert!(json_str.contains("\"sourceId\":"), "should have source IDs");
+        assert!(
+            json_str.contains("\"contentArea\":"),
+            "should have content area"
+        );
+    }
+
+    #[test]
+    fn test_layout_json_with_config() {
+        let builder = WasmDocumentBuilder::new();
+        let doc = builder.text("Config test").build().unwrap();
+
+        let mut config = WasmLayoutConfig::new();
+        config.set_page_width(595.28);
+        config.set_page_height(841.89);
+
+        let json_str = doc.to_layout_json_with_config(&config).unwrap();
+        assert!(
+            json_str.contains("\"width\":595.28"),
+            "should have A4 page width"
+        );
+        assert!(
+            json_str.contains("\"height\":841.89"),
+            "should have A4 page height"
+        );
+    }
+
+    #[test]
+    fn test_layout_json_empty_document() {
+        let builder = WasmDocumentBuilder::new();
+        let doc = builder.build().unwrap();
+        let json_str = doc.to_layout_json().unwrap();
+        assert!(
+            json_str.starts_with("{\"pages\":["),
+            "should start with pages array"
+        );
+        // Empty doc should still have at least one page
+        assert!(
+            json_str.contains("\"index\":"),
+            "should have at least one page"
+        );
     }
 
     #[test]
@@ -8522,6 +9423,201 @@ mod tests {
         doc.format_run(&run_id, "bold", "true").unwrap();
         let fmt = doc.get_run_formatting_json(&run_id).unwrap();
         assert!(fmt.contains("\"bold\":true"), "should be bold: {}", fmt);
+    }
+
+    #[test]
+    fn test_paste_then_to_html_has_formatting_tags() {
+        // THE critical test: paste formatted runs, then verify to_html()
+        // produces <strong>/<em>/style tags in the output.
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        let json = r#"{"paragraphs":[{"runs":[{"text":"Bold","bold":true},{"text":" normal "},{"text":"Italic","italic":true},{"text":" red","color":"FF0000","fontSize":18}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        let html = doc.to_html().unwrap();
+        eprintln!("=== to_html output ===\n{}\n=== end ===", html);
+
+        assert!(
+            html.contains("<strong>"),
+            "to_html must contain <strong>, got: {}",
+            html
+        );
+        assert!(
+            html.contains("Bold</strong>") || html.contains("Bold</span></strong>"),
+            "to_html must contain Bold inside <strong>"
+        );
+        assert!(
+            html.contains("<em>"),
+            "to_html must contain <em>, got: {}",
+            html
+        );
+        assert!(
+            html.contains("color:#FF0000") || html.contains("color:rgb"),
+            "to_html must contain red color style, got: {}",
+            html
+        );
+        assert!(
+            html.contains("font-size:18pt") || html.contains("font-size:18"),
+            "to_html must contain font-size:18, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_paste_then_render_node_html_has_formatting() {
+        // Also verify render_node_html (used for incremental updates) has formatting
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        let json =
+            r#"{"paragraphs":[{"runs":[{"text":"Bold text","bold":true},{"text":" plain"}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        let node_html = doc.render_node_html(&p).unwrap();
+        eprintln!("=== render_node_html ===\n{}\n=== end ===", node_html);
+
+        assert!(
+            node_html.contains("<strong>"),
+            "render_node_html must have <strong>: {}",
+            node_html
+        );
+        assert!(
+            node_html.contains("Bold text"),
+            "render_node_html must have text: {}",
+            node_html
+        );
+    }
+
+    #[test]
+    fn test_set_paragraph_text_preserves_multirun_formatting() {
+        // set_paragraph_text should be a no-op when text hasn't changed,
+        // preserving multi-run formatting (e.g., after paste + re-sync).
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        // Paste formatted runs: bold "Hello" + plain " World"
+        let json = r#"{"paragraphs":[{"runs":[{"text":"Hello","bold":true},{"text":" World"}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        // Verify we have multiple runs with formatting
+        let run_ids_str = doc.get_run_ids(&p).unwrap();
+        let run_count_before: usize = run_ids_str
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count();
+        assert!(
+            run_count_before >= 2,
+            "Should have >=2 runs, got {}",
+            run_count_before
+        );
+
+        // Now call set_paragraph_text with the SAME text (simulating syncParagraphText)
+        doc.set_paragraph_text(&p, "Hello World").unwrap();
+
+        // Runs should still be intact (no-op)
+        let run_ids_after = doc.get_run_ids(&p).unwrap();
+        let run_count_after: usize = run_ids_after
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count();
+        assert_eq!(
+            run_count_before, run_count_after,
+            "Run count should be preserved: before={}, after={}",
+            run_count_before, run_count_after
+        );
+
+        // Bold formatting should still be on "Hello"
+        let first_rid = run_ids_after
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .next()
+            .unwrap()
+            .trim()
+            .trim_matches('"');
+        let fmt = doc.get_run_formatting_json(first_rid).unwrap();
+        assert!(
+            fmt.contains("\"bold\":true"),
+            "Bold should be preserved: {}",
+            fmt
+        );
+    }
+
+    #[test]
+    fn test_set_paragraph_text_updates_when_changed() {
+        // set_paragraph_text should update text when it actually changed.
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Hello World").unwrap();
+
+        doc.set_paragraph_text(&p, "New text").unwrap();
+
+        let text = doc.get_paragraph_text(&p).unwrap();
+        assert_eq!(text, "New text");
+    }
+
+    #[test]
+    fn test_set_paragraph_text_typing_preserves_multirun() {
+        // Simulates: paste "Hello World" with bold "Hello", then user types "X"
+        // at position 5 (end of "Hello"). set_paragraph_text receives "HelloX World".
+        // The runs should be preserved (not collapsed).
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        // Paste formatted runs: bold "Hello" + plain " World"
+        let json = r#"{"paragraphs":[{"runs":[{"text":"Hello","bold":true},{"text":" World"}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        // Verify initial state: 2+ runs
+        let run_ids_before = doc.get_run_ids(&p).unwrap();
+        let run_count_before: usize = run_ids_before
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count();
+        assert!(run_count_before >= 2, "Should have >=2 runs before typing");
+
+        // Simulate typing "X" at position 5 (user typed in the bold "Hello" run)
+        // The DOM now says "HelloX World", syncParagraphText calls set_paragraph_text
+        doc.set_paragraph_text(&p, "HelloX World").unwrap();
+
+        // Verify: runs should still be preserved (not collapsed to 1)
+        let run_ids_after = doc.get_run_ids(&p).unwrap();
+        let run_count_after: usize = run_ids_after
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .count();
+        assert!(
+            run_count_after >= 2,
+            "Runs should be preserved after single-run edit, got {}",
+            run_count_after
+        );
+
+        // The first run should still be bold
+        let first_rid = run_ids_after
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .next()
+            .unwrap()
+            .trim()
+            .trim_matches('"');
+        let fmt = doc.get_run_formatting_json(first_rid).unwrap();
+        assert!(
+            fmt.contains("\"bold\":true"),
+            "Bold should be preserved after typing: {}",
+            fmt
+        );
+
+        // Text should be updated
+        let text = doc.get_paragraph_text(&p).unwrap();
+        assert_eq!(text, "HelloX World");
     }
 
     #[test]
@@ -9366,6 +10462,164 @@ mod tests {
         assert_eq!(run.font_family, Some("Courier".to_string()));
         assert_eq!(run.color, Some("00FF00".to_string()));
         assert_eq!(run.highlight_color, Some("FFFF00".to_string()));
+    }
+
+    #[test]
+    fn test_paste_formatted_runs_verify_bold_italic() {
+        // This test verifies that formatting is ACTUALLY applied to runs,
+        // not just that text is inserted.
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        // Paste: bold "Hello" + plain " " + italic "World"
+        let json = r#"{"paragraphs":[{"runs":[{"text":"Hello","bold":true},{"text":" "},{"text":"World","italic":true}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        // Verify text
+        let text = doc.get_document_text().unwrap();
+        assert!(text.contains("Hello World"), "text: {}", text);
+
+        // Verify runs exist and have correct formatting
+        let run_ids_str = doc.get_run_ids(&p).unwrap();
+        let run_ids: Vec<&str> = run_ids_str
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert!(
+            run_ids.len() >= 2,
+            "Expected at least 2 runs, got {}: {:?}",
+            run_ids.len(),
+            run_ids
+        );
+
+        // Check that "Hello" run has bold
+        let first_run_text = doc.get_run_text(run_ids[0]).unwrap();
+        let first_run_fmt = doc.get_run_formatting_json(run_ids[0]).unwrap();
+        assert_eq!(first_run_text, "Hello");
+        assert!(
+            first_run_fmt.contains("\"bold\":true"),
+            "First run should be bold: {}",
+            first_run_fmt
+        );
+
+        // Find the "World" run and check italic
+        let mut found_world = false;
+        for &rid in &run_ids {
+            let rt = doc.get_run_text(rid).unwrap();
+            if rt == "World" {
+                let fmt = doc.get_run_formatting_json(rid).unwrap();
+                assert!(
+                    fmt.contains("\"italic\":true"),
+                    "World run should be italic: {}",
+                    fmt
+                );
+                found_world = true;
+            }
+        }
+        assert!(found_world, "Could not find 'World' run in: {:?}", run_ids);
+    }
+
+    #[test]
+    fn test_paste_formatted_runs_verify_font_color() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Before").unwrap();
+
+        // Paste a run with font family, size, and color
+        let json = r#"{"paragraphs":[{"runs":[{"text":"styled","bold":true,"fontSize":24,"fontFamily":"Arial","color":"FF0000"}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 6, json).unwrap();
+
+        let text = doc.get_document_text().unwrap();
+        assert!(text.contains("Beforestyled"), "text: {}", text);
+
+        // Find the "styled" run
+        let run_ids_str = doc.get_run_ids(&p).unwrap();
+        let run_ids: Vec<&str> = run_ids_str
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut found = false;
+        for &rid in &run_ids {
+            let rt = doc.get_run_text(rid).unwrap();
+            if rt == "styled" {
+                let fmt = doc.get_run_formatting_json(rid).unwrap();
+                assert!(fmt.contains("\"bold\":true"), "should be bold: {}", fmt);
+                assert!(
+                    fmt.contains("\"fontSize\""),
+                    "should have fontSize: {}",
+                    fmt
+                );
+                assert!(
+                    fmt.contains("\"fontFamily\""),
+                    "should have fontFamily: {}",
+                    fmt
+                );
+                assert!(fmt.contains("\"color\""), "should have color: {}", fmt);
+                found = true;
+            }
+        }
+        assert!(found, "Could not find 'styled' run");
+    }
+
+    #[test]
+    fn test_paste_formatted_multi_para_verify_formatting() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("").unwrap();
+
+        // Multi-paragraph paste: first para bold, second para italic
+        let json = r#"{"paragraphs":[{"runs":[{"text":"Bold line","bold":true}]},{"runs":[{"text":"Italic line","italic":true}]}]}"#;
+        doc.paste_formatted_runs_json(&p, 0, json).unwrap();
+
+        let text = doc.get_document_text().unwrap();
+        assert!(text.contains("Bold line"), "text: {}", text);
+        assert!(text.contains("Italic line"), "text: {}", text);
+
+        // Check paragraphs
+        let all_ids: Vec<String> = {
+            let j = doc.paragraph_ids_json().unwrap();
+            let trimmed = j.trim_matches(|c| c == '[' || c == ']');
+            trimmed
+                .split(',')
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        assert!(
+            all_ids.len() >= 2,
+            "Expected >= 2 paragraphs, got {}",
+            all_ids.len()
+        );
+
+        // First paragraph should contain "Bold line" with bold formatting
+        let first_runs_str = doc.get_run_ids(&all_ids[0]).unwrap();
+        let first_runs: Vec<&str> = first_runs_str
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let mut found_bold = false;
+        for &rid in &first_runs {
+            let rt = doc.get_run_text(rid).unwrap();
+            if rt.contains("Bold") {
+                let fmt = doc.get_run_formatting_json(rid).unwrap();
+                assert!(
+                    fmt.contains("\"bold\":true"),
+                    "Bold line run should be bold: {}",
+                    fmt
+                );
+                found_bold = true;
+            }
+        }
+        assert!(found_bold, "Could not find bold run in first paragraph");
     }
 
     // ── Multi-run paragraph tests ──────────────────────────

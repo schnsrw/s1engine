@@ -475,6 +475,7 @@ fn test_large_document_performance() {
 // ─── Test 7: Cross-Format DOCX to ODT ─────────────────────────────────────
 
 #[test]
+#[cfg(feature = "odt")]
 fn test_cross_format_docx_to_odt() {
     let doc = DocumentBuilder::new()
         .heading(1, "Cross-Format Title")
@@ -961,19 +962,22 @@ fn test_mixed_content_stress() {
     assert!(found_list, "Lists must survive mixed-content round-trip");
 
     // Cross-format: also verify ODT export works for the whole thing
-    let odt_bytes = doc2.export(Format::Odt).unwrap();
-    let from_odt = engine.open_as(&odt_bytes, Format::Odt).unwrap();
-    let odt_text = from_odt.to_plain_text();
-    assert!(
-        odt_text.contains("Introduction"),
-        "Heading text must survive DOCX -> ODT"
-    );
-    assert!(
-        odt_text.contains("Alpha"),
-        "Table text must survive DOCX -> ODT"
-    );
-    assert!(
-        odt_text.contains("caf\u{00e9}"),
-        "Unicode text must survive DOCX -> ODT"
-    );
+    #[cfg(feature = "odt")]
+    {
+        let odt_bytes = doc2.export(Format::Odt).unwrap();
+        let from_odt = engine.open_as(&odt_bytes, Format::Odt).unwrap();
+        let odt_text = from_odt.to_plain_text();
+        assert!(
+            odt_text.contains("Introduction"),
+            "Heading text must survive DOCX -> ODT"
+        );
+        assert!(
+            odt_text.contains("Alpha"),
+            "Table text must survive DOCX -> ODT"
+        );
+        assert!(
+            odt_text.contains("caf\u{00e9}"),
+            "Unicode text must survive DOCX -> ODT"
+        );
+    }
 }

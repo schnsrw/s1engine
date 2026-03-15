@@ -693,8 +693,12 @@ fn stress_5_replicas_mixed_ops() {
         ))
         .unwrap();
         let rid = doc.next_id();
-        doc.apply_local(Operation::insert_node(pid, 0, Node::new(rid, NodeType::Run)))
-            .unwrap();
+        doc.apply_local(Operation::insert_node(
+            pid,
+            0,
+            Node::new(rid, NodeType::Run),
+        ))
+        .unwrap();
         let tid = doc.next_id();
         doc.apply_local(Operation::insert_node(rid, 0, Node::text(tid, label)))
             .unwrap();
@@ -899,9 +903,18 @@ fn stress_concurrent_node_reorder() {
 
     // All 5 paragraphs still present
     for pid in &para_ids {
-        assert!(doc1.model().node(*pid).is_some(), "para {pid:?} lost in doc1");
-        assert!(doc2.model().node(*pid).is_some(), "para {pid:?} lost in doc2");
-        assert!(doc3.model().node(*pid).is_some(), "para {pid:?} lost in doc3");
+        assert!(
+            doc1.model().node(*pid).is_some(),
+            "para {pid:?} lost in doc1"
+        );
+        assert!(
+            doc2.model().node(*pid).is_some(),
+            "para {pid:?} lost in doc2"
+        );
+        assert!(
+            doc3.model().node(*pid).is_some(),
+            "para {pid:?} lost in doc3"
+        );
     }
 
     // All replicas should contain the same set of children (order may differ

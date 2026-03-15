@@ -5,13 +5,14 @@ import {
   setCursorAtOffset, setCursorAtStart, isCursorAtStart, isCursorAtEnd,
   getEditableText,
 } from './selection.js';
-import { renderDocument, renderNodeById, syncParagraphText, syncAllText, debouncedSync } from './render.js';
+import { renderDocument, renderNodeById, syncParagraphText, syncAllText, debouncedSync, markLayoutDirty } from './render.js';
 import { toggleFormat, applyFormat, updateToolbarState, updateUndoRedo, recordUndoAction, renderUndoHistory } from './toolbar.js';
 import { deleteSelectedImage, setupImages } from './images.js';
+import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
 import { updatePageBreaks } from './pagination.js';
 import { markDirty, saveVersion, updateDirtyIndicator, updateStatusBar, openAutosaveDB } from './file.js';
 import { broadcastOp } from './collab.js';
-import { setZoomLevel } from './toolbar-handlers.js';
+import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled } from './toolbar-handlers.js';
 
 export function initInput() {
   const page = $('pageContainer');
@@ -117,6 +118,11 @@ export function initInput() {
         }
       }
     }
+
+    // ── E9.1: Auto-correct after space or punctuation ──
+    if (e.inputType === 'insertText' && el && /^[\s.,;:!?\-)\]}>]$/.test(e.data || '')) {
+      tryAutoCorrect(el, e.data);
+    }
   });
 
   // ─── Copy — write both plain text and HTML to clipboard via WASM ───
@@ -202,7 +208,8 @@ export function initInput() {
               collapsed: false, startEl, endEl,
             };
 
-            // Visual highlight across pages
+            // Clear previous highlights, then apply new ones
+            page.querySelectorAll('.select-all-highlight').forEach(el => el.classList.remove('select-all-highlight'));
             for (const pageEl of state.pageElements) {
               const content = pageEl.querySelector('.page-content') || pageEl;
               let inRange = false;
@@ -330,6 +337,14 @@ export function initInput() {
       e.preventDefault(); deleteSelectedImage(); return;
     }
 
+    // Delete selected shape(s) — E9.4
+    if (hasSelectedShape() && (e.key === 'Delete' || e.key === 'Backspace')) {
+      // Don't intercept if editing text inside a shape textbox
+      if (!e.target.closest('.shape-textbox-edit')) {
+        e.preventDefault(); deleteSelectedShape(); return;
+      }
+    }
+
     // ── Cross-page arrow key navigation ──
     if ((e.key === 'ArrowDown' || e.key === 'ArrowRight') && !e.ctrlKey && !e.metaKey) {
       const el = getActiveElement();
@@ -393,7 +408,7 @@ export function initInput() {
         case 'u': e.preventDefault(); toggleFormat('underline'); return;
         case 'z': e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return;
         case 'y': e.preventDefault(); doRedo(); return;
-        case 'x': e.preventDefault(); doCut(e); return;
+        case 'x': e.preventDefault(); doCut(); return;
         case 'c': /* handled by copy event above */ return;
         case 'v': /* handled by paste event */ return;
         case 'a': {
@@ -410,6 +425,37 @@ export function initInput() {
         case '-': e.preventDefault(); adjustEditorZoom(-10); return;
         case '0': e.preventDefault(); adjustEditorZoom(0); return;
         case '/': e.preventDefault(); { const m = document.getElementById('shortcutsModal'); if (m) m.classList.add('show'); } return;
+      }
+
+      // Ctrl+Alt+M — insert comment at current selection
+      if (e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const commentBtn = document.getElementById('miComment');
+        if (commentBtn) commentBtn.click();
+        return;
+      }
+
+      // Ctrl+Shift+E — insert equation
+      if (e.shiftKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        import('./toolbar-handlers.js').then(mod => {
+          if (typeof mod.openEquationModal === 'function') mod.openEquationModal('');
+        });
+        return;
+      }
+
+      // Ctrl+Alt+F — insert footnote
+      if (e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        insertFootnoteAtCursor();
+        return;
+      }
+
+      // Ctrl+Alt+D — insert endnote
+      if (e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        insertEndnoteAtCursor();
+        return;
       }
     }
 
@@ -730,20 +776,46 @@ export function initInput() {
     // Delete selection first if not collapsed
     if (info && !info.collapsed) {
       syncAllText();
+      const origStartNodeId = info.startNodeId;
+      const origStartOffset = info.startOffset;
       try {
         doc.delete_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset);
         renderDocument();
       } catch (_) {}
       // After delete + re-render, DOM is rebuilt. Clear stale selection info.
       state.lastSelInfo = null;
-      info = null;
+      // Try to restore cursor at the original start position
+      const restoredEl = page.querySelector(`[data-node-id="${origStartNodeId}"]`);
+      if (restoredEl) {
+        info = { startNodeId: origStartNodeId, startOffset: origStartOffset, startEl: restoredEl };
+      } else {
+        // Start node was deleted — find first available paragraph
+        info = null;
+      }
     } else if (info) {
-      syncParagraphText(info.startEl);
+      // Sync text before paste to ensure WASM model matches DOM
+      if (info.startEl && info.startEl.isConnected) {
+        syncParagraphText(info.startEl);
+      }
     }
 
     // Ensure we have a valid target paragraph
     const ensureTarget = () => {
-      // Try to get fresh selection after re-render
+      // First try WASM paragraph list (authoritative)
+      try {
+        const allIds = JSON.parse(doc.paragraph_ids_json());
+        if (allIds.length > 0) {
+          const firstId = allIds[0];
+          const el = page.querySelector(`[data-node-id="${firstId}"]`);
+          if (el) {
+            return { startNodeId: firstId, startOffset: 0, startEl: el };
+          }
+          // Element not in DOM yet — return WASM-based info anyway
+          return { startNodeId: firstId, startOffset: 0, startEl: null };
+        }
+      } catch (_) {}
+
+      // DOM fallback: search across all pages
       let firstEl = page.querySelector('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
       if (!firstEl) {
         // Document is completely empty — create a paragraph
@@ -755,7 +827,6 @@ export function initInput() {
         firstEl = page.querySelector('[data-node-id]');
       }
       if (firstEl) {
-        setCursorAtStart(firstEl);
         return { startNodeId: firstEl.dataset.nodeId, startOffset: 0, startEl: firstEl };
       }
       return null;
@@ -780,14 +851,17 @@ export function initInput() {
     if (html) {
       const parsed = parseClipboardHtml(html);
       if (parsed && parsed.elements.length > 0) {
-        // pasteStructuredContent handles errors internally per-element
-        pasteStructuredContent(doc, info, parsed, page);
-        renderDocument();
-        placeCursorAfterPaste(page, text || '', info.startNodeId, info.startOffset);
-        recordUndoAction('Paste formatted content');
-        updateUndoRedo();
-        markDirty();
-        return;
+        const ok = pasteStructuredContent(doc, info, parsed, page);
+        if (ok) {
+          renderDocument();
+          placeCursorAfterPaste(page, text || '', info.startNodeId, info.startOffset);
+          recordUndoAction('Paste formatted content');
+          updateUndoRedo();
+          markDirty();
+          return;
+        }
+        // Rich paste failed entirely — fall through to plain text
+        console.warn('Rich paste returned no content, falling back to plain text');
       }
     }
 
@@ -1004,6 +1078,21 @@ export function initInput() {
     // Close alt text modal
     if ($('altTextModal').classList.contains('show')) {
       $('altTextModal').classList.remove('show');
+      return;
+    }
+    // Close equation modal
+    if ($('equationModal')?.classList.contains('show')) {
+      $('equationModal').classList.remove('show');
+      return;
+    }
+    // Close custom dictionary modal
+    if ($('dictModal')?.classList.contains('show')) {
+      $('dictModal').classList.remove('show');
+      return;
+    }
+    // Close auto-correct modal
+    if ($('autoCorrectModal')?.classList.contains('show')) {
+      $('autoCorrectModal').classList.remove('show');
       return;
     }
     // Close menus
@@ -1280,6 +1369,61 @@ function htmlToPlainText(html) {
 
 // insertTextAtCursor removed — all text insertion must go through WASM to maintain model consistency
 
+// ─── E9.1: Auto-Correct ────────────────────────────
+// After space/punctuation, check if the previous word matches an auto-correct rule.
+// If so, replace the word via WASM and re-render the node.
+function tryAutoCorrect(el, triggerChar) {
+  if (!isAutoCorrectEnabled()) return;
+  if (!state.doc || !el?.dataset?.nodeId) return;
+
+  const text = getEditableText(el);
+  const cursorOff = getCursorOffset(el);
+  // cursorOff includes the trigger char, so the word ends at cursorOff - 1
+  const codepoints = [...text];
+  const endIdx = cursorOff - 1; // index of trigger char
+  if (endIdx < 1) return;
+
+  // Walk backward to find the start of the previous word
+  let startIdx = endIdx - 1;
+  while (startIdx >= 0 && /\S/.test(codepoints[startIdx])) startIdx--;
+  startIdx++; // startIdx is now the first char of the word
+
+  if (startIdx >= endIdx) return;
+  const word = codepoints.slice(startIdx, endIdx).join('').toLowerCase();
+  if (!word) return;
+
+  const acMap = getAutoCorrectMap();
+  const replacement = acMap[word];
+  if (!replacement) return;
+
+  const nodeId = el.dataset.nodeId;
+
+  // Sync the current paragraph text to WASM first
+  clearTimeout(state.syncTimer);
+  syncParagraphText(el);
+
+  try {
+    // Delete the misspelled word (startIdx to endIdx), then insert the correction
+    // Using WASM for model consistency
+    if (typeof state.doc.replace_text_range === 'function') {
+      state.doc.replace_text_range(nodeId, startIdx, endIdx, replacement);
+    } else {
+      // Fallback: reconstruct the paragraph text
+      const fullText = getEditableText(el);
+      const cp = [...fullText];
+      const newCp = [...cp.slice(0, startIdx), ...replacement, ...cp.slice(endIdx)];
+      state.doc.set_paragraph_text(nodeId, newCp.join(''));
+    }
+    // Calculate new cursor offset: startIdx + replacement length + 1 (for the trigger char)
+    const newCursorOff = startIdx + [...replacement].length + 1;
+    const updated = renderNodeById(nodeId);
+    if (updated) setCursorAtOffset(updated, newCursorOff);
+    state.syncedTextCache.set(nodeId, getEditableText(updated || el));
+  } catch (e) {
+    console.warn('auto-correct failed:', e);
+  }
+}
+
 // ─── E2.2: Parse clipboard HTML into structured content for WASM ─────
 // Returns { elements: [ {type:'paragraph', runs:[...], ...}, {type:'image', src, width, height}, {type:'table', rows:[...]} ] }
 function parseClipboardHtml(html) {
@@ -1290,7 +1434,11 @@ function parseClipboardHtml(html) {
       .replace(/<!--\[if[\s\S]*?<!\[endif\]-->/gi, '')
       .replace(/<!\[if[\s\S]*?<!\[endif\]>/gi, '')
       .replace(/<\?xml[\s\S]*?\?>/gi, '')
-      .replace(/<o:p>[\s\S]*?<\/o:p>/gi, '');
+      .replace(/<o:p>[\s\S]*?<\/o:p>/gi, '')
+      // Remove Word's <w:Sdt> and other Office XML tags that DOMParser may mangle
+      .replace(/<\/?w:[^>]+>/gi, '')
+      // Remove VML namespace declarations that break DOMParser
+      .replace(/<\/?v:[^>]+>/gi, '');
 
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleaned, 'text/html');
@@ -1307,8 +1455,21 @@ function parseClipboardHtml(html) {
 
     const elements = [];
 
-    // Walk all top-level children
-    walkBlockElements(walkRoot, elements);
+    // Google Docs: if the wrapper contains block elements (<p>, <h*>), walk normally.
+    // If it only has inline children (<span>, text, etc.), treat the whole thing as one paragraph.
+    const hasBlockChildren = walkRoot.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, ul, ol, li, blockquote, pre, hr');
+    if (gdocsWrapper && !hasBlockChildren) {
+      // All-inline Google Docs content: extract as a single paragraph with formatted runs
+      const runs = extractRunsFromElement(walkRoot);
+      if (runs.length > 0) {
+        const para = { type: 'paragraph', runs };
+        extractParagraphFormat(walkRoot, para);
+        elements.push(para);
+      }
+    } else {
+      // Walk all top-level children
+      walkBlockElements(walkRoot, elements);
+    }
 
     if (elements.length === 0) {
       // Fallback: treat body as a single paragraph with formatted inline content
@@ -1322,6 +1483,11 @@ function parseClipboardHtml(html) {
       return null;
     }
 
+    // Clean up internal _fromInline marker
+    for (const el of elements) {
+      delete el._fromInline;
+    }
+
     return { elements };
   } catch (_) {
     return null;
@@ -1332,10 +1498,15 @@ function parseClipboardHtml(html) {
 function walkBlockElements(container, elements) {
   for (const child of container.childNodes) {
     if (child.nodeType === 3) {
-      // Text node at top level
+      // Text node at top level — merge into previous inline paragraph if applicable
       const text = child.textContent;
       if (text && text.trim()) {
-        elements.push({ type: 'paragraph', runs: [{ text }] });
+        const prev = elements[elements.length - 1];
+        if (prev && prev.type === 'paragraph' && prev._fromInline) {
+          prev.runs.push({ text });
+        } else {
+          elements.push({ type: 'paragraph', runs: [{ text }], _fromInline: true });
+        }
       }
       continue;
     }
@@ -1345,12 +1516,20 @@ function walkBlockElements(container, elements) {
     // Skip MS Office namespace elements, style/meta/link tags
     if (tag.includes(':') || tag === 'style' || tag === 'meta' || tag === 'link' || tag === 'script') continue;
 
-    // Inline-only elements at block level (span, b, i, a, etc.) — treat as paragraph
+    // Inline-only elements at block level (span, b, i, a, etc.)
+    // Merge consecutive inline elements into a single paragraph instead
+    // of creating one paragraph per inline element.
     if (/^(span|b|strong|i|em|u|a|font|mark|small|big|code|kbd|abbr|cite|q|var|samp)$/.test(tag)) {
       const runs = extractRunsFromElement(child);
       if (runs.length > 0) {
-        const para = { type: 'paragraph', runs };
-        elements.push(para);
+        // Merge with the previous paragraph if it was also from inline content
+        const prev = elements[elements.length - 1];
+        if (prev && prev.type === 'paragraph' && prev._fromInline) {
+          prev.runs.push(...runs);
+        } else {
+          const para = { type: 'paragraph', runs, _fromInline: true };
+          elements.push(para);
+        }
       }
       continue;
     }
@@ -1412,7 +1591,38 @@ function walkBlockElements(container, elements) {
       if (runs.length > 0) {
         const para = { type: 'paragraph', runs };
         extractParagraphFormat(child, para);
-        elements.push(para);
+
+        // MS Word list paragraph detection (class="MsoListParagraph" or mso-list style)
+        const cls = typeof child.className === 'string' ? child.className : '';
+        const cssText = child.style?.cssText || '';
+        if (cls.includes('MsoListParagraph') || cssText.includes('mso-list')) {
+          // Word list markers are typically the first run's leading text
+          const firstText = runs[0]?.text || '';
+          const bulletMatch = firstText.match(/^[\u00B7\u2022\u25CF\u25CB\uF0B7·•]\s*/);
+          const numMatch = firstText.match(/^(\d+[.)]\s*|[a-zA-Z][.)]\s*)/);
+          if (bulletMatch) {
+            runs[0].text = firstText.slice(bulletMatch[0].length);
+            para.listType = 'bullet';
+          } else if (numMatch) {
+            runs[0].text = firstText.slice(numMatch[0].length);
+            para.listType = 'decimal';
+          }
+          // Extract indent level from mso-list style
+          const levelMatch = cssText.match(/level(\d+)/);
+          if (levelMatch) para.listLevel = parseInt(levelMatch[1]) - 1;
+          // Clean up empty first run after marker removal
+          if (runs[0] && !runs[0].text) runs.shift();
+        }
+
+        // MS Word heading detection (class="MsoTitle", "MsoHeading1", etc.)
+        if (tag === 'p') {
+          const hClassMatch = cls.match(/MsoHeading(\d)/i);
+          if (hClassMatch) para.headingLevel = parseInt(hClassMatch[1]);
+          if (cls.includes('MsoTitle')) para.headingLevel = 1;
+          if (cls.includes('MsoSubtitle')) para.headingLevel = 2;
+        }
+
+        if (runs.length > 0) elements.push(para);
       }
       // Add any images found inside the paragraph as separate elements
       imgs.forEach(img => {
@@ -1443,9 +1653,12 @@ function extractImageElement(img) {
   // Prefer getAttribute to avoid URL resolution by DOMParser
   const src = img.getAttribute('src') || img.src;
   if (!src) return null;
+  // Only accept data URLs and blob URLs (file:/// and http:// won't work in paste)
+  if (!src.startsWith('data:') && !src.startsWith('blob:')) return null;
   const style = img.style || {};
-  let width = parseFloat(style.width) || img.naturalWidth || img.width || 200;
-  let height = parseFloat(style.height) || img.naturalHeight || img.height || 200;
+  // Parse width/height from inline styles, attributes, or defaults
+  let width = parseFloat(style.width) || parseFloat(img.getAttribute('width')) || img.naturalWidth || img.width || 200;
+  let height = parseFloat(style.height) || parseFloat(img.getAttribute('height')) || img.naturalHeight || img.height || 200;
   // Convert px to pt if needed
   if (style.width && style.width.endsWith('px')) width = width * 0.75;
   else if (style.width && style.width.endsWith('pt')) { /* already pt */ }
@@ -1470,23 +1683,53 @@ function extractTableElement(tableEl) {
   return { type: 'table', rows };
 }
 
-/** Paste structured content (paragraphs, images, tables) into the document */
+/** Paste structured content (paragraphs, images, tables) into the document.
+ *  Returns true if any content was successfully pasted, false otherwise. */
 function pasteStructuredContent(doc, info, parsed, page) {
   const elements = parsed.elements;
-  if (!elements || elements.length === 0) return;
+  if (!elements || elements.length === 0) return false;
 
-  // Collect consecutive paragraph runs and batch-paste them
   let lastNodeId = info.startNodeId;
+  let startOffset = info.startOffset;
   let firstParaHandled = false;
+  let anyPasted = false;
+
+  // Validate that a node exists in the WASM model
+  const nodeExists = (nodeId) => {
+    try { doc.get_formatting_json(nodeId); return true; } catch (_) { return false; }
+  };
+
+  // Find a valid target node from WASM paragraph list
+  const findValidTarget = () => {
+    try {
+      const allIds = JSON.parse(doc.paragraph_ids_json());
+      if (allIds.length > 0) return { nodeId: allIds[allIds.length - 1], offset: 0 };
+    } catch (_) {}
+    // Last resort: create a paragraph
+    try {
+      const newId = doc.append_paragraph('');
+      return { nodeId: newId, offset: 0 };
+    } catch (_) {}
+    return null;
+  };
+
+  // Ensure our target node is valid; if not, find a new one
+  if (!nodeExists(lastNodeId)) {
+    const target = findValidTarget();
+    if (!target) return false;
+    lastNodeId = target.nodeId;
+    startOffset = target.offset;
+    info = { startNodeId: lastNodeId, startOffset };
+  }
 
   // Helper: find a body-level parent for insert_image/insert_table/insert_hr
-  // (these WASM methods require a body-level node)
   const getBodyNodeId = (nodeId) => {
-    // If this node is in body, return it. Otherwise find the closest body-level ancestor.
+    // Search across all page elements
+    const container = $('pageContainer');
+    if (!container) return nodeId;
     try {
-      const el = page.querySelector(`[data-node-id="${nodeId}"]`);
+      const el = container.querySelector(`[data-node-id="${nodeId}"]`);
       if (!el) return nodeId;
-      // Walk up to find a body-level node (direct child of .page-content)
       let n = el;
       while (n && n.parentElement) {
         if (n.parentElement.classList?.contains('page-content') ||
@@ -1499,49 +1742,165 @@ function pasteStructuredContent(doc, info, parsed, page) {
     return nodeId;
   };
 
+  // Helper: get last paragraph ID from WASM (not DOM)
+  const getLastParaId = () => {
+    try {
+      const allIds = JSON.parse(doc.paragraph_ids_json());
+      if (allIds.length > 0) return allIds[allIds.length - 1];
+    } catch (_) {}
+    return lastNodeId;
+  };
+
   for (let i = 0; i < elements.length; i++) {
     const el = elements[i];
 
     if (el.type === 'paragraph') {
-      try {
-        if (!firstParaHandled) {
-          // First batch: collect all consecutive paragraphs
-          firstParaHandled = true;
-          const textParas = [];
-          let j = i;
-          while (j < elements.length && elements[j].type === 'paragraph') {
-            textParas.push(elements[j]);
-            j++;
-          }
-          if (textParas.length > 0) {
-            const pasteJson = JSON.stringify({ paragraphs: textParas.map(p => ({ runs: p.runs || [], ...extractParaFmtForJson(p) })) });
-            doc.paste_formatted_runs_json(info.startNodeId, info.startOffset, pasteJson);
-            broadcastOp({ action: 'pasteFormattedRuns', nodeId: info.startNodeId, offset: info.startOffset, runsJson: pasteJson });
-            i = j - 1; // skip pasted paragraphs
-          }
-          // After paste, get fresh last paragraph ID from DOM
-          renderDocument();
-          lastNodeId = findLastParagraphId(page) || info.startNodeId;
-        } else {
-          // Subsequent paragraphs after non-paragraph elements
-          const bodyId = getBodyNodeId(lastNodeId);
-          const text = el.runs ? el.runs.map(r => r.text).join('') : '';
-          // Split at end of last paragraph to insert a new one
-          const lastEl = page.querySelector(`[data-node-id="${bodyId}"]`);
-          if (lastEl) {
-            const lastLen = Array.from(getEditableText(lastEl)).length;
-            const newId = doc.split_paragraph(bodyId, lastLen);
-            if (text) doc.insert_text_in_paragraph(newId, 0, text);
-            lastNodeId = newId;
-          }
+      if (!firstParaHandled) {
+        firstParaHandled = true;
+        // Collect consecutive paragraphs for batch paste
+        const textParas = [];
+        let j = i;
+        while (j < elements.length && elements[j].type === 'paragraph') {
+          textParas.push(elements[j]);
+          j++;
         }
-      } catch (e) { console.warn('paste paragraph:', e); }
+        if (textParas.length > 0) {
+          // Filter runs: drop empty text runs, sanitize data
+          const cleanedParas = textParas.map(p => {
+            const runs = (p.runs || []).filter(r => r.text && r.text.length > 0);
+            return { ...p, runs };
+          }).filter(p => p.runs.length > 0);
+
+          if (cleanedParas.length > 0) {
+            let richPasteOk = false;
+
+            // Sanitize runs for JSON serialization
+            const sanitizedParas = cleanedParas.map(p => {
+              const runs = (p.runs || []).map(r => {
+                const sr = { text: r.text || '' };
+                if (r.bold === true) sr.bold = true;
+                if (r.italic === true) sr.italic = true;
+                if (r.underline === true) sr.underline = true;
+                if (r.strikethrough === true) sr.strikethrough = true;
+                if (r.superscript === true) sr.superscript = true;
+                if (r.subscript === true) sr.subscript = true;
+                if (typeof r.fontSize === 'number' && r.fontSize > 0) sr.fontSize = r.fontSize;
+                if (typeof r.fontFamily === 'string' && r.fontFamily) sr.fontFamily = r.fontFamily;
+                if (typeof r.color === 'string' && r.color) sr.color = r.color;
+                if (typeof r.highlightColor === 'string' && r.highlightColor) sr.highlightColor = r.highlightColor;
+                if (typeof r.hyperlinkUrl === 'string' && r.hyperlinkUrl) sr.hyperlinkUrl = r.hyperlinkUrl;
+                return sr;
+              });
+              return { ...p, runs };
+            });
+
+            // Clamp startOffset to actual paragraph text length
+            let safeOffset = startOffset;
+            try {
+              const paraText = doc.get_paragraph_text(info.startNodeId);
+              const maxLen = paraText ? Array.from(paraText).length : 0;
+              if (safeOffset > maxLen) safeOffset = maxLen;
+            } catch (_) { safeOffset = 0; }
+
+            // Strategy 1: batch paste via paste_formatted_runs_json
+            try {
+              const pasteJson = JSON.stringify({
+                paragraphs: sanitizedParas.map(p => ({
+                  runs: p.runs,
+                  ...extractParaFmtForJson(p)
+                }))
+              });
+              doc.paste_formatted_runs_json(info.startNodeId, safeOffset, pasteJson);
+              broadcastOp({ action: 'pasteFormattedRuns', nodeId: info.startNodeId, offset: safeOffset, runsJson: pasteJson });
+              richPasteOk = true;
+              anyPasted = true;
+            } catch (e) {
+              console.error('[paste] paste_formatted_runs_json failed:', e.message || e);
+            }
+
+            // Strategy 2: plain text + per-run formatting
+            if (!richPasteOk) {
+              richPasteOk = pasteWithManualFormatting(doc, info.startNodeId, safeOffset, sanitizedParas);
+              if (richPasteOk) anyPasted = true;
+            }
+
+            // Strategy 3: plain text only (no formatting)
+            if (!richPasteOk) {
+              try {
+                const plainText = sanitizedParas.map(p => p.runs.map(r => r.text).join('')).join('\n');
+                if (plainText) {
+                  doc.paste_plain_text(info.startNodeId, safeOffset, plainText);
+                  anyPasted = true;
+                }
+              } catch (e2) {
+                try {
+                  const flatText = sanitizedParas.map(p => p.runs.map(r => r.text).join('')).join(' ');
+                  if (flatText) {
+                    doc.insert_text_in_paragraph(info.startNodeId, safeOffset, flatText);
+                    anyPasted = true;
+                  }
+                } catch (_) {}
+              }
+            }
+
+            // Apply list formatting to pasted paragraphs
+            if (anyPasted) {
+              const hasLists = cleanedParas.some(p => p.listType);
+              if (hasLists) {
+                try {
+                  const allIds = JSON.parse(doc.paragraph_ids_json());
+                  const startIdx = allIds.indexOf(info.startNodeId);
+                  if (startIdx >= 0) {
+                    for (let pi = 0; pi < cleanedParas.length; pi++) {
+                      const p = cleanedParas[pi];
+                      if (p.listType) {
+                        const paraIdx = startIdx + pi;
+                        if (paraIdx < allIds.length) {
+                          try { doc.set_list_format(allIds[paraIdx], p.listType, p.listLevel || 0); } catch (_) {}
+                        }
+                      }
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+
+          i = j - 1; // skip pasted paragraphs
+        }
+        // Get fresh last paragraph ID from WASM
+        lastNodeId = getLastParaId();
+      } else {
+        // Subsequent paragraphs after non-paragraph elements (images, tables, etc.)
+        try {
+          // Use WASM paragraph list instead of DOM to get text length
+          const paraText = doc.get_paragraph_text(lastNodeId);
+          const lastLen = paraText ? Array.from(paraText).length : 0;
+          const newId = doc.split_paragraph(lastNodeId, lastLen);
+          const text = el.runs ? el.runs.map(r => r.text).join('') : '';
+          if (text) doc.insert_text_in_paragraph(newId, 0, text);
+          lastNodeId = newId;
+          anyPasted = true;
+        } catch (e) {
+          // Fallback: append paragraph
+          try {
+            const text = el.runs ? el.runs.map(r => r.text).join('') : '';
+            const newId = doc.append_paragraph(text);
+            lastNodeId = newId;
+            anyPasted = true;
+          } catch (e2) { console.warn('paste paragraph:', e2); }
+        }
+      }
       continue;
     }
 
     if (!firstParaHandled) {
-      // Need a paragraph before we can insert non-paragraph elements
       firstParaHandled = true;
+    }
+
+    // For non-paragraph elements, ensure lastNodeId is still valid
+    if (!nodeExists(lastNodeId)) {
+      lastNodeId = getLastParaId();
     }
 
     if (el.type === 'image') {
@@ -1554,6 +1913,7 @@ function pasteStructuredContent(doc, info, parsed, page) {
             try { doc.set_image_alt_text(newId, el.alt); } catch (_) {}
           }
           lastNodeId = newId;
+          anyPasted = true;
         }
       } catch (e) { console.warn('paste image:', e); }
       continue;
@@ -1577,6 +1937,7 @@ function pasteStructuredContent(doc, info, parsed, page) {
           }
         }
         lastNodeId = tableId;
+        anyPasted = true;
       } catch (e) { console.warn('paste table:', e); }
       continue;
     }
@@ -1586,9 +1947,101 @@ function pasteStructuredContent(doc, info, parsed, page) {
         const bodyId = getBodyNodeId(lastNodeId);
         const newId = doc.insert_horizontal_rule(bodyId);
         lastNodeId = newId;
+        anyPasted = true;
       } catch (e) { console.warn('paste hr:', e); }
       continue;
     }
+  }
+
+  return anyPasted;
+}
+
+/**
+ * Fallback paste strategy: insert plain text, then apply formatting per-run
+ * using format_selection. Works when paste_formatted_runs_json fails.
+ */
+function pasteWithManualFormatting(doc, targetNodeId, offset, sanitizedParas) {
+  try {
+    // For single-paragraph paste: insert text then format each run
+    if (sanitizedParas.length === 1) {
+      const runs = sanitizedParas[0].runs;
+      const fullText = runs.map(r => r.text).join('');
+      if (!fullText) return false;
+
+      doc.insert_text_in_paragraph(targetNodeId, offset, fullText);
+
+      // Now format each run's character range
+      let runStart = offset;
+      for (const run of runs) {
+        const runLen = Array.from(run.text).length;
+        if (runLen === 0) continue;
+        const runEnd = runStart + runLen;
+        const hasFormatting = run.bold || run.italic || run.underline ||
+          run.strikethrough || run.fontSize || run.fontFamily || run.color;
+        if (hasFormatting) {
+          // Apply each formatting attribute individually
+          if (run.bold) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'bold', 'true'); } catch(_){}
+          if (run.italic) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'italic', 'true'); } catch(_){}
+          if (run.underline) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'underline', 'true'); } catch(_){}
+          if (run.strikethrough) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'strikethrough', 'true'); } catch(_){}
+          if (run.fontSize) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'fontSize', String(run.fontSize)); } catch(_){}
+          if (run.fontFamily) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'fontFamily', run.fontFamily); } catch(_){}
+          if (run.color) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'color', run.color); } catch(_){}
+          if (run.highlightColor) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'highlightColor', run.highlightColor); } catch(_){}
+          if (run.superscript) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'superscript', 'true'); } catch(_){}
+          if (run.subscript) try { doc.format_selection(targetNodeId, runStart, targetNodeId, runEnd, 'subscript', 'true'); } catch(_){}
+        }
+        runStart = runEnd;
+      }
+      return true;
+    }
+
+    // Multi-paragraph: insert as plain text with newlines, then format
+    const plainText = sanitizedParas.map(p => p.runs.map(r => r.text).join('')).join('\n');
+    if (!plainText) return false;
+
+    doc.paste_plain_text(targetNodeId, offset, plainText);
+
+    // Now apply formatting paragraph by paragraph
+    const allIds = JSON.parse(doc.paragraph_ids_json());
+    const startIdx = allIds.indexOf(targetNodeId);
+    if (startIdx < 0) return true; // text was pasted, just no formatting
+
+    let paraIdx = startIdx;
+    for (const para of sanitizedParas) {
+      if (paraIdx >= allIds.length) break;
+      const currentParaId = allIds[paraIdx];
+
+      // Determine run offset within this paragraph
+      // For first para: starts at 'offset', for subsequent: starts at 0
+      let runStart = (paraIdx === startIdx) ? offset : 0;
+
+      for (const run of para.runs) {
+        const runLen = Array.from(run.text).length;
+        if (runLen === 0) continue;
+        const runEnd = runStart + runLen;
+        const hasFormatting = run.bold || run.italic || run.underline ||
+          run.strikethrough || run.fontSize || run.fontFamily || run.color;
+        if (hasFormatting) {
+          if (run.bold) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'bold', 'true'); } catch(_){}
+          if (run.italic) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'italic', 'true'); } catch(_){}
+          if (run.underline) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'underline', 'true'); } catch(_){}
+          if (run.strikethrough) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'strikethrough', 'true'); } catch(_){}
+          if (run.fontSize) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'fontSize', String(run.fontSize)); } catch(_){}
+          if (run.fontFamily) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'fontFamily', run.fontFamily); } catch(_){}
+          if (run.color) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'color', run.color); } catch(_){}
+          if (run.highlightColor) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'highlightColor', run.highlightColor); } catch(_){}
+          if (run.superscript) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'superscript', 'true'); } catch(_){}
+          if (run.subscript) try { doc.format_selection(currentParaId, runStart, currentParaId, runEnd, 'subscript', 'true'); } catch(_){}
+        }
+        runStart = runEnd;
+      }
+      paraIdx++;
+    }
+    return true;
+  } catch (e) {
+    console.error('[paste] Manual formatting fallback failed:', e);
+    return false;
   }
 }
 
@@ -1727,6 +2180,12 @@ function walkInline(node, inherited, runs) {
   if (tag === 's' || tag === 'strike' || tag === 'del') fmt.strikethrough = true;
   if (tag === 'sup') fmt.superscript = true;
   if (tag === 'sub') fmt.subscript = true;
+  if (tag === 'a') {
+    const href = node.getAttribute('href');
+    if (href && !href.startsWith('javascript:') && !href.startsWith('#_mso')) {
+      fmt.hyperlinkUrl = href;
+    }
+  }
   if (tag === 'br') {
     // Line breaks within a block become newline text
     runs.push({ text: '\n', ...inherited });
@@ -1770,6 +2229,12 @@ function walkInline(node, inherited, runs) {
     if (style.verticalAlign === 'sub') fmt.subscript = true;
   }
 
+  // MS Word specific: mso-bidi-* styles in cssText
+  if (style && style.cssText) {
+    if (/mso-bidi-font-weight\s*:\s*bold/i.test(style.cssText)) fmt.bold = true;
+    if (/mso-bidi-font-style\s*:\s*italic/i.test(style.cssText)) fmt.italic = true;
+  }
+
   // Check for class-based formatting (some editors use classes)
   const cls = node.className || '';
   if (typeof cls === 'string') {
@@ -1793,7 +2258,8 @@ function sameFormatting(a, b) {
     (a.fontSize || null) === (b.fontSize || null) &&
     (a.fontFamily || null) === (b.fontFamily || null) &&
     (a.color || null) === (b.color || null) &&
-    (a.highlightColor || null) === (b.highlightColor || null);
+    (a.highlightColor || null) === (b.highlightColor || null) &&
+    (a.hyperlinkUrl || null) === (b.hyperlinkUrl || null);
 }
 
 function colorToHex(cssColor) {
@@ -1961,11 +2427,26 @@ function doCut() {
     broadcastOp({ action: 'deleteSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.endNodeId, endOffset: info.endOffset });
     renderDocument();
     const el = $('pageContainer')?.querySelector(`[data-node-id="${info.startNodeId}"]`);
-    if (el) setCursorAtOffset(el, info.startOffset);
-    else {
+    if (el) {
+      const content = el.closest('.page-content');
+      if (content) content.focus();
+      setCursorAtOffset(el, info.startOffset);
+    } else {
       const first = $('pageContainer')?.querySelector('[data-node-id]');
-      if (first) setCursorAtStart(first);
-      else { state.doc.append_paragraph(''); renderDocument(); }
+      if (first) {
+        const content = first.closest('.page-content');
+        if (content) content.focus();
+        setCursorAtStart(first);
+      } else {
+        state.doc.append_paragraph('');
+        renderDocument();
+        const n = $('pageContainer')?.querySelector('[data-node-id]');
+        if (n) {
+          const content = n.closest('.page-content');
+          if (content) content.focus();
+          setCursorAtStart(n);
+        }
+      }
     }
     recordUndoAction('Cut text');
     updateUndoRedo();
@@ -2288,4 +2769,117 @@ function adjustEditorZoom(delta) {
   } else {
     setZoomLevel((state.zoomLevel || 100) + delta);
   }
+}
+
+// ═══════════════════════════════════════════════════
+// E9.6: Insert Footnote / Endnote at Cursor
+// ═══════════════════════════════════════════════════
+
+function insertFootnoteAtCursor() {
+  if (!state.doc) return;
+  const info = getSelectionInfo();
+  if (!info) return;
+  const nodeId = info.startNodeId;
+  if (!nodeId) return;
+  import('./render.js').then(({ syncAllText: syncAll, renderDocument: renderDoc }) => {
+    syncAll();
+    try {
+      if (typeof state.doc.insert_footnote === 'function') {
+        state.doc.insert_footnote(nodeId, '');
+        import('./collab.js').then(({ broadcastOp: bcast }) => {
+          bcast({ action: 'insertFootnote', nodeId });
+        });
+        renderDoc();
+        import('./toolbar.js').then(({ updateUndoRedo: uur, recordUndoAction: rua }) => {
+          rua('Insert footnote');
+          uur();
+        });
+        import('./toolbar-handlers.js').then(({ announce: ann }) => { ann('Footnote inserted'); });
+      } else {
+        import('./toolbar-handlers.js').then(({ showToast: st }) => {
+          st('Footnote insertion not available in this build.', 'info');
+        });
+      }
+    } catch (e) { console.error('insert footnote:', e); }
+  });
+}
+
+function insertEndnoteAtCursor() {
+  if (!state.doc) return;
+  const info = getSelectionInfo();
+  if (!info) return;
+  const nodeId = info.startNodeId;
+  if (!nodeId) return;
+  import('./render.js').then(({ syncAllText: syncAll, renderDocument: renderDoc }) => {
+    syncAll();
+    try {
+      if (typeof state.doc.insert_endnote === 'function') {
+        state.doc.insert_endnote(nodeId, '');
+        import('./collab.js').then(({ broadcastOp: bcast }) => {
+          bcast({ action: 'insertEndnote', nodeId });
+        });
+        renderDoc();
+        import('./toolbar.js').then(({ updateUndoRedo: uur, recordUndoAction: rua }) => {
+          rua('Insert endnote');
+          uur();
+        });
+        import('./toolbar-handlers.js').then(({ announce: ann }) => { ann('Endnote inserted'); });
+      } else {
+        import('./toolbar-handlers.js').then(({ showToast: st }) => {
+          st('Endnote insertion not available in this build.', 'info');
+        });
+      }
+    } catch (e) { console.error('insert endnote:', e); }
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// E6.2: Pinch-to-Zoom (trackpad ctrl+wheel)
+// ═══════════════════════════════════════════════════
+
+export function initPinchToZoom() {
+  const canvas = $('editorCanvas');
+  if (!canvas) return;
+
+  canvas.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    // Trackpad pinch fires as ctrl+wheel
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -5 : 5;
+    setZoomLevel((state.zoomLevel || 100) + delta);
+  }, { passive: false });
+}
+
+// ═══════════════════════════════════════════════════
+// E7.2: Table Cell Navigation Announcements
+// ═══════════════════════════════════════════════════
+
+export function initTableCellAnnouncements() {
+  let _lastAnnouncedCell = null;
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const anchor = sel.anchorNode;
+    if (!anchor) return;
+    const el = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    if (!el) return;
+    const cell = el.closest('td, th');
+    if (!cell) {
+      _lastAnnouncedCell = null;
+      return;
+    }
+    if (cell === _lastAnnouncedCell) return;
+    _lastAnnouncedCell = cell;
+
+    const row = cell.parentElement;
+    const table = row?.closest('table');
+    if (!row || !table) return;
+
+    const rowIdx = Array.from(row.parentElement?.children || []).indexOf(row) + 1;
+    const colIdx = Array.from(row.children).indexOf(cell) + 1;
+    const isHeader = cell.tagName === 'TH' || row.parentElement?.tagName === 'THEAD';
+    const label = `Row ${rowIdx}, Column ${colIdx}${isHeader ? ', header row' : ''}`;
+
+    import('./toolbar-handlers.js').then(({ announce: ann }) => { ann(label); });
+  });
 }

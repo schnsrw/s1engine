@@ -1068,9 +1068,7 @@ fn write_property_change_element(
     attrs: &s1_model::AttributeMap,
     xml: &mut String,
 ) {
-    let id = attrs
-        .get_i64(&AttributeKey::RevisionId)
-        .unwrap_or(0);
+    let id = attrs.get_i64(&AttributeKey::RevisionId).unwrap_or(0);
     let author = attrs
         .get_string(&AttributeKey::RevisionAuthor)
         .unwrap_or_default();
@@ -2599,17 +2597,32 @@ mod tests {
         let body_id = doc.body_id().unwrap();
         let para_id = doc.next_id();
         let mut para = Node::new(para_id, NodeType::Paragraph);
-        para.attributes.set(AttributeKey::Alignment, AttributeValue::Alignment(Alignment::Center));
-        para.attributes.set(AttributeKey::RevisionType, AttributeValue::String("PropertyChange".into()));
-        para.attributes.set(AttributeKey::RevisionId, AttributeValue::Int(50));
-        para.attributes.set(AttributeKey::RevisionAuthor, AttributeValue::String("Alice".into()));
-        para.attributes.set(AttributeKey::RevisionDate, AttributeValue::String("2026-01-01T12:00:00Z".into()));
+        para.attributes.set(
+            AttributeKey::Alignment,
+            AttributeValue::Alignment(Alignment::Center),
+        );
+        para.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("PropertyChange".into()),
+        );
+        para.attributes
+            .set(AttributeKey::RevisionId, AttributeValue::Int(50));
+        para.attributes.set(
+            AttributeKey::RevisionAuthor,
+            AttributeValue::String("Alice".into()),
+        );
+        para.attributes.set(
+            AttributeKey::RevisionDate,
+            AttributeValue::String("2026-01-01T12:00:00Z".into()),
+        );
         doc.insert_node(body_id, 0, para).unwrap();
 
         let (xml, _, _) = write_document_xml(&doc);
 
         assert!(
-            xml.contains(r#"<w:pPrChange w:id="50" w:author="Alice" w:date="2026-01-01T12:00:00Z">"#),
+            xml.contains(
+                r#"<w:pPrChange w:id="50" w:author="Alice" w:date="2026-01-01T12:00:00Z">"#
+            ),
             "should output pPrChange: {xml}"
         );
         assert!(xml.contains("</w:pPrChange>"), "should close pPrChange");
@@ -2620,27 +2633,42 @@ mod tests {
         let mut doc = DocumentModel::new();
         let body_id = doc.body_id().unwrap();
         let table_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(table_id, NodeType::Table)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(table_id, NodeType::Table))
+            .unwrap();
 
         let row_id = doc.next_id();
-        doc.insert_node(table_id, 0, Node::new(row_id, NodeType::TableRow)).unwrap();
+        doc.insert_node(table_id, 0, Node::new(row_id, NodeType::TableRow))
+            .unwrap();
 
         let cell_id = doc.next_id();
         let mut cell = Node::new(cell_id, NodeType::TableCell);
-        cell.attributes.set(AttributeKey::RevisionType, AttributeValue::String("PropertyChange".into()));
-        cell.attributes.set(AttributeKey::RevisionId, AttributeValue::Int(60));
-        cell.attributes.set(AttributeKey::RevisionAuthor, AttributeValue::String("Bob".into()));
-        cell.attributes.set(AttributeKey::RevisionDate, AttributeValue::String("2026-02-15T08:00:00Z".into()));
+        cell.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("PropertyChange".into()),
+        );
+        cell.attributes
+            .set(AttributeKey::RevisionId, AttributeValue::Int(60));
+        cell.attributes.set(
+            AttributeKey::RevisionAuthor,
+            AttributeValue::String("Bob".into()),
+        );
+        cell.attributes.set(
+            AttributeKey::RevisionDate,
+            AttributeValue::String("2026-02-15T08:00:00Z".into()),
+        );
         doc.insert_node(row_id, 0, cell).unwrap();
 
         // Add a paragraph inside the cell (required for valid DOCX)
         let para_id = doc.next_id();
-        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         let (xml, _, _) = write_document_xml(&doc);
 
         assert!(
-            xml.contains(r#"<w:tcPrChange w:id="60" w:author="Bob" w:date="2026-02-15T08:00:00Z">"#),
+            xml.contains(
+                r#"<w:tcPrChange w:id="60" w:author="Bob" w:date="2026-02-15T08:00:00Z">"#
+            ),
             "should output tcPrChange: {xml}"
         );
     }
@@ -2650,22 +2678,36 @@ mod tests {
         let mut doc = DocumentModel::new();
         let body_id = doc.body_id().unwrap();
         let table_id = doc.next_id();
-        doc.insert_node(body_id, 0, Node::new(table_id, NodeType::Table)).unwrap();
+        doc.insert_node(body_id, 0, Node::new(table_id, NodeType::Table))
+            .unwrap();
 
         let row_id = doc.next_id();
         let mut row = Node::new(row_id, NodeType::TableRow);
-        row.attributes.set(AttributeKey::TableHeaderRow, AttributeValue::Bool(true));
-        row.attributes.set(AttributeKey::RevisionType, AttributeValue::String("PropertyChange".into()));
-        row.attributes.set(AttributeKey::RevisionId, AttributeValue::Int(70));
-        row.attributes.set(AttributeKey::RevisionAuthor, AttributeValue::String("Carol".into()));
-        row.attributes.set(AttributeKey::RevisionDate, AttributeValue::String("2026-03-10T10:00:00Z".into()));
+        row.attributes
+            .set(AttributeKey::TableHeaderRow, AttributeValue::Bool(true));
+        row.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("PropertyChange".into()),
+        );
+        row.attributes
+            .set(AttributeKey::RevisionId, AttributeValue::Int(70));
+        row.attributes.set(
+            AttributeKey::RevisionAuthor,
+            AttributeValue::String("Carol".into()),
+        );
+        row.attributes.set(
+            AttributeKey::RevisionDate,
+            AttributeValue::String("2026-03-10T10:00:00Z".into()),
+        );
         doc.insert_node(table_id, 0, row).unwrap();
 
         // Add a cell + paragraph inside
         let cell_id = doc.next_id();
-        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell)).unwrap();
+        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell))
+            .unwrap();
         let para_id = doc.next_id();
-        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         let (xml, _, _) = write_document_xml(&doc);
 
@@ -2674,7 +2716,9 @@ mod tests {
             "should output tblHeader: {xml}"
         );
         assert!(
-            xml.contains(r#"<w:trPrChange w:id="70" w:author="Carol" w:date="2026-03-10T10:00:00Z">"#),
+            xml.contains(
+                r#"<w:trPrChange w:id="70" w:author="Carol" w:date="2026-03-10T10:00:00Z">"#
+            ),
             "should output trPrChange: {xml}"
         );
     }
@@ -2686,25 +2730,44 @@ mod tests {
 
         let table_id = doc.next_id();
         let mut table = Node::new(table_id, NodeType::Table);
-        table.attributes.set(AttributeKey::TableAlignment, AttributeValue::Alignment(Alignment::Center));
-        table.attributes.set(AttributeKey::RevisionType, AttributeValue::String("PropertyChange".into()));
-        table.attributes.set(AttributeKey::RevisionId, AttributeValue::Int(80));
-        table.attributes.set(AttributeKey::RevisionAuthor, AttributeValue::String("Dave".into()));
-        table.attributes.set(AttributeKey::RevisionDate, AttributeValue::String("2026-03-12T14:00:00Z".into()));
+        table.attributes.set(
+            AttributeKey::TableAlignment,
+            AttributeValue::Alignment(Alignment::Center),
+        );
+        table.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("PropertyChange".into()),
+        );
+        table
+            .attributes
+            .set(AttributeKey::RevisionId, AttributeValue::Int(80));
+        table.attributes.set(
+            AttributeKey::RevisionAuthor,
+            AttributeValue::String("Dave".into()),
+        );
+        table.attributes.set(
+            AttributeKey::RevisionDate,
+            AttributeValue::String("2026-03-12T14:00:00Z".into()),
+        );
         doc.insert_node(body_id, 0, table).unwrap();
 
         // Add row/cell/paragraph
         let row_id = doc.next_id();
-        doc.insert_node(table_id, 0, Node::new(row_id, NodeType::TableRow)).unwrap();
+        doc.insert_node(table_id, 0, Node::new(row_id, NodeType::TableRow))
+            .unwrap();
         let cell_id = doc.next_id();
-        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell)).unwrap();
+        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell))
+            .unwrap();
         let para_id = doc.next_id();
-        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph)).unwrap();
+        doc.insert_node(cell_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
 
         let (xml, _, _) = write_document_xml(&doc);
 
         assert!(
-            xml.contains(r#"<w:tblPrChange w:id="80" w:author="Dave" w:date="2026-03-12T14:00:00Z">"#),
+            xml.contains(
+                r#"<w:tblPrChange w:id="80" w:author="Dave" w:date="2026-03-12T14:00:00Z">"#
+            ),
             "should output tblPrChange: {xml}"
         );
     }

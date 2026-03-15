@@ -7,28 +7,89 @@ use crate::error::TextError;
 use crate::font::Font;
 use crate::types::FontId;
 
+/// Embedded fallback font for WASM and headless environments.
+///
+/// This is a variable-weight Noto Sans font (OFL-licensed) that provides
+/// broad Latin, Cyrillic, Greek, and many other script coverages. It is
+/// loaded automatically in WASM builds so that text rendering works even
+/// without user-loaded fonts.
+#[cfg(feature = "embedded-font")]
+static EMBEDDED_FONT: &[u8] = include_bytes!("../fonts/NotoSans-Regular.ttf");
+
 /// Common font substitution table.
 ///
 /// Maps document fonts that are often unavailable on other platforms to
 /// widely-available alternatives. Used when the exact font isn't found.
 const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     // Microsoft Office fonts → alternatives
-    ("Calibri", &["Carlito", "Helvetica", "Arial", "Liberation Sans", "Noto Sans"]),
-    ("Cambria", &["Caladea", "Times New Roman", "Liberation Serif", "Noto Serif"]),
-    ("Consolas", &["Inconsolata", "Menlo", "DejaVu Sans Mono", "Liberation Mono"]),
-    ("Segoe UI", &["Helvetica", "Arial", "Noto Sans", "Liberation Sans"]),
+    (
+        "Calibri",
+        &[
+            "Carlito",
+            "Helvetica",
+            "Arial",
+            "Liberation Sans",
+            "Noto Sans",
+        ],
+    ),
+    (
+        "Cambria",
+        &[
+            "Caladea",
+            "Times New Roman",
+            "Liberation Serif",
+            "Noto Serif",
+        ],
+    ),
+    (
+        "Consolas",
+        &[
+            "Inconsolata",
+            "Menlo",
+            "DejaVu Sans Mono",
+            "Liberation Mono",
+        ],
+    ),
+    (
+        "Segoe UI",
+        &["Helvetica", "Arial", "Noto Sans", "Liberation Sans"],
+    ),
     ("Verdana", &["DejaVu Sans", "Liberation Sans", "Noto Sans"]),
     ("Tahoma", &["DejaVu Sans", "Liberation Sans", "Noto Sans"]),
-    ("Trebuchet MS", &["Liberation Sans", "DejaVu Sans", "Noto Sans"]),
-    ("Georgia", &["Liberation Serif", "DejaVu Serif", "Noto Serif"]),
-    ("Palatino Linotype", &["Palatino", "Liberation Serif", "Noto Serif"]),
-    ("Book Antiqua", &["Palatino", "Liberation Serif", "Noto Serif"]),
-    ("Garamond", &["EB Garamond", "Liberation Serif", "Noto Serif"]),
-    ("Century Gothic", &["URW Gothic", "Liberation Sans", "Noto Sans"]),
+    (
+        "Trebuchet MS",
+        &["Liberation Sans", "DejaVu Sans", "Noto Sans"],
+    ),
+    (
+        "Georgia",
+        &["Liberation Serif", "DejaVu Serif", "Noto Serif"],
+    ),
+    (
+        "Palatino Linotype",
+        &["Palatino", "Liberation Serif", "Noto Serif"],
+    ),
+    (
+        "Book Antiqua",
+        &["Palatino", "Liberation Serif", "Noto Serif"],
+    ),
+    (
+        "Garamond",
+        &["EB Garamond", "Liberation Serif", "Noto Serif"],
+    ),
+    (
+        "Century Gothic",
+        &["URW Gothic", "Liberation Sans", "Noto Sans"],
+    ),
     // macOS fonts → alternatives on Linux/Windows
-    ("Helvetica Neue", &["Helvetica", "Arial", "Liberation Sans", "Noto Sans"]),
+    (
+        "Helvetica Neue",
+        &["Helvetica", "Arial", "Liberation Sans", "Noto Sans"],
+    ),
     ("Helvetica", &["Arial", "Liberation Sans", "Noto Sans"]),
-    ("Times", &["Times New Roman", "Liberation Serif", "Noto Serif"]),
+    (
+        "Times",
+        &["Times New Roman", "Liberation Serif", "Noto Serif"],
+    ),
     // CJK font fallbacks
     ("SimSun", &["Noto Serif CJK SC", "WenQuanYi Zen Hei"]),
     ("SimHei", &["Noto Sans CJK SC", "WenQuanYi Zen Hei"]),
@@ -36,7 +97,10 @@ const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
     ("MS Gothic", &["Noto Sans CJK JP", "IPAGothic"]),
     ("Malgun Gothic", &["Noto Sans CJK KR"]),
     // Arabic
-    ("Arabic Typesetting", &["Noto Naskh Arabic", "Noto Sans Arabic"]),
+    (
+        "Arabic Typesetting",
+        &["Noto Naskh Arabic", "Noto Sans Arabic"],
+    ),
     ("Sakkal Majalla", &["Noto Naskh Arabic", "Noto Sans Arabic"]),
     // Indic
     ("Mangal", &["Noto Sans Devanagari", "Noto Serif Devanagari"]),
@@ -48,14 +112,34 @@ const FONT_SUBSTITUTIONS: &[(&str, &[&str])] = &[
 fn script_preferred_fonts(script: unicode_script::Script) -> &'static [&'static str] {
     use unicode_script::Script;
     match script {
-        Script::Arabic => &["Noto Naskh Arabic", "Noto Sans Arabic", "Geeza Pro", "Arial Unicode MS"],
-        Script::Hebrew => &["Noto Sans Hebrew", "Noto Serif Hebrew", "Arial Hebrew", "Arial Unicode MS"],
-        Script::Devanagari => &["Noto Sans Devanagari", "Noto Serif Devanagari", "Kohinoor Devanagari"],
+        Script::Arabic => &[
+            "Noto Naskh Arabic",
+            "Noto Sans Arabic",
+            "Geeza Pro",
+            "Arial Unicode MS",
+        ],
+        Script::Hebrew => &[
+            "Noto Sans Hebrew",
+            "Noto Serif Hebrew",
+            "Arial Hebrew",
+            "Arial Unicode MS",
+        ],
+        Script::Devanagari => &[
+            "Noto Sans Devanagari",
+            "Noto Serif Devanagari",
+            "Kohinoor Devanagari",
+        ],
         Script::Bengali => &["Noto Sans Bengali", "Noto Serif Bengali"],
         Script::Tamil => &["Noto Sans Tamil", "Noto Serif Tamil"],
         Script::Telugu => &["Noto Sans Telugu", "Noto Serif Telugu"],
         Script::Thai => &["Noto Sans Thai", "Noto Serif Thai", "Thonburi"],
-        Script::Han => &["Noto Sans CJK SC", "Noto Serif CJK SC", "PingFang SC", "Hiragino Sans", "WenQuanYi Zen Hei"],
+        Script::Han => &[
+            "Noto Sans CJK SC",
+            "Noto Serif CJK SC",
+            "PingFang SC",
+            "Hiragino Sans",
+            "WenQuanYi Zen Hei",
+        ],
         Script::Hangul => &["Noto Sans CJK KR", "Apple SD Gothic Neo"],
         Script::Hiragana | Script::Katakana => &["Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic"],
         Script::Cyrillic => &["Noto Sans", "DejaVu Sans", "Liberation Sans"],
@@ -92,16 +176,26 @@ impl std::fmt::Debug for FontDatabase {
 impl FontDatabase {
     /// Create a new font database loaded with system fonts.
     ///
-    /// On `wasm32` targets, this creates an empty database since there is no
-    /// filesystem. Use `empty()` + `load_font_data()` to add fonts manually.
+    /// On `wasm32` targets with the `embedded-font` feature enabled, the
+    /// built-in Noto Sans font is loaded automatically so that basic text
+    /// rendering works without any user-loaded fonts. Without the feature,
+    /// the database starts empty. Use `load_font_data()` to add fonts manually.
     pub fn new() -> Self {
         let mut db = fontdb::Database::new();
         #[cfg(not(target_arch = "wasm32"))]
         db.load_system_fonts();
-        Self {
+
+        #[allow(unused_mut)]
+        let mut font_db = Self {
             db,
             fallback_cache: Mutex::new(HashMap::new()),
-        }
+        };
+
+        // On WASM, load embedded fallback font if available
+        #[cfg(all(target_arch = "wasm32", feature = "embedded-font"))]
+        font_db.load_font_data(EMBEDDED_FONT.to_vec());
+
+        font_db
     }
 
     /// Create an empty font database (no system fonts loaded).
@@ -110,6 +204,24 @@ impl FontDatabase {
             db: fontdb::Database::new(),
             fallback_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Create a font database with an embedded fallback font.
+    ///
+    /// This loads a built-in font (Noto Sans) that provides broad Latin,
+    /// Cyrillic, Greek, and many other script coverages. Useful for WASM
+    /// environments where no system fonts are available, or for headless
+    /// testing.
+    ///
+    /// # Errors
+    ///
+    /// This method is only available when the `embedded-font` feature is
+    /// enabled (on by default).
+    #[cfg(feature = "embedded-font")]
+    pub fn with_embedded_fallback() -> Self {
+        let mut db = Self::empty();
+        db.load_font_data(EMBEDDED_FONT.to_vec());
+        db
     }
 
     /// Load fonts from a directory.
@@ -208,11 +320,7 @@ impl FontDatabase {
     ///
     /// Tries script-preferred fonts first (e.g., Noto Sans Arabic for Arabic
     /// characters) before falling back to a linear scan of all fonts.
-    pub fn fallback_for_script(
-        &self,
-        ch: char,
-        script: unicode_script::Script,
-    ) -> Option<FontId> {
+    pub fn fallback_for_script(&self, ch: char, script: unicode_script::Script) -> Option<FontId> {
         // Check cache first
         if let Ok(cache) = self.fallback_cache.lock() {
             if let Some(&cached) = cache.get(&ch) {
@@ -228,7 +336,9 @@ impl FontDatabase {
                     if font.has_glyph(ch) {
                         // Cache and return
                         if let Ok(mut cache) = self.fallback_cache.lock() {
-                            if cache.len() > 10_000 { cache.clear(); }
+                            if cache.len() > 10_000 {
+                                cache.clear();
+                            }
                             cache.insert(ch, Some(id));
                         }
                         return Some(id);
@@ -240,7 +350,9 @@ impl FontDatabase {
         // Fall back to general scan
         let result = self.fallback_uncached(ch);
         if let Ok(mut cache) = self.fallback_cache.lock() {
-            if cache.len() > 10_000 { cache.clear(); }
+            if cache.len() > 10_000 {
+                cache.clear();
+            }
             cache.insert(ch, result);
         }
         result
@@ -411,5 +523,49 @@ mod tests {
         // Whether it finds a font depends on the system.
         let _ = db.fallback_for_script('A', unicode_script::Script::Latin);
         let _ = db.fallback_for_script('你', unicode_script::Script::Han);
+    }
+
+    #[cfg(feature = "embedded-font")]
+    #[test]
+    fn embedded_font_loads() {
+        let db = FontDatabase::with_embedded_fallback();
+        assert!(db.len() > 0, "embedded font should load at least one face");
+    }
+
+    #[cfg(feature = "embedded-font")]
+    #[test]
+    fn embedded_font_has_basic_latin() {
+        let db = FontDatabase::with_embedded_fallback();
+        // The embedded Noto Sans font must contain basic Latin glyphs
+        let id = db.fallback('A');
+        assert!(id.is_some(), "embedded font should have glyph for 'A'");
+        let id = db.fallback('z');
+        assert!(id.is_some(), "embedded font should have glyph for 'z'");
+        let id = db.fallback('0');
+        assert!(id.is_some(), "embedded font should have glyph for '0'");
+    }
+
+    #[cfg(feature = "embedded-font")]
+    #[test]
+    fn embedded_font_findable_by_name() {
+        let db = FontDatabase::with_embedded_fallback();
+        // Should be findable as "Noto Sans"
+        let id = db.find("Noto Sans", false, false);
+        assert!(
+            id.is_some(),
+            "embedded font should be findable as 'Noto Sans'"
+        );
+    }
+
+    #[cfg(feature = "embedded-font")]
+    #[test]
+    fn embedded_font_substitution_works() {
+        let db = FontDatabase::with_embedded_fallback();
+        // Calibri should substitute to Noto Sans (last entry in substitution list)
+        let id = db.find_with_substitution("Calibri", false, false);
+        assert!(
+            id.is_some(),
+            "Calibri should substitute to embedded Noto Sans"
+        );
     }
 }

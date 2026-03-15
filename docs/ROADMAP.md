@@ -13,7 +13,8 @@ Phase 5: Production Ready   █████████████████�
 Phase 6: Fidelity & MD      ████████████████████  COMPLETE (F.1-F.7 all milestones)
 Phase 7: Hardening Plan     ████████████████████  COMPLETE (15/15 milestones + bug fixes)
 Phase 8: Editor API         ████████████████████  COMPLETE (P.1-P.5, 44 new WASM tests)
-Phase 9: Editor Demo        ████████████████░░░░  MOSTLY COMPLETE (P.6+P.7 done, P.8+P.9 planned)
+Phase 9: Editor Demo        ████████████████████  COMPLETE (P.6-P.9 all milestones)
+Phase 10: PDF Editor        ████████████████████  COMPLETE (8/8 phases)
 ```
 
 ---
@@ -773,3 +774,87 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 | Crate | Purpose |
 |---|---|
 | `pulldown-cmark` | Markdown parsing (CommonMark + GFM) |
+
+### Phase 10 Crates/Dependencies
+| Crate/Package | Purpose |
+|---|---|
+| `lopdf` | PDF reading/editing (Rust, behind `pdf-editing` feature) |
+| `pdfjs-dist` | PDF rendering in browser (npm) |
+
+---
+
+## Phase 10: PDF Editor (COMPLETE)
+
+**Completed**: 2026-03-16
+
+**Goal**: Full PDF viewing and annotation experience in the Folio editor.
+
+### Phase 10.1: PDF Viewer (COMPLETE)
+- [x] PDF.js integration with `standardFontDataUrl` configuration
+- [x] Continuous scroll rendering with lazy page loading
+- [x] Page navigation (prev/next, page info display)
+- [x] Zoom (50%-200%, fit-page, fit-width)
+- [x] Text layer with selectable text
+- [x] Page thumbnails in sidebar with scroll tracking
+- [x] Loading spinner for unrendered pages
+- [x] Hi-DPI canvas rendering
+
+### Phase 10.2: PDF Annotations (COMPLETE)
+- [x] Highlight tool (text selection -> yellow overlay)
+- [x] Comment tool (click -> inline input -> comment marker)
+- [x] Ink/draw tool (freehand on canvas, red stroke)
+- [x] Text box tool (click -> contenteditable div)
+- [x] Redact tool (click-drag -> redaction rectangle)
+- [x] Annotation panel (right sidebar, sorted by page)
+- [x] Delete annotations from panel
+- [x] Annotations auto-open panel on creation
+
+### Phase 10.3: PDF Text Editing (COMPLETE)
+- [x] Double-click on text layer opens inline editor
+- [x] Edit box positioned at text span location
+- [x] Enter commits, Escape cancels
+- [x] Text edits tracked in `state.pdfTextEdits`
+- [x] Overlay approach for saved PDFs (white rect + new text)
+
+### Phase 10.4: Rust PDF Editor (COMPLETE)
+- [x] `PdfEditor` struct in `s1-format-pdf` (behind `pdf-editing` feature)
+- [x] `lopdf` integration for PDF structure manipulation
+- [x] Page manipulation: delete, move, rotate, duplicate, extract, merge
+- [x] Annotation writing: highlight, text, ink, freetext, redact
+- [x] Form field reading and value setting
+- [x] Form flattening
+- [x] Text overlay (white rect + new text)
+- [x] 4 Rust tests passing
+
+### Phase 10.5: WASM PDF Editor (COMPLETE)
+- [x] `WasmPdfEditor` class with 20+ methods
+- [x] All page operations exposed to JS
+- [x] All annotation operations exposed to JS
+- [x] Form field JSON serialization
+- [x] Save to bytes
+
+### Phase 10.6: Document Model Annotations to PDF (COMPLETE)
+- [x] `LayoutAnnotation` type in `s1-layout`
+- [x] `collect_annotations()` in layout engine
+- [x] Comment nodes -> PDF Text annotations in writer
+- [x] Highlight runs -> PDF Highlight annotations with QuadPoints
+- [x] Per-page annotation filtering in write_page()
+
+### Phase 10.7: Editor Integration (COMPLETE)
+- [x] PDF-specific toolbar (hidden doc editor menus in PDF mode)
+- [x] Tool cursors (select, highlight, comment, draw, text, redact)
+- [x] Keyboard shortcuts (V/H/C/D/T/R + Ctrl+S)
+- [x] PDF download button
+- [x] File picker accepts .pdf
+- [x] Drag-and-drop PDF opening
+- [x] Welcome screen updated for PDF
+
+### Phase 10.8: Quality & Polish (COMPLETE)
+- [x] Fix ArrayBuffer detach error on open
+- [x] Fix corrupted PDF download
+- [x] Font name XSS sanitization in text layer
+- [x] Comment input replaces browser prompt()
+- [x] Outside-click closes comment input
+- [x] Annotations preserved across view switches
+- [x] Signature canvas hi-DPI scaling
+- [x] Text layer opacity improved for selection visibility

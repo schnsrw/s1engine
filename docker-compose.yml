@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  s1-editor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      - PORT=8787
+      - PUBLIC_DIR=/app/public
+      - DATA_DIR=/app/data
+      - JWT_SECRET=${JWT_SECRET:-}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    volumes:
+      - s1-editor-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  s1-editor-data:

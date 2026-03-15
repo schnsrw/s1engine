@@ -133,10 +133,14 @@ function connect(url) {
     }));
 
     // Flush offline buffer
-    for (const op of offlineBuffer) {
-      ws.send(JSON.stringify({ type: 'op', room: roomId, data: JSON.stringify(op) }));
+    if (offlineBuffer.length > 0) {
+      updateSyncStatus('syncing');
+      for (const op of offlineBuffer) {
+        ws.send(JSON.stringify({ type: 'op', room: roomId, data: JSON.stringify(op) }));
+      }
+      offlineBuffer = [];
     }
-    offlineBuffer = [];
+    updateSyncStatus('synced');
   };
 
   ws.onmessage = (event) => {
@@ -149,6 +153,7 @@ function connect(url) {
   ws.onclose = () => {
     connected = false;
     updateConnectionStatus('disconnected');
+    updateSyncStatus('offline');
     if (roomId) scheduleReconnect(url);
   };
 
@@ -180,7 +185,31 @@ function sendOp(opData) {
       offlineBuffer.push(opData);
       console.warn('Offline buffer limit reached. Some changes may not sync when reconnected.');
     }
+    // Update offline pending count in sync status
+    updateSyncStatus('offline');
   }
+}
+
+/**
+ * Update the sync status indicator in the status bar.
+ * @param {'synced'|'syncing'|'offline'} status
+ */
+function updateSyncStatus(status) {
+  const syncEl = $('collabSyncStatus');
+  if (!syncEl || !roomId) return;
+
+  if (status === 'synced') {
+    syncEl.textContent = 'Synced';
+    syncEl.className = 'collab-sync-status synced';
+  } else if (status === 'syncing') {
+    syncEl.textContent = 'Syncing...';
+    syncEl.className = 'collab-sync-status syncing';
+  } else if (status === 'offline') {
+    const pending = offlineBuffer.length;
+    syncEl.textContent = pending > 0 ? `Offline (${pending} pending)` : 'Offline';
+    syncEl.className = 'collab-sync-status offline';
+  }
+  syncEl.style.display = 'inline-flex';
 }
 
 // ─── Message Handlers ─────────────────────────────────
@@ -615,17 +644,39 @@ function broadcastCursor() {
   }
   if (!node || !node.dataset?.nodeId) return;
 
+  // Build awareness payload including selection range when present
+  const payload = {
+    peerId,
+    nodeId: node.dataset.nodeId,
+    offset: sel.anchorOffset,
+    userName,
+    userColor,
+  };
+
+  // Include selection range if the user has a non-collapsed selection
+  if (!sel.isCollapsed && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    let startNode = range.startContainer;
+    while (startNode && startNode !== document && !startNode.dataset?.nodeId) {
+      startNode = startNode.parentElement;
+    }
+    let endNode = range.endContainer;
+    while (endNode && endNode !== document && !endNode.dataset?.nodeId) {
+      endNode = endNode.parentElement;
+    }
+    if (startNode?.dataset?.nodeId && endNode?.dataset?.nodeId) {
+      payload.selStartNodeId = startNode.dataset.nodeId;
+      payload.selStartOffset = range.startOffset;
+      payload.selEndNodeId = endNode.dataset.nodeId;
+      payload.selEndOffset = range.endOffset;
+    }
+  }
+
   try {
     ws.send(JSON.stringify({
       type: 'awareness',
       room: roomId,
-      data: JSON.stringify({
-        peerId,
-        nodeId: node.dataset.nodeId,
-        offset: sel.anchorOffset,
-        userName,
-        userColor,
-      }),
+      data: JSON.stringify(payload),
     }));
   } catch (_) {}
 }
@@ -659,6 +710,7 @@ function removePeer(pid) {
   peers.delete(pid);
   const el = document.getElementById(`peer-cursor-${pid}`);
   if (el) el.remove();
+  clearPeerSelection(pid);
   updatePeerCount();
 }
 
@@ -668,6 +720,9 @@ function renderPeerCursor(cursor) {
   // Remove old cursor for this peer
   const oldEl = document.getElementById(`peer-cursor-${cursor.peerId}`);
   if (oldEl) oldEl.remove();
+
+  // Remove old selection highlights for this peer
+  clearPeerSelection(cursor.peerId);
 
   const page = $('pageContainer');
   if (!page) return;
@@ -714,15 +769,77 @@ function renderPeerCursor(cursor) {
   paraEl.style.position = 'relative';
   paraEl.appendChild(cursorEl);
 
+  // Render peer selection highlights if selection data is present
+  if (cursor.selStartNodeId && cursor.selEndNodeId) {
+    renderPeerSelection(cursor);
+  }
+
   // Auto-remove after 5s if no update
   setTimeout(() => {
     const el = document.getElementById(`peer-cursor-${cursor.peerId}`);
     if (el) el.remove();
+    clearPeerSelection(cursor.peerId);
   }, 5000);
+}
+
+/**
+ * Render semi-transparent selection highlights for a peer's selected text range.
+ * Highlights use the peer's color at 20% opacity, positioned as overlays.
+ */
+function renderPeerSelection(cursor) {
+  const page = $('pageContainer');
+  if (!page) return;
+
+  const color = cursor.userColor || '#999';
+  // Parse hex color to rgba at 20% opacity
+  const rgba = hexToRgba(color, 0.2);
+
+  // Collect all paragraph elements between start and end node (inclusive)
+  const allParas = Array.from(page.querySelectorAll('[data-node-id]'));
+  const startIdx = allParas.findIndex(el => el.dataset.nodeId === cursor.selStartNodeId);
+  const endIdx = allParas.findIndex(el => el.dataset.nodeId === cursor.selEndNodeId);
+  if (startIdx < 0 || endIdx < 0) return;
+
+  const lo = Math.min(startIdx, endIdx);
+  const hi = Math.max(startIdx, endIdx);
+
+  for (let i = lo; i <= hi; i++) {
+    const paraEl = allParas[i];
+    paraEl.style.position = 'relative';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'peer-selection-highlight';
+    overlay.dataset.peerId = cursor.peerId;
+    overlay.style.cssText = `
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: ${rgba}; pointer-events: none; z-index: 1;
+      border-radius: 2px;
+    `;
+    paraEl.appendChild(overlay);
+  }
+}
+
+/**
+ * Remove all selection highlight overlays for a specific peer.
+ */
+function clearPeerSelection(peerId) {
+  document.querySelectorAll(`.peer-selection-highlight[data-peer-id="${peerId}"]`).forEach(el => el.remove());
+}
+
+/**
+ * Convert a hex color string to rgba() with given alpha.
+ */
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16) || 0;
+  const g = parseInt(h.substring(2, 4), 16) || 0;
+  const b = parseInt(h.substring(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function clearPeerCursors() {
   document.querySelectorAll('.peer-cursor').forEach(el => el.remove());
+  document.querySelectorAll('.peer-selection-highlight').forEach(el => el.remove());
   peers.clear();
   updatePeerCount();
 }
@@ -855,9 +972,11 @@ export function showShareDialog() {
     return;
   }
 
-  // Generate a room ID and shareable URL
+  // Generate a room ID and shareable URL with permission level
   const generatedRoom = Math.random().toString(36).substring(2, 10);
-  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}`;
+  const permSelect = $('sharePermission');
+  const access = permSelect ? permSelect.value : 'edit';
+  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
 
   // Populate modal fields
   const urlInput = $('shareUrlInput');
@@ -931,12 +1050,14 @@ function updateSharePeerList() {
     return;
   }
 
-  // Show self
+  // Show self at top with "(you)" label and editing status
   if (roomId) {
     const self = document.createElement('div');
     self.className = 'share-peer-item';
     self.innerHTML = `<span class="share-peer-dot" style="background:${userColor}"></span>
-      <span class="share-peer-name">${userName} (you)</span>`;
+      <span class="share-peer-name">${userName}</span>
+      <span class="share-peer-you">(you)</span>
+      <span class="share-peer-status">editing</span>`;
     list.appendChild(self);
   }
 
@@ -944,7 +1065,8 @@ function updateSharePeerList() {
     const el = document.createElement('div');
     el.className = 'share-peer-item';
     el.innerHTML = `<span class="share-peer-dot" style="background:${p.userColor || '#999'}"></span>
-      <span class="share-peer-name">${p.userName || 'Anonymous'}</span>`;
+      <span class="share-peer-name">${p.userName || 'Anonymous'}</span>
+      <span class="share-peer-status">editing</span>`;
     list.appendChild(el);
   }
 
