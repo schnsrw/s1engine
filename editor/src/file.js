@@ -435,9 +435,10 @@ export async function openFile(bytes, name) {
       // Set initial tool cursor
       const container = $('pdfCanvasContainer');
       if (container) container.dataset.tool = 'select';
-      // Copy bytes before PDF.js consumes the buffer
-      state.pdfBytes = new Uint8Array(bytes);
-      await state.pdfViewer.open(state.pdfBytes);
+      // Make independent copies — PDF.js may transfer/detach the buffer it receives
+      const pdfData = bytes.slice(0); // copy for PDF.js
+      state.pdfBytes = bytes.slice(0); // clean copy for download
+      await state.pdfViewer.open(pdfData);
       state.pdfCurrentPage = 1;
       state.pdfModified = false;
       if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
@@ -459,8 +460,17 @@ export async function openFile(bytes, name) {
         });
       } catch (err) { console.warn('PDF tools init:', err); }
     } catch (e) {
-      showToast('Failed to open PDF: ' + e.message, 'error');
-      console.error(e);
+      console.error('PDF open error:', e);
+      // If PDF.js fails, show a clear error and reset UI
+      const msg = e?.message || String(e);
+      if (msg.includes('InvalidPDF') || msg.includes('Invalid PDF')) {
+        showToast('This file is not a valid PDF or is corrupted', 'error');
+      } else {
+        showToast('Failed to open PDF: ' + msg, 'error');
+      }
+      // Reset to welcome screen
+      switchView('editor');
+      $('welcomeScreen').style.display = '';
     }
     return;
   }

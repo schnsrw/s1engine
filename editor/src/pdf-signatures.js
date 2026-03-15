@@ -286,7 +286,7 @@ function onPlacementClick(e) {
     _placementPreview.style.height = height + 'px';
   };
 
-  const onUp = (ev) => {
+  const onUp = async (ev) => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
 
@@ -310,8 +310,8 @@ function onPlacementClick(e) {
     _placementPreview.style.width = width + 'px';
     _placementPreview.style.height = height + 'px';
 
-    // Store as stamp annotation
-    const { PdfAnnotation } = getAnnotationClass();
+    // Store as stamp annotation (use shared class from pdf-annotations)
+    const { PdfAnnotation } = await import('./pdf-annotations.js');
     const ann = new PdfAnnotation('stamp', pageNum, {
       x: left,
       y: top,
@@ -337,23 +337,6 @@ function onPlacementClick(e) {
 
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
-}
-
-// Helper to create annotations without circular import
-function getAnnotationClass() {
-  class PdfAnnotation {
-    constructor(type, pageNum, props = {}) {
-      this.id = crypto.randomUUID();
-      this.type = type;
-      this.pageNum = pageNum;
-      this.created = new Date().toISOString();
-      this.author = 'User';
-      this.color = '#000000';
-      this.opacity = 1.0;
-      this.props = props;
-    }
-  }
-  return { PdfAnnotation };
 }
 
 // ─── Digital Signature Modal ─────────────────────────

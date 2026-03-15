@@ -442,6 +442,8 @@ export function initToolbar() {
   if ($('btnPages')) $('btnPages').addEventListener('click', () => {
     togglePagesPanel();
   });
+  // Pages panel tabs (Pages / Outline)
+  initPagesPanelTabs();
 
   // Find toolbar button
   $('btnFind').addEventListener('click', () => {
@@ -515,6 +517,21 @@ export function initToolbar() {
   if ($('menuShowPages')) $('menuShowPages').addEventListener('click', () => {
     closeAllMenus();
     togglePagesPanel();
+  });
+  // View → Document Outline toggle (opens left panel on Outline tab)
+  if ($('menuShowOutline')) $('menuShowOutline').addEventListener('click', () => {
+    closeAllMenus();
+    const panel = $('pagesPanel');
+    if (!panel) return;
+    // Switch to outline tab
+    panel.querySelectorAll('.pages-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+    panel.querySelectorAll('.pages-tab-content').forEach(c => c.classList.remove('active'));
+    const outlineTab = panel.querySelector('.pages-tab[data-tab="outline"]');
+    const outlineContent = panel.querySelector('.pages-tab-content[data-tab="outline"]');
+    if (outlineTab) { outlineTab.classList.add('active'); outlineTab.setAttribute('aria-selected', 'true'); }
+    if (outlineContent) outlineContent.classList.add('active');
+    if (!panel.classList.contains('show')) panel.classList.add('show');
+    renderOutline();
   });
   // View → Comments Panel toggle
   if ($('menuShowComments')) $('menuShowComments').addEventListener('click', () => {
@@ -3685,60 +3702,95 @@ function insertMention(textareaEl, atPos, name) {
   textareaEl.focus();
 }
 
-// ── Pages Panel — Thumbnail sidebar ─────────────────────────────
+// ── Left Sidebar — Pages + Outline ──────────────────────────────
+
+let _scrollTrackingSetup = false;
+
 function togglePagesPanel() {
   const panel = $('pagesPanel');
   if (!panel) return;
   panel.classList.toggle('show');
-  if (panel.classList.contains('show')) renderPageThumbnails();
+  if (panel.classList.contains('show')) {
+    const activeTab = panel.querySelector('.pages-tab.active');
+    if (activeTab?.dataset.tab === 'pages') renderPageThumbnails();
+    else renderOutline();
+  }
 }
 
-/** Render mini page thumbnails in the pages sidebar. */
+/** Wire up tab switching in the left panel. */
+function initPagesPanelTabs() {
+  const panel = $('pagesPanel');
+  if (!panel) return;
+  panel.querySelectorAll('.pages-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      panel.querySelectorAll('.pages-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+      panel.querySelectorAll('.pages-tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
+      const target = panel.querySelector(`.pages-tab-content[data-tab="${tab.dataset.tab}"]`);
+      if (target) target.classList.add('active');
+      if (tab.dataset.tab === 'pages') renderPageThumbnails();
+      else renderOutline();
+    });
+  });
+}
+
+// ── Page Thumbnails (real DOM clone, CSS-scaled) ────────────────
+
 function renderPageThumbnails() {
   const list = $('pagesList');
   const pageContainer = $('pageContainer');
   if (!list || !pageContainer) return;
 
-  const pages = pageContainer.querySelectorAll('.s1-page');
+  const pages = pageContainer.querySelectorAll('.doc-page, .s1-page');
   if (!pages.length) {
-    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">No pages to display</div>';
+    list.innerHTML = '<div style="text-align:center;padding:30px 12px;color:var(--text-muted);font-size:12px">No pages to display</div>';
     return;
   }
 
   list.innerHTML = '';
-  const THUMB_WIDTH = 148; // px width for thumbnails
+  const THUMB_WIDTH = 156; // px
 
   pages.forEach((page, i) => {
     const thumb = document.createElement('div');
     thumb.className = 'page-thumb';
-    thumb.title = `Page ${i + 1}`;
+    thumb.title = `Page ${i + 1} — click to scroll`;
     thumb.dataset.pageIndex = i;
 
-    // Create a scaled-down canvas snapshot of the page
-    const canvas = document.createElement('canvas');
-    canvas.className = 'page-thumb-canvas';
-
-    // Get page dimensions from the s1-page style
-    const pageW = parseFloat(page.style.width) || 612;
-    const pageH = parseFloat(page.style.height) || 792;
+    // Clone the page DOM and scale it down with CSS transform
+    const pageW = page.offsetWidth || 816;
+    const pageH = page.offsetHeight || 1056;
     const scale = THUMB_WIDTH / pageW;
-    const thumbH = pageH * scale;
+    const thumbH = Math.round(pageH * scale);
 
-    canvas.width = THUMB_WIDTH * 2; // retina
-    canvas.height = thumbH * 2;
-    canvas.style.width = THUMB_WIDTH + 'px';
-    canvas.style.height = Math.round(thumbH) + 'px';
+    const inner = document.createElement('div');
+    inner.className = 'page-thumb-inner';
+    inner.style.width = THUMB_WIDTH + 'px';
+    inner.style.height = thumbH + 'px';
 
-    // Draw a white background then rasterize the page via html2canvas-lite approach
-    const ctx = canvas.getContext('2d');
-    ctx.scale(2, 2);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, THUMB_WIDTH, thumbH);
+    const clone = page.cloneNode(true);
+    // Strip contenteditable / interactive attributes from clone
+    clone.removeAttribute('contenteditable');
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    clone.querySelectorAll('input, textarea, button, select').forEach(el => el.remove());
 
-    // Simple rasterization: draw text content as gray lines (fast, no external lib)
-    drawMiniPage(ctx, page, THUMB_WIDTH, thumbH, scale);
-
-    thumb.appendChild(canvas);
+    // Apply CSS transform to scale down
+    clone.style.cssText = `
+      transform: scale(${scale});
+      transform-origin: top left;
+      width: ${pageW}px;
+      height: ${pageH}px;
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+      box-shadow: none;
+      margin: 0;
+      overflow: hidden;
+    `;
+    inner.style.position = 'relative';
+    inner.style.overflow = 'hidden';
+    inner.appendChild(clone);
+    thumb.appendChild(inner);
 
     // Page number label
     const label = document.createElement('div');
@@ -3746,10 +3798,9 @@ function renderPageThumbnails() {
     label.textContent = i + 1;
     thumb.appendChild(label);
 
-    // Click to scroll to page
+    // Click to scroll
     thumb.addEventListener('click', () => {
       page.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // Highlight active
       list.querySelectorAll('.page-thumb').forEach(t => t.classList.remove('active'));
       thumb.classList.add('active');
     });
@@ -3757,87 +3808,19 @@ function renderPageThumbnails() {
     list.appendChild(thumb);
   });
 
-  // Mark first page as active
+  // Mark first as active
   const first = list.querySelector('.page-thumb');
   if (first) first.classList.add('active');
 
-  // Update active thumb on scroll
-  setupPageScrollTracking(pageContainer, list);
+  // Setup scroll tracking (once)
+  if (!_scrollTrackingSetup) {
+    _scrollTrackingSetup = true;
+    setupPageScrollTracking();
+  }
 }
 
-/** Draw a simplified mini representation of a page for the thumbnail. */
-function drawMiniPage(ctx, page, thumbW, thumbH, scale) {
-  // Draw blocks as simplified gray rectangles / text lines
-  const blocks = page.querySelectorAll('.s1-block');
-  ctx.fillStyle = '#666';
-
-  blocks.forEach(block => {
-    const style = block.style;
-    const bx = (parseFloat(style.left) || 0) * scale;
-    const by = (parseFloat(style.top) || 0) * scale;
-    const bw = (parseFloat(style.width) || 100) * scale;
-
-    // Draw each line of text as a thin gray bar
-    const text = block.textContent || '';
-    if (!text.trim()) return;
-
-    const lines = block.querySelectorAll('span, div');
-    if (lines.length > 0) {
-      lines.forEach(line => {
-        const lt = line.textContent || '';
-        if (!lt.trim()) return;
-        const lStyle = line.style;
-        const ly = (parseFloat(lStyle.top) || 0) * scale;
-        const lw = Math.min(lt.length * 1.2 * scale, bw);
-        const lh = Math.max(2, 3 * scale);
-        ctx.globalAlpha = 0.35;
-        ctx.fillRect(bx, by + ly, lw, lh);
-      });
-    } else {
-      // No child spans — draw a single bar for the block text
-      const lh = Math.max(2, 3 * scale);
-      const lw = Math.min(text.length * 1.2 * scale, bw);
-      ctx.globalAlpha = 0.35;
-      ctx.fillRect(bx, by, lw, lh);
-    }
-  });
-
-  ctx.globalAlpha = 1.0;
-
-  // Draw images as light blue rectangles
-  const images = page.querySelectorAll('img');
-  images.forEach(img => {
-    const parent = img.closest('.s1-block');
-    if (!parent) return;
-    const ps = parent.style;
-    const ix = (parseFloat(ps.left) || 0) * scale;
-    const iy = (parseFloat(ps.top) || 0) * scale;
-    const iw = (parseFloat(ps.width) || 50) * scale;
-    const ih = (parseFloat(img.style.height || img.height) || 50) * scale;
-    ctx.fillStyle = '#c8ddf0';
-    ctx.fillRect(ix, iy, iw, ih);
-    ctx.strokeStyle = '#8ab4d6';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(ix, iy, iw, ih);
-    ctx.fillStyle = '#666';
-  });
-
-  // Draw tables as grid outlines
-  const tables = page.querySelectorAll('.s1-table');
-  tables.forEach(table => {
-    const ts = table.style;
-    const tx = (parseFloat(ts.left) || 0) * scale;
-    const ty = (parseFloat(ts.top) || 0) * scale;
-    const tw = (parseFloat(ts.width) || 200) * scale;
-    const th = (parseFloat(ts.height) || 50) * scale;
-    ctx.strokeStyle = '#aaa';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(tx, ty, tw, th);
-  });
-}
-
-/** Track scroll position to highlight the active page thumbnail. */
-function setupPageScrollTracking(pageContainer, thumbList) {
+/** Track scroll to highlight active page thumb + outline heading. */
+function setupPageScrollTracking() {
   const canvas = $('editorCanvas');
   if (!canvas) return;
 
@@ -3847,30 +3830,96 @@ function setupPageScrollTracking(pageContainer, thumbList) {
     ticking = true;
     requestAnimationFrame(() => {
       ticking = false;
-      const pages = pageContainer.querySelectorAll('.s1-page');
+      const pageContainer = $('pageContainer');
+      if (!pageContainer) return;
+
+      const pages = pageContainer.querySelectorAll('.doc-page, .s1-page');
       const scrollTop = canvas.scrollTop;
       const viewMid = scrollTop + canvas.clientHeight / 3;
 
+      // Update page thumbnails
       let activeIdx = 0;
       pages.forEach((page, i) => {
         if (page.offsetTop <= viewMid) activeIdx = i;
       });
+      const thumbList = $('pagesList');
+      if (thumbList) {
+        thumbList.querySelectorAll('.page-thumb').forEach((t, i) => {
+          const wasActive = t.classList.contains('active');
+          t.classList.toggle('active', i === activeIdx);
+          if (i === activeIdx && !wasActive) {
+            t.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        });
+      }
 
-      thumbList.querySelectorAll('.page-thumb').forEach((t, i) => {
-        t.classList.toggle('active', i === activeIdx);
-        if (i === activeIdx) {
-          // Ensure active thumb is visible in sidebar
-          t.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
-      });
+      // Update outline active heading
+      const outlineList = $('outlineList');
+      if (outlineList && outlineList.children.length) {
+        const headings = pageContainer.querySelectorAll('h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
+        let activeHeadingId = null;
+        headings.forEach(h => {
+          const rect = h.getBoundingClientRect();
+          const canvasRect = canvas.getBoundingClientRect();
+          if (rect.top - canvasRect.top <= canvas.clientHeight / 3) {
+            activeHeadingId = h.dataset.nodeId;
+          }
+        });
+        outlineList.querySelectorAll('.outline-item').forEach(item => {
+          item.classList.toggle('active', item.dataset.nodeId === activeHeadingId);
+        });
+      }
     });
   });
 }
 
-/** Re-render page thumbnails after document changes (called from render.js). */
+// ── Outline (Table of Contents) ─────────────────────────────────
+
+function renderOutline() {
+  const list = $('outlineList');
+  const pageContainer = $('pageContainer');
+  if (!list || !pageContainer) return;
+
+  const headings = pageContainer.querySelectorAll('h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
+
+  if (!headings.length) {
+    list.innerHTML = '<div class="outline-empty">No headings found.<br><br>Add headings (H1\u2013H6) to your document to see the outline here.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  headings.forEach(h => {
+    const level = parseInt(h.tagName[1], 10);
+    const text = h.textContent.trim();
+    if (!text) return;
+
+    const item = document.createElement('div');
+    item.className = 'outline-item';
+    item.dataset.level = level;
+    item.dataset.nodeId = h.dataset.nodeId || '';
+    item.textContent = text;
+    item.title = text;
+
+    item.addEventListener('click', () => {
+      h.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Brief highlight
+      h.style.transition = 'background 0.3s';
+      h.style.background = 'rgba(26, 115, 232, 0.12)';
+      setTimeout(() => { h.style.background = ''; }, 1500);
+      // Mark active
+      list.querySelectorAll('.outline-item').forEach(it => it.classList.remove('active'));
+      item.classList.add('active');
+    });
+
+    list.appendChild(item);
+  });
+}
+
+/** Re-render page thumbnails / outline after document changes. */
 export function refreshPageThumbnails() {
   const panel = $('pagesPanel');
-  if (panel && panel.classList.contains('show')) {
-    renderPageThumbnails();
-  }
+  if (!panel || !panel.classList.contains('show')) return;
+  const activeTab = panel.querySelector('.pages-tab.active');
+  if (activeTab?.dataset.tab === 'pages') renderPageThumbnails();
+  else renderOutline();
 }

@@ -174,18 +174,116 @@ function initPdfToolbar() {
     });
   });
 
-  // Download PDF button
-  $('pdfSave')?.addEventListener('click', () => {
+  // Download PDF button — bake annotations into PDF via WASM editor, then download
+  $('pdfSave')?.addEventListener('click', async () => {
     if (!state.pdfBytes) return;
-    const blob = new Blob([state.pdfBytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = ($('docName').value || 'document') + '.pdf';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      let outputBytes = state.pdfBytes;
+
+      // If there are annotations or text edits, bake them into the PDF
+      if (state.pdfAnnotations.length > 0 || state.pdfTextEdits.length > 0) {
+        const wasm = await import('../wasm-pkg/s1engine_wasm.js');
+        const editor = wasm.WasmPdfEditor.open(state.pdfBytes);
+
+        // Apply annotations
+        for (const ann of state.pdfAnnotations) {
+          const page = ann.pageNum - 1; // 0-indexed for WASM
+          try {
+            switch (ann.type) {
+              case 'highlight':
+                if (ann.props.quads?.length) {
+                  // Flatten quads to [x1,y1,x2,y2,...] for WASM
+                  const quads = [];
+                  for (const q of ann.props.quads) {
+                    quads.push(q.x, q.y, q.x + q.width, q.y, q.x, q.y + q.height, q.x + q.width, q.y + q.height);
+                  }
+                  editor.add_highlight_annotation(page, new Float64Array(quads), 1.0, 0.92, 0.23, ann.author || 'User', ann.props.selectedText || '');
+                }
+                break;
+              case 'comment':
+                editor.add_text_annotation(page, ann.props.x, ann.props.y, ann.author || 'User', ann.props.content || '');
+                break;
+              case 'ink':
+                if (ann.props.paths?.[0]?.length) {
+                  const pts = [];
+                  for (const p of ann.props.paths[0]) { pts.push(p.x, p.y); }
+                  editor.add_ink_annotation(page, new Float64Array(pts), 0.85, 0.07, 0.14, ann.props.strokeWidth || 2);
+                }
+                break;
+              case 'text':
+                editor.add_freetext_annotation(page, ann.props.x, ann.props.y, ann.props.width || 100, ann.props.height || 20, ann.props.content || '', ann.props.fontSize || 12);
+                break;
+              case 'redact':
+                for (const r of (ann.props.rects || [])) {
+                  editor.add_redaction(page, r.x, r.y, r.width, r.height);
+                }
+                break;
+              case 'stamp':
+                // Signatures/stamps — add as freetext annotation with "[Signature]" marker
+                editor.add_freetext_annotation(page, ann.props.x, ann.props.y, ann.props.width || 150, ann.props.height || 60, '[Signature]', 12);
+                break;
+            }
+          } catch (err) {
+            console.warn(`Failed to write ${ann.type} annotation:`, err);
+          }
+        }
+
+        // Apply text edits (overlay approach)
+        for (const edit of state.pdfTextEdits) {
+          try {
+            const page = edit.pageNum - 1;
+            const p = edit.position;
+            editor.add_white_rect(page, p.x, p.y, p.width, p.height);
+            editor.add_text_overlay(page, p.x, p.y, p.width, p.height, edit.newText, edit.fontInfo?.size || 12);
+          } catch (err) {
+            console.warn('Failed to write text edit:', err);
+          }
+        }
+
+        outputBytes = editor.save();
+        editor.free();
+      }
+
+      // Download
+      const blob = new Blob([outputBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ($('docName').value || 'document') + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      state.pdfModified = false;
+
+      const { showToast } = await import('./toolbar-handlers.js');
+      showToast('PDF saved with annotations');
+    } catch (err) {
+      console.error('PDF save error:', err);
+      // Fallback: download original without annotations
+      const blob = new Blob([state.pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ($('docName').value || 'document') + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      const { showToast } = await import('./toolbar-handlers.js');
+      showToast('Saved without annotations (WASM editor unavailable)', 'error');
+    }
+  });
+
+  // Signature button — opens signature creation modal
+  $('pdfToolSignature')?.addEventListener('click', async () => {
+    try {
+      const { openSignatureModal } = await import('./pdf-signatures.js');
+      openSignatureModal();
+    } catch (err) {
+      console.error('Signature module error:', err);
+    }
   });
 
   // Annotations panel close

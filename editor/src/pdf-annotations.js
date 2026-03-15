@@ -208,13 +208,14 @@ function startDrawing(page) {
   _drawingPath = [{ x: page.x, y: page.y }];
 
   drawCanvas.style.pointerEvents = 'auto';
-  const dpr = window.devicePixelRatio || 1;
+  // The canvas context was already scaled by dpr during page render,
+  // so we draw in CSS-pixel coordinates directly (no dpr multiply).
   _drawingCtx.strokeStyle = _drawColor;
-  _drawingCtx.lineWidth = _drawWidth * dpr;
+  _drawingCtx.lineWidth = _drawWidth;
   _drawingCtx.lineCap = 'round';
   _drawingCtx.lineJoin = 'round';
   _drawingCtx.beginPath();
-  _drawingCtx.moveTo(page.x * dpr, page.y * dpr);
+  _drawingCtx.moveTo(page.x, page.y);
 }
 
 function continueDrawing(e) {
@@ -224,13 +225,12 @@ function continueDrawing(e) {
   const rect = pageEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const dpr = window.devicePixelRatio || 1;
 
   _drawingPath.push({ x, y });
-  _drawingCtx.lineTo(x * dpr, y * dpr);
+  _drawingCtx.lineTo(x, y);
   _drawingCtx.stroke();
   _drawingCtx.beginPath();
-  _drawingCtx.moveTo(x * dpr, y * dpr);
+  _drawingCtx.moveTo(x, y);
 }
 
 function endDrawing(e) {

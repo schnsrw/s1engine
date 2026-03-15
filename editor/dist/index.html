@@ -12,8 +12,8 @@
   <!-- KaTeX — equation rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script type="module" crossorigin src="/assets/index-q4pjmLMT.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-Cp8hv33o.css">
+  <script type="module" crossorigin src="/assets/index-CV7M49U3.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-g0AbEQmH.css">
 </head>
 <body>
 <div class="app" id="app">
@@ -76,6 +76,7 @@
         <button class="app-menu-entry tab-menu-entry" data-view="editor" role="menuitem" tabindex="-1"><span class="msi">edit</span> Editor</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuShowPages" role="menuitem" tabindex="-1"><span class="msi">view_sidebar</span> Pages Panel</button>
+        <button class="app-menu-entry" id="menuShowOutline" role="menuitem" tabindex="-1"><span class="msi">toc</span> Document Outline</button>
         <button class="app-menu-entry" id="menuShowComments" role="menuitem" tabindex="-1"><span class="msi">comment</span> Comments Panel</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuZoomIn" role="menuitem" tabindex="-1"><span class="msi">zoom_in</span> Zoom In <span class="shortcut">Ctrl++</span></button>
@@ -374,13 +375,21 @@
   <!-- Editor Wrapper — Pages sidebar | Canvas | Comments panel -->
   <div class="editor-wrapper" id="editorWrapper">
 
-    <!-- Pages Sidebar (left) -->
-    <div class="pages-panel" id="pagesPanel" role="complementary" aria-label="Page thumbnails">
+    <!-- Left Sidebar: Pages + Outline (TOC) -->
+    <div class="pages-panel" id="pagesPanel" role="complementary" aria-label="Document navigation">
       <div class="pages-header">
-        <h3>Pages</h3>
-        <button class="pages-close" id="pagesPanelClose" aria-label="Close pages panel" title="Close pages panel"><span class="msi">close</span></button>
+        <div class="pages-tabs" role="tablist">
+          <button class="pages-tab active" data-tab="pages" role="tab" aria-selected="true" title="Page thumbnails">Pages</button>
+          <button class="pages-tab" data-tab="outline" role="tab" aria-selected="false" title="Document outline">Outline</button>
+        </div>
+        <button class="pages-close" id="pagesPanelClose" aria-label="Close panel" title="Close panel"><span class="msi">close</span></button>
       </div>
-      <div class="pages-list" id="pagesList"></div>
+      <div class="pages-tab-content active" id="pagesTabContent" data-tab="pages">
+        <div class="pages-list" id="pagesList"></div>
+      </div>
+      <div class="pages-tab-content" id="outlineTabContent" data-tab="outline">
+        <div class="outline-list" id="outlineList"></div>
+      </div>
     </div>
 
     <!-- Editor Canvas (center) -->
@@ -446,10 +455,11 @@
         <button class="tb-btn pdf-tool-btn" id="pdfToolComment" data-tool="comment" title="Add comment" aria-label="Add comment"><span class="msi">add_comment</span></button>
         <button class="tb-btn pdf-tool-btn" id="pdfToolDraw" data-tool="draw" title="Free draw" aria-label="Free draw"><span class="msi">draw</span></button>
         <button class="tb-btn pdf-tool-btn" id="pdfToolText" data-tool="text" title="Add text box" aria-label="Add text box"><span class="msi">title</span></button>
-        <button class="tb-btn pdf-tool-btn" id="pdfToolRedact" data-tool="redact" title="Redact area" aria-label="Redact area"><span class="msi">visibility_off</span></button>
+        <button class="tb-btn pdf-tool-btn" id="pdfToolRedact" data-tool="redact" title="Redact area (R)" aria-label="Redact area"><span class="msi">visibility_off</span></button>
       </div>
       <div class="pdf-toolbar-group">
-        <button class="tb-btn" id="pdfSave" title="Download PDF" aria-label="Download PDF"><span class="msi">download</span></button>
+        <button class="tb-btn" id="pdfToolSignature" title="Insert signature" aria-label="Insert signature"><span class="msi">draw</span></button>
+        <button class="tb-btn" id="pdfSave" title="Save PDF (Ctrl+S)" aria-label="Save PDF"><span class="msi">download</span></button>
       </div>
     </div>
     <div class="pdf-body">
