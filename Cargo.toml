@@ -21,12 +21,12 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/nicholasgasior/s1engine"
-homepage = "https://github.com/nicholasgasior/s1engine"
+repository = "https://github.com/schnsrw/s1engine"
+homepage = "https://github.com/schnsrw/s1engine"
 keywords = ["document", "docx", "odt", "pdf", "editor"]
 categories = ["parsing", "text-processing"]
 

@@ -1,14 +1,14 @@
 # s1engine
 
-A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based real-time collaboration, a page layout engine, and a fully-featured web editor.
+A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a web editor.
 
 ## Highlights
 
 - **Multi-format** — DOCX, ODT, PDF, TXT, Markdown, and legacy DOC (read)
 - **Pure Rust** — Zero C/C++ dependencies. Compiles to native, WASM, and C FFI
-- **Collaborative** — Fugue CRDT for real-time multi-user editing with conflict resolution
+- **Collaborative** — Fugue CRDT for multi-user editing with conflict resolution
 - **Layout engine** — Pagination, text shaping (rustybuzz), font subsetting, PDF export
-- **Web editor included** — Production-grade browser editor (Folio) with toolbar, comments, track changes, and PDF viewer
+- **Web editor** — S1 Editor: browser-based document editor with toolbar, comments, track changes, and PDF viewer
 - **Embeddable** — Use as a Rust library, WASM module, or C shared library
 
 ## Architecture
@@ -43,10 +43,10 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-s1engine = "1.0"
+s1engine = "1.0.1"
 
 # Optional features
-# s1engine = { version = "1.0", features = ["pdf", "crdt", "convert"] }
+# s1engine = { version = "1.0.1", features = ["pdf", "crdt", "convert"] }
 ```
 
 Open and read a document:
@@ -107,20 +107,21 @@ std::fs::write("output.odt", doc.export(Format::Odt)?)?;
 | `doc-legacy` | Legacy DOC binary parsing | No |
 | `crdt` | CRDT collaboration primitives | No |
 
-## Web Editor (Folio)
+## S1 Editor
 
-s1engine ships with **Folio**, a production-grade document editor that runs in the browser via WASM.
+s1engine ships with **S1 Editor**, a browser-based document editor that runs via WASM.
 
 ### Features
 
-- Full WYSIWYG editing with multi-page layout
+- WYSIWYG editing with multi-page layout
 - Toolbar with formatting, styles, tables, images, comments
-- Real-time collaboration via WebSocket relay
+- Collaboration via WebSocket relay
 - Track changes with accept/reject
-- PDF viewer with annotations (highlight, comment, draw, text)
+- PDF viewer with annotation tools (highlight, comment, draw, text)
 - Export to DOCX, ODT, PDF, TXT, Markdown
-- Dark mode, keyboard shortcuts, find & replace
+- Keyboard shortcuts, find & replace
 - Drag-and-drop file opening
+- Dark mode support
 
 ### Running the Editor
 
@@ -172,7 +173,7 @@ The editor is served at `http://localhost:8787`.
 
 ### Prerequisites
 
-- Rust 1.75+ (`rustup install stable`)
+- Rust 1.85+ (`rustup install stable`)
 - For WASM: `wasm-pack` (`cargo install wasm-pack`)
 - For editor: Node.js 18+ and npm
 - For Docker: Docker 20+
@@ -183,7 +184,7 @@ The editor is served at `http://localhost:8787`.
 # Build all crates
 cargo build --workspace
 
-# Run all tests
+# Run all tests (1,310 tests)
 cargo test --workspace
 
 # Lint
@@ -214,20 +215,20 @@ make clean          # Clean build artifacts
 
 | Feature | DOCX | ODT | Markdown | PDF | TXT | DOC |
 |---|---|---|---|---|---|---|
-| Read | Full | Full | Full | View* | Full | Partial |
-| Write | Full | Full | Full | Export | Full | — |
-| Round-trip | Full | Full | Partial | — | Full | — |
-| Paragraphs | Full | Full | Full | Export | Lossy | Full |
-| Tables | Full | Full | GFM | Export | Tab-sep | Partial |
-| Images | Full | Full | — | Export | — | — |
-| Lists | Full | Full | Full | — | Markers | — |
-| Styles | Full | Full | — | Export | — | Partial |
-| Comments | Full | Full | — | — | — | — |
-| Headers/Footers | Full | Full | — | Export | — | — |
-| Hyperlinks | Full | Full | Full | Export | — | — |
-| Track Changes | Full | — | — | — | — | — |
+| Read | Yes | Yes | Yes | View* | Yes | Partial |
+| Write | Yes | Yes | Yes | Export | Yes | — |
+| Round-trip | Yes | Yes | Partial | — | Yes | — |
+| Paragraphs | Yes | Yes | Yes | Export | Lossy | Yes |
+| Tables | Yes | Yes | GFM | Export | Tab-sep | Partial |
+| Images | Yes | Yes | — | Export | — | — |
+| Lists | Yes | Yes | Yes | — | Markers | — |
+| Styles | Yes | Yes | — | Export | — | Partial |
+| Comments | Yes | Yes | — | — | — | — |
+| Headers/Footers | Yes | Yes | — | Export | — | — |
+| Hyperlinks | Yes | Yes | Yes | Export | — | — |
+| Track Changes | Yes | — | — | — | — | — |
 
-*PDF viewing is available in the Folio web editor via PDF.js integration.
+*PDF viewing is available in S1 Editor via PDF.js integration.
 
 ## Documentation
 
@@ -265,12 +266,12 @@ at your option.
 
 ## Acknowledgments
 
-s1engine uses these excellent pure-Rust libraries:
+s1engine uses these pure-Rust libraries:
 
-- [rustybuzz](https://github.com/nicholasgasior/rustybuzz) — Text shaping (HarfBuzz port)
-- [ttf-parser](https://github.com/nicholasgasior/ttf-parser) — Font parsing
-- [fontdb](https://github.com/nicholasgasior/fontdb) — Font discovery
-- [pdf-writer](https://github.com/nicholasgasior/pdf-writer) — PDF generation
-- [lopdf](https://github.com/nicholasgasior/lopdf) — PDF reading/editing
-- [quick-xml](https://github.com/nicholasgasior/quick-xml) — XML parsing
-- [pulldown-cmark](https://github.com/nicholasgasior/pulldown-cmark) — Markdown parsing
+- [rustybuzz](https://github.com/RazrFalcon/rustybuzz) — Text shaping (HarfBuzz port)
+- [ttf-parser](https://github.com/RazrFalcon/ttf-parser) — Font parsing
+- [fontdb](https://github.com/RazrFalcon/fontdb) — Font discovery
+- [pdf-writer](https://github.com/typst/pdf-writer) — PDF generation
+- [lopdf](https://github.com/J-F-Liu/lopdf) — PDF reading/editing
+- [quick-xml](https://github.com/tafia/quick-xml) — XML parsing
+- [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) — Markdown parsing

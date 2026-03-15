@@ -7,37 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-03-16
+
 ### Added
 
-**PDF Editor**
-- PDF viewing in Folio editor via PDF.js (open, zoom, page navigation, text selection)
+**S1 Editor**
+- PDF viewing via PDF.js (open, zoom, page navigation, text selection)
 - PDF annotation tools: highlight, comment, freehand draw, text box
 - PDF text editing: double-click to inline-edit text (overlay approach)
 - PDF page thumbnails sidebar with scroll tracking
-- PDF editor Rust crate (`s1-format-pdf` with `pdf-editing` feature via lopdf)
-- WASM `WasmPdfEditor` class: page manipulation, annotations, form fields, text overlay
-- Document model annotations exported to PDF (comments as sticky notes, highlights with quad points)
-- `LayoutAnnotation` type in `s1-layout` for resolved comment/highlight positions
-
-**Editor Improvements**
 - PDF-specific toolbar (replaces doc toolbar when viewing PDFs)
 - Inline comment input (replaces browser `prompt()`)
-- Proper PDF download (non-corrupted Blob export)
+- Rich paste with formatting preservation (bold, italic, underline, font, size, color)
+- Three-tier paste strategy: batch WASM paste, per-run formatting fallback, plain text fallback
+- Paste support for content from external sources (Word, Google Docs)
+- Shapes drawing tools (rectangle, ellipse, line, arrow, text box)
+
+**WASM API**
+- PDF editor Rust crate (`s1-format-pdf` with `pdf-editing` feature via lopdf)
+- `WasmPdfEditor` class: page manipulation, annotations, form fields, text overlay
+- `LayoutAnnotation` type in `s1-layout` for resolved comment/highlight positions
+- `paste_formatted_runs_json` — batch paste with formatting
+- `export_selection_html` — rich copy to clipboard
+- `pasteWithManualFormatting` JS fallback for per-run formatting
+
+**CI/CD**
+- GitHub Actions CI: test (stable), test (MSRV 1.85), clippy, rustfmt, documentation, minimal features, all features
 
 **Documentation**
 - Rewrote README.md for open-source readability
 - Added CONTRIBUTING.md with setup, workflow, and architecture rules
 - Added SECURITY.md with vulnerability reporting and security measures
+- Added future/ directory with architecture docs (plugin system, REST/WebSocket API, editor SDK, distribution)
 
 ### Changed
+- Editor renamed from Folio to S1 Editor
 - Removed Pages and Text views from editor (simplified to Editor + PDF views)
 - File picker now accepts `.pdf` files
 - Editor menubar hidden when viewing PDFs
+- MSRV bumped from 1.75 to 1.85 (required by ecosystem dependencies using edition2024)
+- Fixed GitHub repository URL in Cargo.toml
+- Fixed Acknowledgments links in README to point to correct upstream crate repos
 
 ### Fixed
+- **Paste formatting preservation** — `set_paragraph_text` rewritten with diff-based editing; typing after paste no longer destroys multi-run formatting
+- **Underline paste value** — fixed `pasteWithManualFormatting` to use `'underline', 'true'` (was `'single'`, which WASM didn't recognize)
+- **Google Docs paste** — fixed inline content from Google Docs `<b id="docs-internal-guid-...">` wrapper creating separate paragraphs per span
+- **Consecutive inline paste** — fixed `walkBlockElements` merging adjacent inline elements into single paragraph instead of splitting
 - PDF.js `standardFontDataUrl` warning resolved
 - ArrayBuffer detach error when opening PDFs
 - PDF sidebar thumbnails now track scroll position
+- Feature-gated ODT/TXT/MD tests so `--no-default-features --features docx` CI passes
+- Fixed broken doc link `[next_id]` in s1-crdt
 
 ## [1.0.0] - 2026-03-13
 
