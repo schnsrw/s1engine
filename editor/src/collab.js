@@ -248,7 +248,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         // Set paragraph text from remote
         try {
           state.doc.set_paragraph_text(op.nodeId, op.text);
-          const el = $('docPage').querySelector(`[data-node-id="${op.nodeId}"]`);
+          const el = $('pageContainer').querySelector(`[data-node-id="${op.nodeId}"]`);
           if (el) {
             const updated = renderNodeById(op.nodeId);
             // Don't move local cursor
@@ -662,7 +662,7 @@ function renderPeerCursor(cursor) {
   const oldEl = document.getElementById(`peer-cursor-${cursor.peerId}`);
   if (oldEl) oldEl.remove();
 
-  const page = $('docPage');
+  const page = $('pageContainer');
   if (!page) return;
 
   const paraEl = page.querySelector(`[data-node-id="${cursor.nodeId}"]`);
@@ -972,7 +972,7 @@ function showCollabToast(message) {
  * Briefly flash a paragraph element to indicate a remote edit.
  */
 function flashParagraph(nodeId) {
-  const page = $('docPage');
+  const page = $('pageContainer');
   if (!page) return;
   const el = page.querySelector(`[data-node-id="${nodeId}"]`);
   if (!el) return;

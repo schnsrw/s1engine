@@ -1,7 +1,7 @@
-// Document rendering — WASM → DOM
+// Document rendering — WASM → DOM (multi-page)
 import { state, $ } from './state.js';
 import { setupImages } from './images.js';
-import { updatePageBreaks } from './pagination.js';
+import { repaginate } from './pagination.js';
 import { updateUndoRedo } from './toolbar.js';
 import { markDirty, updateTrackChanges, updateStatusBar } from './file.js';
 import { broadcastTextSync, broadcastOp } from './collab.js';
@@ -11,58 +11,128 @@ import { broadcastTextSync, broadcastOp } from './collab.js';
 // ═══════════════════════════════════════════════════
 const LARGE_DOC_PARAGRAPH_THRESHOLD = 500;
 
+/**
+ * Helper: query all page-content elements.
+ */
+function getAllPageContents() {
+  const container = $('pageContainer');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.page-content'));
+}
+
+/**
+ * Helper: query across all page-content elements or pageContainer.
+ */
+function queryAllNodes(selector) {
+  const container = $('pageContainer');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(selector));
+}
+
 export function renderDocument() {
   const { doc } = state;
   if (!doc) return;
   try {
     // Tear down any existing virtual scroll before re-rendering
     teardownVirtualScroll();
+
     const html = doc.to_html();
     state.ignoreInput = true;
-    const page = $('docPage');
-    page.innerHTML = html;
-    // E8.2: Clear the nodeIdToElement map on full re-render (DOM is rebuilt)
-    state.nodeIdToElement.clear();
-    // Extract header/footer HTML from WASM output, then remove the elements.
-    // The pagination system will render them per-page instead.
-    const hdrEl = page.querySelector(':scope > header');
-    const ftrEl = page.querySelector(':scope > footer');
+
+    // Parse the HTML to extract content and header/footer
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+
+    // Extract header/footer HTML from WASM output
+    const hdrEl = temp.querySelector(':scope > header');
+    const ftrEl = temp.querySelector(':scope > footer');
     state.docHeaderHtml = hdrEl ? hdrEl.innerHTML : '';
     state.docFooterHtml = ftrEl ? ftrEl.innerHTML : '';
     if (hdrEl) hdrEl.remove();
     if (ftrEl) ftrEl.remove();
+
+    // Clear nodeIdToElement map (DOM is rebuilt)
+    state.nodeIdToElement.clear();
+
+    // Apply page dimensions from WASM
+    applyPageDimensions();
+
+    // Ensure pageContainer exists and is empty for fresh render
+    const container = $('pageContainer');
+    if (container) {
+      container.innerHTML = '';
+      state.pageElements = [];
+      state.nodeToPage.clear();
+    }
+
+    // Run repaginate which builds per-page containers and places nodes
+    repaginate();
+
+    // If repagination didn't create pages (no page map), create a single page with all content
+    if (state.pageElements.length === 0 && container) {
+      const pageEl = document.createElement('div');
+      pageEl.className = 'doc-page';
+      pageEl.dataset.page = '1';
+      const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
+      const ptToPx = 96 / 72;
+      pageEl.style.width = Math.round((dims.widthPt || 612) * ptToPx) + 'px';
+      pageEl.style.minHeight = Math.round((dims.heightPt || 792) * ptToPx) + 'px';
+
+      const header = document.createElement('div');
+      header.className = 'page-header';
+      header.contentEditable = 'false';
+      pageEl.appendChild(header);
+
+      const content = document.createElement('div');
+      content.className = 'page-content';
+      content.contentEditable = 'true';
+      content.spellcheck = true;
+      content.lang = 'en';
+      content.setAttribute('role', 'textbox');
+      content.setAttribute('aria-multiline', 'true');
+      content.setAttribute('aria-label', 'Page 1 content');
+      // Put all content from temp into the single page
+      content.innerHTML = temp.innerHTML;
+      pageEl.appendChild(content);
+
+      const footer = document.createElement('div');
+      footer.className = 'page-footer';
+      footer.contentEditable = 'false';
+      footer.innerHTML = '<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">1</span>';
+      pageEl.appendChild(footer);
+
+      container.appendChild(pageEl);
+      state.pageElements = [pageEl];
+    }
+
+    // Post-render fixups across all pages
     fixEmptyBlocks();
     setupImages();
     cacheAllText();
-    // E8.2: Populate nodeIdToElement map from freshly rendered DOM
     populateNodeIdMap();
     setupTrackChangeHandlers();
+
     state.ignoreInput = false;
     state.pagesRendered = false;
-    // Apply page dimensions from WASM before pagination
-    applyPageDimensions();
-    updatePageBreaks();
+
     updateUndoRedo();
     updateTrackChanges();
     updateStatusBar();
-    // E8.4: Show document size warning if paragraph count exceeds threshold
     checkLargeDocumentWarning();
-    // E-19: Re-apply zoom level after full re-render (DOM is rebuilt)
-    if (state.zoomLevel && state.zoomLevel !== 100) {
-      page.style.transform = `scale(${state.zoomLevel / 100})`;
-      page.style.transformOrigin = 'top center';
-    }
+
+    // Re-apply zoom level after full re-render
+    applyZoom();
+
     // Activate virtual scrolling for large documents
     maybeInitVirtualScroll();
-    // E1.5: Refresh find highlights after full re-render
+    // Refresh find highlights after full re-render
     state._onTextChanged?.();
   } catch (e) { console.error('Render error:', e); }
 }
 
 // ─── Per-change Track Changes popup ─────────────────
 function setupTrackChangeHandlers() {
-  const page = $('docPage');
-  const tcElements = page.querySelectorAll('[data-tc-node-id]');
+  const tcElements = queryAllNodes('[data-tc-node-id]');
   if (tcElements.length === 0) return;
 
   tcElements.forEach(el => {
@@ -127,21 +197,16 @@ function showTcPopup(el) {
 
   document.body.appendChild(popup);
 
-  // Position near the element
   const rect = el.getBoundingClientRect();
   const popupW = 200;
   let left = rect.left + (rect.width / 2) - (popupW / 2);
   let top = rect.bottom + 6;
-
-  // Keep within viewport
   if (left < 8) left = 8;
   if (left + popupW > window.innerWidth - 8) left = window.innerWidth - popupW - 8;
   if (top + 40 > window.innerHeight) top = rect.top - 44;
-
   popup.style.left = left + 'px';
   popup.style.top = top + 'px';
 
-  // Dismiss on outside click
   const dismiss = (e) => {
     if (!popup.contains(e.target)) {
       dismissTcPopup();
@@ -152,52 +217,39 @@ function showTcPopup(el) {
 }
 
 /**
- * Read page dimensions from WASM sections and apply to .doc-page.
- * Sets width, min-height, and padding (margins) from actual document properties.
- * Falls back to CSS defaults (US Letter, 1" margins) if WASM data unavailable.
+ * Read page dimensions from WASM sections and store in state.
  */
 export function applyPageDimensions() {
-  const page = $('docPage');
-  if (!page || !state.doc) return;
-
-  const ptToPx = 96 / 72; // 1pt = 1.333px
-
+  if (!state.doc) return;
+  const ptToPx = 96 / 72;
   try {
     const json = state.doc.get_sections_json();
     const sections = JSON.parse(json);
     if (sections.length > 0) {
-      // Use first section for the page container dimensions
       const sec = sections[0];
-      const widthPt = sec.pageWidth || 612;
-      const heightPt = sec.pageHeight || 792;
-      const marginTopPt = sec.marginTop || 72;
-      const marginBottomPt = sec.marginBottom || 72;
-      const marginLeftPt = sec.marginLeft || 72;
-      const marginRightPt = sec.marginRight || 72;
-
-      const widthPx = Math.round(widthPt * ptToPx);
-      const heightPx = Math.round(heightPt * ptToPx);
-      const marginTopPx = Math.round(marginTopPt * ptToPx);
-      const marginBottomPx = Math.round(marginBottomPt * ptToPx);
-      const marginLeftPx = Math.round(marginLeftPt * ptToPx);
-      const marginRightPx = Math.round(marginRightPt * ptToPx);
-
-      page.style.width = widthPx + 'px';
-      page.style.minHeight = heightPx + 'px';
-      page.style.paddingTop = marginTopPx + 'px';
-      page.style.paddingBottom = marginBottomPx + 'px';
-      page.style.paddingLeft = marginLeftPx + 'px';
-      page.style.paddingRight = marginRightPx + 'px';
-
-      // Store for pagination and ruler
       state.pageDims = {
-        widthPt, heightPt,
-        marginTopPt, marginBottomPt,
-        marginLeftPt, marginRightPt,
+        widthPt: sec.pageWidth || 612,
+        heightPt: sec.pageHeight || 792,
+        marginTopPt: sec.marginTop || 72,
+        marginBottomPt: sec.marginBottom || 72,
+        marginLeftPt: sec.marginLeft || 72,
+        marginRightPt: sec.marginRight || 72,
       };
     }
   } catch (_) {
-    // CSS defaults apply (US Letter, 1" margins)
+    // Defaults apply
+  }
+}
+
+/**
+ * Apply zoom level to all page elements.
+ */
+function applyZoom() {
+  if (!state.zoomLevel || state.zoomLevel === 100) return;
+  const scale = state.zoomLevel / 100;
+  for (const pageEl of state.pageElements) {
+    pageEl.style.transform = `scale(${scale})`;
+    pageEl.style.transformOrigin = 'top center';
   }
 }
 
@@ -205,41 +257,28 @@ export function applyPageDimensions() {
 // E8.2: nodeIdToElement map — O(1) DOM lookups
 // ═══════════════════════════════════════════════════
 
-/**
- * Populate the nodeIdToElement map by scanning all [data-node-id] elements
- * currently in the docPage. Called after full re-render.
- */
 function populateNodeIdMap() {
   const map = state.nodeIdToElement;
   map.clear();
-  const page = $('docPage');
-  if (!page) return;
-  page.querySelectorAll('[data-node-id]').forEach(el => {
+  queryAllNodes('[data-node-id]').forEach(el => {
     map.set(el.dataset.nodeId, el);
   });
 }
 
-/**
- * E8.2: Fast lookup of a DOM element by node ID.
- * Uses the cached map first, falls back to querySelector if not found
- * (the map entry may be stale or the element may have been added after
- * the last populateNodeIdMap call). Validates the cached element is still
- * attached to the DOM before returning it.
- */
 export function lookupNodeElement(nodeIdStr) {
   const cached = state.nodeIdToElement.get(nodeIdStr);
   if (cached && cached.isConnected) return cached;
-  // Fallback: querySelector and update cache
-  const page = $('docPage');
-  if (!page) return null;
-  const el = page.querySelector(`[data-node-id="${nodeIdStr}"]`);
+  // Fallback: search across all pages
+  const container = $('pageContainer');
+  if (!container) return null;
+  const el = container.querySelector(`[data-node-id="${nodeIdStr}"]`);
   if (el) state.nodeIdToElement.set(nodeIdStr, el);
   else state.nodeIdToElement.delete(nodeIdStr);
   return el;
 }
 
 // ═══════════════════════════════════════════════════
-// E8.2: Incremental DOM patching in renderNodeById
+// Incremental DOM patching
 // ═══════════════════════════════════════════════════
 
 export function renderNodeById(nodeIdStr) {
@@ -247,28 +286,22 @@ export function renderNodeById(nodeIdStr) {
   if (!doc) return null;
   try {
     const html = doc.render_node_html(nodeIdStr);
-    // E8.2: Use lookupNodeElement for O(1) lookup, falling back to querySelector
     const el = lookupNodeElement(nodeIdStr);
     if (!el) return null;
 
-    // E8.2: Incremental DOM patching — parse new HTML and compare before replacing
     const temp = document.createElement('div');
     temp.innerHTML = html;
     const newEl = temp.firstElementChild;
     if (!newEl) return null;
     if (!newEl.innerHTML.trim()) newEl.innerHTML = '<br>';
 
-    // Compare outerHTML: if identical, skip the DOM replacement entirely
     if (el.outerHTML === newEl.outerHTML) {
-      // Content is unchanged — no DOM mutation needed
       state.syncedTextCache.set(nodeIdStr, el.textContent || '');
       return el;
     }
 
     el.replaceWith(newEl);
-    // E8.2: Update the nodeIdToElement map with the new element
     state.nodeIdToElement.set(nodeIdStr, newEl);
-    // Also register any child node IDs (e.g., runs inside a paragraph)
     newEl.querySelectorAll('[data-node-id]').forEach(child => {
       state.nodeIdToElement.set(child.dataset.nodeId, child);
     });
@@ -279,10 +312,6 @@ export function renderNodeById(nodeIdStr) {
   return null;
 }
 
-// E-05: Batch render multiple nodes in a single pass to avoid race conditions
-// where rendering one node invalidates another's DOM reference. Each node is
-// re-queried from the DOM immediately before replacement, ensuring we always
-// operate on the current element.
 export function renderNodesById(nodeIds) {
   const results = new Map();
   for (const id of nodeIds) {
@@ -292,14 +321,13 @@ export function renderNodesById(nodeIds) {
 }
 
 export function fixEmptyBlocks() {
-  $('docPage').querySelectorAll('p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty')
+  queryAllNodes('p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty')
     .forEach(el => { el.innerHTML = '<br>'; });
 }
 
 export function cacheAllText() {
   state.syncedTextCache.clear();
-  $('docPage').querySelectorAll('[data-node-id]').forEach(el => {
-    // Skip virtual-scroll placeholders
+  queryAllNodes('[data-node-id]').forEach(el => {
     if (el.classList.contains('vs-placeholder')) return;
     const tag = el.tagName.toLowerCase();
     if (tag === 'p' || /^h[1-6]$/.test(tag)) {
@@ -319,19 +347,15 @@ export function syncParagraphText(el) {
     doc.set_paragraph_text(nodeId, newText);
     syncedTextCache.set(nodeId, newText);
     markDirty();
-    // E-09: Immediately clear stale find highlights when text changes
     clearFindHighlights();
-    // Broadcast to collaboration peers
     broadcastTextSync(nodeId, newText);
 
-    // E3.1: Track continuous typing for batch undo
     const batch = state._typingBatch;
     if (batch && batch.nodeId === nodeId) {
       batch.count++;
       clearTimeout(batch.timer);
       batch.timer = setTimeout(() => { state._typingBatch = null; }, 500);
     } else {
-      // New typing session (different paragraph or first sync)
       if (batch) clearTimeout(batch.timer);
       state._typingBatch = {
         nodeId,
@@ -344,19 +368,17 @@ export function syncParagraphText(el) {
 
 export function syncAllText() {
   if (!state.doc) return;
-  $('docPage').querySelectorAll('[data-node-id]').forEach(el => {
-    // Skip virtual-scroll placeholders — their content is not rendered
+  queryAllNodes('[data-node-id]').forEach(el => {
     if (el.classList.contains('vs-placeholder')) return;
     const tag = el.tagName.toLowerCase();
     if (tag === 'p' || /^h[1-6]$/.test(tag)) syncParagraphText(el);
   });
 }
 
-// E-09: Clear stale find highlights immediately when text content changes
 function clearFindHighlights() {
-  const page = $('docPage');
-  if (!page) return;
-  const marks = page.querySelectorAll('mark.find-highlight');
+  const container = $('pageContainer');
+  if (!container) return;
+  const marks = container.querySelectorAll('mark.find-highlight');
   if (marks.length === 0) return;
   marks.forEach(m => {
     const parent = m.parentNode;
@@ -371,10 +393,9 @@ export function debouncedSync(el) {
   state.syncTimer = setTimeout(() => {
     syncParagraphText(el);
     state.pagesRendered = false;
-    updatePageBreaks();
+    repaginate();
     updateUndoRedo();
     updateStatusBar();
-    // E1.5: Refresh find highlights after text edits
     state._onTextChanged?.();
   }, 200);
 }
@@ -412,22 +433,17 @@ export function renderText() {
 }
 
 // ═══════════════════════════════════════════════════
-// E8.4: Large-document warning in status bar
+// E8.4: Large-document warning
 // ═══════════════════════════════════════════════════
 
 function checkLargeDocumentWarning() {
-  const page = $('docPage');
-  if (!page) return;
-  const paraCount = page.querySelectorAll(
+  const paraCount = queryAllNodes(
     'p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]'
   ).length;
   const info = $('statusInfo');
   if (paraCount > LARGE_DOC_PARAGRAPH_THRESHOLD && info) {
-    // Append warning to status bar (will be overwritten by next updateStatusBar
-    // call, so we set the _userMsg flag to keep it visible briefly)
     info._userMsg = true;
     info.textContent = `Large document: ${paraCount} paragraphs. Performance may be affected.`;
-    // Clear after 5 seconds so normal status resumes
     setTimeout(() => { info._userMsg = false; updateStatusBar(); }, 5000);
   }
 }
@@ -436,55 +452,45 @@ function checkLargeDocumentWarning() {
 // VIRTUAL SCROLLING — for documents with 100+ blocks
 // ═══════════════════════════════════════════════════
 
-const VS_THRESHOLD = 100;  // Minimum block count to activate
-const VS_BUFFER = 20;      // Extra blocks to render above/below viewport
+const VS_THRESHOLD = 100;
+const VS_BUFFER = 20;
 
 function getBlockElements() {
-  const page = $('docPage');
-  if (!page) return [];
-  // Collect direct children that are block-level content (skip page-break divs, etc.)
-  return Array.from(page.children).filter(el => {
-    const tag = el.tagName.toLowerCase();
-    return tag === 'p' || /^h[1-6]$/.test(tag) || tag === 'table' ||
-           tag === 'ul' || tag === 'ol' || tag === 'hr' ||
-           el.dataset.nodeId || el.classList.contains('vs-placeholder');
-  });
+  const results = [];
+  for (const pageEl of state.pageElements) {
+    const contentEl = pageEl.querySelector('.page-content');
+    if (!contentEl) continue;
+    for (const el of contentEl.children) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'p' || /^h[1-6]$/.test(tag) || tag === 'table' ||
+          tag === 'ul' || tag === 'ol' || tag === 'hr' ||
+          el.dataset.nodeId || el.classList.contains('vs-placeholder')) {
+        results.push(el);
+      }
+    }
+  }
+  return results;
 }
 
-/**
- * E8.1: Check whether virtual scrolling should be suppressed.
- * Returns true if virtual scrolling must NOT run right now.
- * Guards:
- *   1. Find/replace bar is open — collapsing blocks breaks highlighting
- *   2. Selection spans across many paragraphs — collapsing would disrupt it
- */
 function isVirtualScrollSuppressed() {
-  // Guard 1: find/replace bar is open
   const findBar = $('findBar');
   if (findBar && findBar.classList.contains('show')) return true;
-
-  // Guard 2: selection spans multiple paragraphs
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
     const range = sel.getRangeAt(0);
-    const page = $('docPage');
-    if (page) {
-      // Count how many block-level [data-node-id] elements the selection spans
-      const startBlock = findAncestorBlock(range.startContainer, page);
-      const endBlock = findAncestorBlock(range.endContainer, page);
-      if (startBlock && endBlock && startBlock !== endBlock) {
-        // Selection crosses at least two blocks — suppress virtual scroll
-        return true;
-      }
+    const container = $('pageContainer');
+    if (container) {
+      const startBlock = findAncestorBlock(range.startContainer, container);
+      const endBlock = findAncestorBlock(range.endContainer, container);
+      if (startBlock && endBlock && startBlock !== endBlock) return true;
     }
   }
   return false;
 }
 
-/** Walk up to find the nearest block-level ancestor with data-node-id under page */
-function findAncestorBlock(node, page) {
+function findAncestorBlock(node, root) {
   let n = node;
-  while (n && n !== page) {
+  while (n && n !== root) {
     if (n.nodeType === 1 && n.dataset?.nodeId) {
       const tag = n.tagName.toLowerCase();
       if (tag === 'p' || /^h[1-6]$/.test(tag) || tag === 'table') return n;
@@ -505,23 +511,17 @@ function initVirtualScroll(blocks) {
   const canvas = $('editorCanvas');
   if (!canvas) return;
 
-  // Measure actual heights of all rendered blocks and store them
-  const entries = blocks.map(el => {
-    const rect = el.getBoundingClientRect();
-    return {
-      el,
-      nodeId: el.dataset?.nodeId || null,
-      height: Math.max(rect.height, 20),
-      html: el.outerHTML,
-      visible: true,
-    };
-  });
+  const entries = blocks.map(el => ({
+    el,
+    nodeId: el.dataset?.nodeId || null,
+    height: Math.max(el.getBoundingClientRect().height, 20),
+    html: el.outerHTML,
+    visible: true,
+  }));
 
-  // Create the IntersectionObserver with a generous root margin (buffer zone)
-  const bufferPx = VS_BUFFER * 30; // ~30px per block estimate for buffer
+  const bufferPx = VS_BUFFER * 30;
   const observer = new IntersectionObserver((ioEntries) => {
     if (!state.virtualScroll) return;
-    // E8.1: Re-check suppression on every observer callback
     if (isVirtualScrollSuppressed()) return;
     const vs = state.virtualScroll;
 
@@ -533,10 +533,8 @@ function initVirtualScroll(blocks) {
       if (!entry) continue;
 
       if (ioe.isIntersecting && !entry.visible) {
-        // Coming into view — restore real content
         restoreBlock(entry, idx);
       } else if (!ioe.isIntersecting && entry.visible) {
-        // Going out of view — replace with placeholder
         collapseBlock(entry, idx, vs);
       }
     }
@@ -546,7 +544,6 @@ function initVirtualScroll(blocks) {
     threshold: 0,
   });
 
-  // Build index map for fast lookups
   const indexMap = new WeakMap();
   entries.forEach((entry, i) => {
     indexMap.set(entry.el, i);
@@ -558,43 +555,29 @@ function initVirtualScroll(blocks) {
 
 function collapseBlock(entry, idx, vs) {
   if (!entry.visible || !entry.el || !entry.el.parentNode) return;
-  // E8.1: Don't collapse if virtual scroll is suppressed (find/replace, multi-para selection)
   if (isVirtualScrollSuppressed()) return;
-  // Don't collapse blocks that have focus or selection inside them
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0);
-    if (entry.el.contains(range.startContainer) || entry.el.contains(range.endContainer)) {
-      return; // Don't collapse blocks with active selection
-    }
+    if (entry.el.contains(range.startContainer) || entry.el.contains(range.endContainer)) return;
   }
 
-  // E-07: Sync text content to WASM model before hiding, so any user edits
-  // are preserved even if the block is off-screen when a sync would occur.
   if (entry.nodeId) {
     const tag = entry.el.tagName?.toLowerCase() || '';
-    if (tag === 'p' || /^h[1-6]$/.test(tag)) {
-      syncParagraphText(entry.el);
-    }
+    if (tag === 'p' || /^h[1-6]$/.test(tag)) syncParagraphText(entry.el);
   }
 
-  // Save current HTML and measured height
   entry.html = entry.el.outerHTML;
-  const rect = entry.el.getBoundingClientRect();
-  entry.height = Math.max(rect.height, 20);
+  entry.height = Math.max(entry.el.getBoundingClientRect().height, 20);
 
-  // Create placeholder div with same height
   const placeholder = document.createElement('div');
   placeholder.className = 'vs-placeholder';
   placeholder.style.height = entry.height + 'px';
-  // Preserve data-node-id for find/replace compatibility
   if (entry.nodeId) placeholder.dataset.nodeId = entry.nodeId;
   placeholder.dataset.vsIndex = String(idx);
 
   entry.el.replaceWith(placeholder);
-  // E8.2: Update nodeIdToElement map — placeholder now holds the nodeId
   if (entry.nodeId) state.nodeIdToElement.set(entry.nodeId, placeholder);
-  // Unobserve old element, observe placeholder
   vs.observer.unobserve(entry.el);
   entry.el = placeholder;
   vs.indexMap.set(placeholder, idx);
@@ -604,27 +587,19 @@ function collapseBlock(entry, idx, vs) {
 
 function restoreBlock(entry, idx) {
   if (entry.visible || !entry.el || !entry.el.parentNode) return;
-
   const vs = state.virtualScroll;
   let newEl = null;
 
-  // E-07: Always re-render from WASM model when revealing a placeholder, so that
-  // any edits made while the block was off-screen (e.g., via find/replace, undo,
-  // or collaboration) are reflected. Fall back to cached HTML only if WASM render
-  // is unavailable.
   if (entry.nodeId && state.doc) {
     try {
       const html = state.doc.render_node_html(entry.nodeId);
       const temp = document.createElement('div');
       temp.innerHTML = html;
       newEl = temp.firstElementChild;
-    } catch (_) {
-      // WASM render failed — fall back to cached HTML below
-    }
+    } catch (_) {}
   }
 
   if (!newEl) {
-    // Fall back to cached HTML
     if (!entry.html) return;
     const temp = document.createElement('div');
     temp.innerHTML = entry.html;
@@ -632,7 +607,6 @@ function restoreBlock(entry, idx) {
     if (!newEl) return;
   }
 
-  // Unobserve placeholder, replace with real element
   vs.observer.unobserve(entry.el);
   entry.el.replaceWith(newEl);
   entry.el = newEl;
@@ -640,27 +614,20 @@ function restoreBlock(entry, idx) {
   vs.observer.observe(newEl);
   entry.visible = true;
 
-  // E8.2: Update nodeIdToElement map with restored real element
   if (entry.nodeId) {
     state.nodeIdToElement.set(entry.nodeId, newEl);
-    // Also register child node IDs
     newEl.querySelectorAll('[data-node-id]').forEach(child => {
       state.nodeIdToElement.set(child.dataset.nodeId, child);
     });
   }
 
-  // Re-run fixup on restored element
   if (!newEl.innerHTML.trim()) newEl.innerHTML = '<br>';
   setupImages(newEl);
-  // Update text cache from the freshly rendered content
-  if (entry.nodeId) {
-    state.syncedTextCache.set(entry.nodeId, newEl.textContent || '');
-  }
+  if (entry.nodeId) state.syncedTextCache.set(entry.nodeId, newEl.textContent || '');
 }
 
 function teardownVirtualScroll() {
   if (!state.virtualScroll) return;
-  const vs = state.virtualScroll;
-  vs.observer.disconnect();
+  state.virtualScroll.observer.disconnect();
   state.virtualScroll = null;
 }

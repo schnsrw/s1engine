@@ -151,7 +151,7 @@ export function initToolbar() {
   });
   $('tableCancelBtn').addEventListener('click', () => {
     $('tableModal').classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
   $('tableInsertBtn').addEventListener('click', () => {
     const rows = parseInt($('tableRows').value) || 3;
@@ -176,7 +176,7 @@ export function initToolbar() {
   $('tableModal').addEventListener('click', e => {
     if (e.target === $('tableModal')) {
       $('tableModal').classList.remove('show');
-      $('docPage').focus();
+      ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
     }
   });
 
@@ -204,7 +204,7 @@ export function initToolbar() {
   });
   $('linkCancelBtn').addEventListener('click', () => {
     $('linkModal').classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
   $('linkInsertBtn').addEventListener('click', () => {
     let url = $('linkUrl').value.trim();
@@ -220,11 +220,11 @@ export function initToolbar() {
     catch (e) { console.error('hyperlink:', e); }
   });
   $('linkModal').addEventListener('click', e => {
-    if (e.target === $('linkModal')) { $('linkModal').classList.remove('show'); $('docPage').focus(); }
+    if (e.target === $('linkModal')) { $('linkModal').classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
   $('linkUrl').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); $('linkInsertBtn').click(); }
-    if (e.key === 'Escape') { $('linkModal').classList.remove('show'); $('docPage').focus(); }
+    if (e.key === 'Escape') { $('linkModal').classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
 
   // Insert horizontal rule
@@ -271,7 +271,7 @@ export function initToolbar() {
   });
   $('commentCancelBtn').addEventListener('click', () => {
     $('commentModal').classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
   $('commentInsertBtn').addEventListener('click', () => {
     const text = $('commentText').value.trim();
@@ -289,11 +289,11 @@ export function initToolbar() {
     } catch (e) { console.error('insert comment:', e); }
   });
   $('commentModal').addEventListener('click', e => {
-    if (e.target === $('commentModal')) { $('commentModal').classList.remove('show'); $('docPage').focus(); }
+    if (e.target === $('commentModal')) { $('commentModal').classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
   $('commentText').addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('commentInsertBtn').click(); }
-    if (e.key === 'Escape') { $('commentModal').classList.remove('show'); $('docPage').focus(); }
+    if (e.key === 'Escape') { $('commentModal').classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
 
   // Comments panel toggle
@@ -313,7 +313,7 @@ export function initToolbar() {
 
   // Spell check toggle
   $('btnSpellCheck').addEventListener('click', () => {
-    const page = $('docPage');
+    const page = $('pageContainer');
     const enabled = page.getAttribute('spellcheck') === 'true';
     page.setAttribute('spellcheck', enabled ? 'false' : 'true');
     const btn = $('btnSpellCheck');
@@ -398,10 +398,10 @@ export function initToolbar() {
   });
   if ($('shortcutsCloseBtn')) $('shortcutsCloseBtn').addEventListener('click', () => {
     $('shortcutsModal').classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
   if ($('shortcutsModal')) $('shortcutsModal').addEventListener('click', e => {
-    if (e.target === $('shortcutsModal')) { $('shortcutsModal').classList.remove('show'); $('docPage').focus(); }
+    if (e.target === $('shortcutsModal')) { $('shortcutsModal').classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
   // About dialog — simple alert
   if ($('menuAbout')) $('menuAbout').addEventListener('click', () => {
@@ -513,7 +513,7 @@ function toggleList(format) {
 
 // Get all paragraph node IDs between selection start and end
 function getSelectedParagraphIds(info) {
-  const page = $('docPage');
+  const page = $('pageContainer');
   if (!page) return [info.startNodeId];
   const paraEls = page.querySelectorAll('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
   const ids = [];
@@ -557,10 +557,13 @@ export function setZoomLevel(level) {
   const label = level + '%';
   if ($('zoomValue')) $('zoomValue').textContent = label;
   if ($('tbZoomValue')) $('tbZoomValue').textContent = label;
-  const page = $('docPage');
-  if (page) {
-    page.style.transform = `scale(${level / 100})`;
-    page.style.transformOrigin = 'top center';
+  // Apply zoom to each individual page for better scroll behavior
+  const container = $('pageContainer');
+  if (container) {
+    container.querySelectorAll('.doc-page').forEach(pg => {
+      pg.style.transform = `scale(${level / 100})`;
+      pg.style.transformOrigin = 'top center';
+    });
   }
   // Update active state in zoom dropdown
   const dd = $('zoomDropdown');
@@ -1053,7 +1056,7 @@ function initStyleGallery() {
       const info = getSelectionInfo();
       if (!info) { panel.classList.remove('show'); return; }
 
-      const el = $('docPage').querySelector(`[data-node-id="${info.startNodeId}"]`);
+      const el = $('pageContainer')?.querySelector(`[data-node-id="${info.startNodeId}"]`);
       if (el) syncParagraphText(el);
 
       const def = STYLE_DEFS[styleName];
@@ -1068,7 +1071,7 @@ function initStyleGallery() {
           broadcastOp({ action: 'setHeading', nodeId, level: def.heading });
 
           // Apply font formatting (whole paragraph)
-          const pEl = $('docPage').querySelector(`[data-node-id="${nodeId}"]`);
+          const pEl = $('pageContainer')?.querySelector(`[data-node-id="${nodeId}"]`);
           const textLen = pEl ? Array.from(pEl.textContent || '').length : 0;
           if (textLen > 0) {
             const bcast = (key, value) => {
@@ -1098,7 +1101,7 @@ function initStyleGallery() {
 }
 
 function initTableContextMenu() {
-  $('docPage').addEventListener('contextmenu', e => {
+  $('pageContainer').addEventListener('contextmenu', e => {
     const cell = e.target.closest('td, th');
     if (!cell || !state.doc) return;
     e.preventDefault();
@@ -1138,7 +1141,7 @@ function initTableContextMenu() {
         const canvas = $('editorCanvas');
         const scrollTop = canvas ? canvas.scrollTop : 0;
         const tableNodeId = state.ctxTable;
-        const tableEl = $('docPage').querySelector(`[data-node-id="${tableNodeId}"]`);
+        const tableEl = $('pageContainer')?.querySelector(`[data-node-id="${tableNodeId}"]`);
         if (tableEl) {
           // Re-render just the table node
           const updated = renderNodeById(tableNodeId);
@@ -1185,7 +1188,7 @@ function initTableContextMenu() {
       const canvas = $('editorCanvas');
       const scrollTop = canvas ? canvas.scrollTop : 0;
       const tableNodeId = state.ctxTable;
-      const tableEl = tableNodeId ? $('docPage').querySelector(`[data-node-id="${tableNodeId}"]`) : null;
+      const tableEl = tableNodeId ? $('pageContainer')?.querySelector(`[data-node-id="${tableNodeId}"]`) : null;
       if (tableEl) {
         const updated = renderNodeById(tableNodeId);
         if (!updated) { renderDocument(); if (canvas) canvas.scrollTop = scrollTop; }
@@ -1268,7 +1271,7 @@ function initTablePropsModal() {
   // Cancel
   $('tpCancelBtn').addEventListener('click', () => {
     modal.classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
 
   // Apply
@@ -1278,12 +1281,12 @@ function initTablePropsModal() {
 
     applyTableProps(tableId);
     modal.classList.remove('show');
-    $('docPage').focus();
+    ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   });
 
   // Backdrop close
   modal.addEventListener('click', e => {
-    if (e.target === modal) { modal.classList.remove('show'); $('docPage').focus(); }
+    if (e.target === modal) { modal.classList.remove('show'); ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus(); }
   });
 }
 
@@ -1304,7 +1307,7 @@ function openTableProps(tableId) {
   modal.querySelector('.tp-align-btn[data-align="left"]').classList.add('active');
 
   // Try to read current table state from DOM
-  const tableEl = $('docPage').querySelector(`[data-node-id="${tableId}"]`);
+  const tableEl = $('pageContainer')?.querySelector(`[data-node-id="${tableId}"]`);
   if (tableEl) {
     const table = tableEl.tagName === 'TABLE' ? tableEl : tableEl.querySelector('table');
     if (table) {
@@ -1338,7 +1341,7 @@ function openTableProps(tableId) {
 }
 
 function applyTableProps(tableId) {
-  const tableEl = $('docPage').querySelector(`[data-node-id="${tableId}"]`);
+  const tableEl = $('pageContainer')?.querySelector(`[data-node-id="${tableId}"]`);
   if (!tableEl) return;
   const table = tableEl.tagName === 'TABLE' ? tableEl : tableEl.querySelector('table');
   if (!table) return;
@@ -1571,7 +1574,7 @@ function closeMoreMenu() {
 // ── E6.2: Touch Selection Support ────────────────
 // Double-tap to select word, long-press for context menu (cut/copy/paste).
 function initTouchSelection() {
-  const page = $('docPage');
+  const page = $('pageContainer');
   if (!page) return;
 
   // Only activate on touch devices

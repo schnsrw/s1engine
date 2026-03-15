@@ -155,7 +155,7 @@ export function applyFormat(key, value) {
   const info = getSelectionInfo();
   if (!info) return;
 
-  const page = $('docPage');
+  const page = $('pageContainer');
   const startEl = page.querySelector(`[data-node-id="${info.startNodeId}"]`) || info.startEl;
   const endEl = info.endNodeId !== info.startNodeId
     ? (page.querySelector(`[data-node-id="${info.endNodeId}"]`) || info.endEl)
@@ -211,7 +211,7 @@ export function toggleFormat(key) {
   const info = getSelectionInfo();
   if (!info) return;
 
-  const page = $('docPage');
+  const page = $('pageContainer');
   const startEl = page.querySelector(`[data-node-id="${info.startNodeId}"]`) || info.startEl;
   const endEl = info.endNodeId !== info.startNodeId
     ? (page.querySelector(`[data-node-id="${info.endNodeId}"]`) || info.endEl)
@@ -261,7 +261,7 @@ export function toggleFormat(key) {
 function applyFormatPair(clearKey, clearVal, setKey, setVal, info, startEl, endEl) {
   const { doc } = state;
   if (!doc) return;
-  const page = $('docPage');
+  const page = $('pageContainer');
 
   // For collapsed cursors, just update pending formats for both keys
   if (info.collapsed) {

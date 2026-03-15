@@ -223,11 +223,10 @@ function _updateStatusBarImpl() {
     const words = text.trim() ? text.trim().split(/\s+/).filter(w => w.length > 0) : [];
     const wordCount = words.length;
     const charCount = [...text].length;
-    const page = $('docPage');
-    const paraCount = page ? page.querySelectorAll('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]').length : 0;
-    // Count page breaks to estimate page count
-    const pageBreaks = page ? page.querySelectorAll('.page-break').length : 0;
-    const pageCount = pageBreaks + 1;
+    const container = $('pageContainer');
+    const paraCount = container ? container.querySelectorAll('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]').length : 0;
+    // Count pages from pageElements
+    const pageCount = state.pageElements?.length || 1;
     const info = $('statusInfo');
     if (info && !info._userMsg) {
       info.textContent = `${wordCount.toLocaleString()} words \u00B7 ${charCount.toLocaleString()} characters \u00B7 ${paraCount} paragraphs \u00B7 ${pageCount} page${pageCount !== 1 ? 's' : ''}`;
@@ -259,7 +258,7 @@ export function newDocument() {
   renderDocument();
   renderRuler(); // Update ruler with document page dimensions
   $('docName').value = 'Untitled Document';
-  $('docPage').focus();
+  ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
   state.dirty = false;
   updateDirtyIndicator();
   updateStatusBar();
@@ -338,8 +337,8 @@ export function updateTrackChanges() {
   if (!doc) return;
   try {
     // Count tracked change elements in the rendered DOM
-    const page = $('docPage');
-    const tcElements = page.querySelectorAll('[data-tc-node-id]');
+    const container = $('pageContainer');
+    const tcElements = container ? container.querySelectorAll('[data-tc-node-id]') : [];
     const count = tcElements.length;
     if (count > 0) {
       $('tcCount').textContent = count + ' tracked change' + (count !== 1 ? 's' : '');

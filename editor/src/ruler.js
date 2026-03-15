@@ -102,8 +102,8 @@ function applyIndent(type, valuePt, nodeId) {
   if (!state.doc || !nodeId) return;
   try {
     // Sync text before modifying attributes
-    const page = document.getElementById('docPage');
-    const el = page && page.querySelector(`[data-node-id="${nodeId}"]`);
+    const container = document.getElementById('pageContainer');
+    const el = container && container.querySelector(`[data-node-id="${nodeId}"]`);
     if (el) syncParagraphText(el);
 
     if (type === 'left') {

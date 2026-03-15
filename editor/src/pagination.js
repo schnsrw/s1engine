@@ -1,203 +1,358 @@
-// Page break visualization using WASM layout engine.
-// Shows page breaks, headers, and footers like a real document editor.
+// Multi-page rendering — per-page contenteditable containers.
+// WASM get_page_map_json() is the single source of truth for pagination.
 import { state, $ } from './state.js';
 import { updateStatusBar as _updateStatus } from './file.js';
 
-export function updatePageBreaks() {
-  const page = $('docPage');
-  if (!page) return;
+const PT_TO_PX = 96 / 72;
 
-  // Remove previous page-break indicators, editor headers/footers
-  page.querySelectorAll('.page-break, .editor-header, .editor-footer').forEach(el => el.remove());
+let _repaginateTimer = null;
 
+/**
+ * Build or update per-page DOM containers inside #pageContainer.
+ * Each page gets: .page-header (non-editable), .page-content (contenteditable), .page-footer (non-editable).
+ */
+export function repaginate() {
+  const container = $('pageContainer');
   const { doc } = state;
-  if (!doc) return;
+  if (!container || !doc) return;
 
-  // Header/footer HTML from the document (extracted by renderDocument)
-  const headerHtml = state.docHeaderHtml || '';
-  const footerHtml = state.docFooterHtml || '';
+  // Sync text to WASM before querying page map
+  syncAllTextInline();
 
-  // E-10: Sync all text to WASM before querying page map so it reflects latest edits.
-  // Inline sync to avoid circular import with render.js.
-  $('docPage').querySelectorAll('[data-node-id]').forEach(el => {
-    if (el.classList.contains('vs-placeholder')) return;
-    const tag = el.tagName.toLowerCase();
-    if ((tag === 'p' || /^h[1-6]$/.test(tag)) && el.dataset.nodeId) {
-      const nodeId = el.dataset.nodeId;
-      const newText = el.textContent || '';
-      if (state.syncedTextCache.get(nodeId) !== newText) {
-        try {
-          doc.set_paragraph_text(nodeId, newText);
-          state.syncedTextCache.set(nodeId, newText);
-        } catch (_) {}
-      }
-    }
-  });
-
-  // Get page map from WASM layout engine
+  // Get authoritative page map from WASM layout engine
   let pageMap = null;
   try { pageMap = JSON.parse(doc.get_page_map_json()); } catch (_) {}
 
-  const numPages = pageMap?.pages?.length || 1;
-
-  // ── Page 1 header (always shown at top of document) ──
-  const topHdr = document.createElement('div');
-  topHdr.className = 'editor-header';
-  topHdr.contentEditable = 'false';
-  if (headerHtml) {
-    topHdr.innerHTML = headerHtml;
-    substitutePageNumbers(topHdr, 1, numPages);
+  if (!pageMap || !pageMap.pages || pageMap.pages.length === 0) {
+    // Fallback: single page with all content
+    ensureSinglePage(container);
+    state.pageMap = null;
+    _updateStatus();
+    return;
   }
-  // Always prepend header area (even if empty, for page margin visualization)
-  page.prepend(topHdr);
 
-  // Remove previous page-bottom spacers
-  page.querySelectorAll('.page-bottom-spacer').forEach(el => el.remove());
+  const pages = pageMap.pages;
+  const numPages = pages.length;
+  const headerHtml = state.docHeaderHtml || '';
+  const footerHtml = state.docFooterHtml || '';
 
-  if (pageMap && pageMap.pages && numPages > 1) {
-    const pages = pageMap.pages;
-    // Page padding (top + bottom) from actual WASM section margins
-    const ptToPx = 96 / 72;
-    const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72 };
-    const pagePaddingPx = (dims.marginTopPt + dims.marginBottomPt) * ptToPx;
+  // Get page dimensions
+  const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
 
-    for (let i = 0; i < numPages - 1; i++) {
-      const currentPage = pages[i];
-      const nextPage = pages[i + 1];
-      if (!nextPage.nodeIds?.length) continue;
+  // Build nodeToPage map
+  const newNodeToPage = new Map();
+  for (const pg of pages) {
+    for (const nid of pg.nodeIds) {
+      newNodeToPage.set(nid, pg.pageNum);
+    }
+  }
 
-      // Find first DOM element of next page
-      const firstNextEl = page.querySelector(`[data-node-id="${nextPage.nodeIds[0]}"]`);
-      if (!firstNextEl) continue;
+  // Ensure correct number of .doc-page elements
+  const existingPages = container.querySelectorAll('.doc-page');
+  const existingCount = existingPages.length;
 
-      // E1.7: Calculate remaining space to fill the page height.
-      // Measure content height between the previous page break (or top) and this break point.
-      const pageHeightPx = (currentPage.height || 792) * ptToPx;
-      const contentHeightPx = pageHeightPx - pagePaddingPx;
+  // Create missing pages
+  for (let i = existingCount; i < numPages; i++) {
+    const pageEl = createPageElement(i + 1, pages[i], dims, headerHtml, footerHtml, numPages);
+    container.appendChild(pageEl);
+  }
 
-      // Measure actual content height from first to last element bounding box
-      // (includes CSS margins/spacing between elements, unlike sum-of-heights)
-      let sectionContentHeight = 0;
-      const currentNodeIds = currentPage.nodeIds || [];
-      if (currentNodeIds.length > 0) {
-        let firstEl = null, lastEl = null;
-        for (const nid of currentNodeIds) {
-          const el = page.querySelector(`[data-node-id="${nid}"]`);
-          if (el) {
-            if (!firstEl) firstEl = el;
-            lastEl = el;
-          }
-        }
-        if (firstEl && lastEl) {
-          const firstRect = firstEl.getBoundingClientRect();
-          const lastRect = lastEl.getBoundingClientRect();
-          sectionContentHeight = (lastRect.bottom - firstRect.top);
-        }
+  // Remove excess pages
+  for (let i = numPages; i < existingCount; i++) {
+    existingPages[i].remove();
+  }
+
+  // Update state.pageElements
+  state.pageElements = Array.from(container.querySelectorAll('.doc-page'));
+
+  // Reconcile nodes into correct pages
+  for (let i = 0; i < numPages; i++) {
+    const pg = pages[i];
+    const pageEl = state.pageElements[i];
+    const contentEl = pageEl.querySelector('.page-content');
+    if (!contentEl) continue;
+
+    // Update page dimensions
+    applyPageStyle(pageEl, pg, dims);
+
+    // Update header/footer
+    updatePageHeaderFooter(pageEl, pg.pageNum, numPages, headerHtml, footerHtml);
+
+    // Set of nodeIds that belong on this page
+    const pageNodeIds = new Set(pg.nodeIds);
+
+    // Track which nodes are already correctly placed
+    const existingNodeIds = new Set();
+    contentEl.querySelectorAll(':scope > [data-node-id]').forEach(el => {
+      const nid = el.dataset.nodeId;
+      if (pageNodeIds.has(nid)) {
+        existingNodeIds.add(nid);
+      }
+    });
+
+    // Add missing nodes in order
+    let lastInserted = null;
+    for (const nid of pg.nodeIds) {
+      if (existingNodeIds.has(nid)) {
+        // Already on this page — find it for ordering reference
+        lastInserted = contentEl.querySelector(`[data-node-id="${nid}"]`);
+        continue;
       }
 
-      // Add spacer to fill remaining page height
-      const remaining = contentHeightPx - sectionContentHeight;
-      if (remaining > 20) {
-        const spacer = document.createElement('div');
-        spacer.className = 'page-bottom-spacer';
-        spacer.style.height = remaining + 'px';
-        spacer.contentEditable = 'false';
-        firstNextEl.before(spacer);
+      // Check if node exists on another page (move it)
+      let existingEl = null;
+      for (const otherPage of state.pageElements) {
+        if (otherPage === pageEl) continue;
+        const otherContent = otherPage.querySelector('.page-content');
+        if (!otherContent) continue;
+        existingEl = otherContent.querySelector(`[data-node-id="${nid}"]`);
+        if (existingEl) break;
       }
 
-      // Build page break with footer of current page and header of next page
-      const brk = document.createElement('div');
-      brk.className = 'page-break';
-      brk.contentEditable = 'false';
-
-      // Footer for page i
-      const ftrDiv = document.createElement('div');
-      ftrDiv.className = 'pb-footer';
-      if (footerHtml) {
-        ftrDiv.innerHTML = footerHtml;
-        substitutePageNumbers(ftrDiv, i + 1, numPages);
+      if (existingEl) {
+        // Move from another page
+        if (lastInserted && lastInserted.nextSibling) {
+          contentEl.insertBefore(existingEl, lastInserted.nextSibling);
+        } else if (!lastInserted) {
+          contentEl.prepend(existingEl);
+        } else {
+          contentEl.appendChild(existingEl);
+        }
+        lastInserted = existingEl;
       } else {
-        ftrDiv.textContent = `Page ${i + 1}`;
-      }
-      brk.appendChild(ftrDiv);
-
-      // Gap between pages
-      const gap = document.createElement('div');
-      gap.className = 'pb-gap';
-      brk.appendChild(gap);
-
-      // Header for page i+1
-      const hdrDiv = document.createElement('div');
-      hdrDiv.className = 'pb-header';
-      if (headerHtml) {
-        hdrDiv.innerHTML = headerHtml;
-        substitutePageNumbers(hdrDiv, i + 2, numPages);
-      }
-      brk.appendChild(hdrDiv);
-
-      // Page badge
-      const badge = document.createElement('span');
-      badge.className = 'pb-badge';
-      badge.textContent = `Page ${i + 2}`;
-      brk.appendChild(badge);
-
-      firstNextEl.before(brk);
-    }
-  }
-
-  // ── Last page spacer (fill remaining height on final page) ──
-  {
-    const pgArr = pageMap?.pages;
-    const lastPage = pgArr?.[pgArr.length - 1] || null;
-    const lastNodeIds = lastPage?.nodeIds || [];
-    if (lastNodeIds.length > 0) {
-      const ptToPxR = 96 / 72;
-      const padPx = 96 * 2;
-      const pageHPx = (lastPage.height || 792) * ptToPxR;
-      const contentHPx = pageHPx - padPx;
-      let firstEl = null, lastEl = null;
-      for (const nid of lastNodeIds) {
-        const el = page.querySelector(`[data-node-id="${nid}"]`);
-        if (el) {
-          if (!firstEl) firstEl = el;
-          lastEl = el;
-        }
-      }
-      if (firstEl && lastEl) {
-        const sectionH = lastEl.getBoundingClientRect().bottom - firstEl.getBoundingClientRect().top;
-        const remaining = contentHPx - sectionH;
-        if (remaining > 20) {
-          const spacer = document.createElement('div');
-          spacer.className = 'page-bottom-spacer';
-          spacer.style.height = remaining + 'px';
-          spacer.contentEditable = 'false';
-          page.appendChild(spacer);
-        }
+        // Render from WASM
+        try {
+          const html = doc.render_node_html(nid);
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          const newEl = temp.firstElementChild;
+          if (newEl) {
+            if (!newEl.innerHTML.trim()) newEl.innerHTML = '<br>';
+            if (lastInserted && lastInserted.nextSibling) {
+              contentEl.insertBefore(newEl, lastInserted.nextSibling);
+            } else if (!lastInserted) {
+              contentEl.prepend(newEl);
+            } else {
+              contentEl.appendChild(newEl);
+            }
+            lastInserted = newEl;
+            // Update cache
+            state.nodeIdToElement.set(nid, newEl);
+            state.syncedTextCache.set(nid, newEl.textContent || '');
+          }
+        } catch (_) {}
       }
     }
+
+    // Remove nodes that don't belong on this page anymore
+    contentEl.querySelectorAll(':scope > [data-node-id]').forEach(el => {
+      if (!pageNodeIds.has(el.dataset.nodeId)) {
+        // Will be picked up by the correct page's loop
+        // Only remove if it's already been placed elsewhere, or store temporarily
+        const correctPage = newNodeToPage.get(el.dataset.nodeId);
+        if (correctPage && correctPage !== pg.pageNum) {
+          // Will be moved by the correct page's iteration — leave it for now
+          // But if we've already processed that page, we need to move it
+        }
+      }
+    });
+
+    // Ensure correct ordering within the page
+    reorderChildren(contentEl, pg.nodeIds);
   }
 
-  // ── Footer (always shown at bottom of document) ──
-  const btmFtr = document.createElement('div');
-  btmFtr.className = 'editor-footer';
-  btmFtr.contentEditable = 'false';
-  if (footerHtml) {
-    btmFtr.innerHTML = footerHtml;
-    substitutePageNumbers(btmFtr, numPages, numPages);
-  } else {
-    // Default page number footer
-    btmFtr.innerHTML = `<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">${numPages}</span>`;
+  // Second pass: remove any orphaned nodes (nodes in DOM not in any page)
+  for (const pageEl of state.pageElements) {
+    const contentEl = pageEl.querySelector('.page-content');
+    if (!contentEl) continue;
+    contentEl.querySelectorAll(':scope > [data-node-id]').forEach(el => {
+      if (!newNodeToPage.has(el.dataset.nodeId)) {
+        el.remove();
+      }
+    });
   }
-  page.appendChild(btmFtr);
+
+  // Update state
+  state.pageMap = pageMap;
+  state.nodeToPage = newNodeToPage;
+
+  // Rebuild nodeIdToElement map
+  state.nodeIdToElement.clear();
+  for (const pageEl of state.pageElements) {
+    const contentEl = pageEl.querySelector('.page-content');
+    if (!contentEl) continue;
+    contentEl.querySelectorAll('[data-node-id]').forEach(el => {
+      state.nodeIdToElement.set(el.dataset.nodeId, el);
+    });
+  }
 
   _updateStatus();
+}
+
+/**
+ * Schedule a debounced repagination (300ms).
+ */
+export function scheduleRepaginate() {
+  clearTimeout(_repaginateTimer);
+  _repaginateTimer = setTimeout(() => repaginate(), 300);
+}
+
+/**
+ * Legacy compatibility — called by existing code that used updatePageBreaks()
+ */
+export function updatePageBreaks() {
+  repaginate();
+}
+
+// ─── Internal helpers ──────────────────────────────────
+
+function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalPages) {
+  const pageEl = document.createElement('div');
+  pageEl.className = 'doc-page';
+  pageEl.dataset.page = String(pageNum);
+
+  applyPageStyle(pageEl, pgData, dims);
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'page-header';
+  header.contentEditable = 'false';
+  if (headerHtml) {
+    header.innerHTML = headerHtml;
+    substitutePageNumbers(header, pageNum, totalPages);
+  }
+  pageEl.appendChild(header);
+
+  // Content (editable)
+  const content = document.createElement('div');
+  content.className = 'page-content';
+  content.contentEditable = 'true';
+  content.spellcheck = true;
+  content.lang = 'en';
+  content.setAttribute('role', 'textbox');
+  content.setAttribute('aria-multiline', 'true');
+  content.setAttribute('aria-label', `Page ${pageNum} content`);
+  pageEl.appendChild(content);
+
+  // Footer
+  const footer = document.createElement('div');
+  footer.className = 'page-footer';
+  footer.contentEditable = 'false';
+  if (footerHtml) {
+    footer.innerHTML = footerHtml;
+    substitutePageNumbers(footer, pageNum, totalPages);
+  } else {
+    footer.innerHTML = `<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">${pageNum}</span>`;
+  }
+  pageEl.appendChild(footer);
+
+  return pageEl;
+}
+
+function applyPageStyle(pageEl, pgData, dims) {
+  const w = (pgData?.width || 612) * PT_TO_PX;
+  const h = (pgData?.height || 792) * PT_TO_PX;
+  pageEl.style.width = Math.round(w) + 'px';
+  pageEl.style.minHeight = Math.round(h) + 'px';
+
+  // Content area gets the margin padding
+  const contentEl = pageEl.querySelector('.page-content');
+  if (contentEl) {
+    contentEl.style.paddingTop = Math.round(dims.marginTopPt * PT_TO_PX) + 'px';
+    contentEl.style.paddingBottom = Math.round(dims.marginBottomPt * PT_TO_PX) + 'px';
+    contentEl.style.paddingLeft = Math.round(dims.marginLeftPt * PT_TO_PX) + 'px';
+    contentEl.style.paddingRight = Math.round(dims.marginRightPt * PT_TO_PX) + 'px';
+  }
+}
+
+function updatePageHeaderFooter(pageEl, pageNum, totalPages, headerHtml, footerHtml) {
+  const header = pageEl.querySelector('.page-header');
+  if (header) {
+    if (headerHtml) {
+      header.innerHTML = headerHtml;
+      substitutePageNumbers(header, pageNum, totalPages);
+    } else {
+      header.innerHTML = '';
+    }
+  }
+
+  const footer = pageEl.querySelector('.page-footer');
+  if (footer) {
+    if (footerHtml) {
+      footer.innerHTML = footerHtml;
+      substitutePageNumbers(footer, pageNum, totalPages);
+    } else {
+      footer.innerHTML = `<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">${pageNum}</span>`;
+    }
+  }
+}
+
+/**
+ * Reorder children of contentEl to match the order in nodeIds array.
+ */
+function reorderChildren(contentEl, nodeIds) {
+  const childMap = new Map();
+  contentEl.querySelectorAll(':scope > [data-node-id]').forEach(el => {
+    childMap.set(el.dataset.nodeId, el);
+  });
+
+  let prev = null;
+  for (const nid of nodeIds) {
+    const el = childMap.get(nid);
+    if (!el) continue;
+    if (prev) {
+      if (el.previousElementSibling !== prev) {
+        prev.after(el);
+      }
+    } else {
+      if (el !== contentEl.firstElementChild) {
+        contentEl.prepend(el);
+      }
+    }
+    prev = el;
+  }
+}
+
+/**
+ * Fallback: ensure a single page exists when no page map available.
+ */
+function ensureSinglePage(container) {
+  if (container.querySelector('.doc-page')) return;
+  const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
+  const pageEl = createPageElement(1, null, dims, '', '', 1);
+  container.appendChild(pageEl);
+  state.pageElements = [pageEl];
+}
+
+/**
+ * Sync all text content to WASM (inline to avoid circular import with render.js).
+ */
+function syncAllTextInline() {
+  const { doc } = state;
+  if (!doc) return;
+  for (const pageEl of state.pageElements) {
+    const contentEl = pageEl?.querySelector('.page-content');
+    if (!contentEl) continue;
+    contentEl.querySelectorAll('[data-node-id]').forEach(el => {
+      const tag = el.tagName.toLowerCase();
+      if ((tag === 'p' || /^h[1-6]$/.test(tag)) && el.dataset.nodeId) {
+        const nodeId = el.dataset.nodeId;
+        const newText = el.textContent || '';
+        if (state.syncedTextCache.get(nodeId) !== newText) {
+          try {
+            doc.set_paragraph_text(nodeId, newText);
+            state.syncedTextCache.set(nodeId, newText);
+          } catch (_) {}
+        }
+      }
+    });
+  }
 }
 
 /**
  * Replace page number / page count field placeholders in header/footer HTML.
  */
 function substitutePageNumbers(container, pageNum, totalPages) {
-  // Handle <span data-field="PageNumber"> elements from WASM
   container.querySelectorAll('[data-field]').forEach(el => {
     const field = el.dataset.field;
     if (field === 'PageNumber' || field === 'PAGE') {
@@ -206,7 +361,6 @@ function substitutePageNumbers(container, pageNum, totalPages) {
       el.textContent = String(totalPages);
     }
   });
-  // Handle plain text patterns
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
   let node;
   while ((node = walker.nextNode())) {
@@ -219,6 +373,35 @@ function substitutePageNumbers(container, pageNum, totalPages) {
   }
 }
 
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/**
+ * Get the active .page-content element (the one with focus or the first one).
+ */
+export function getActivePage() {
+  // Check which page has focus
+  const active = document.activeElement;
+  if (active && active.classList?.contains('page-content')) return active;
+  // Walk up from active element
+  let n = active;
+  while (n) {
+    if (n.classList?.contains('page-content')) return n;
+    n = n.parentElement;
+  }
+  // Fallback to first page
+  const first = $('pageContainer')?.querySelector('.page-content');
+  return first;
+}
+
+/**
+ * Get the .page-content element for a given node ID.
+ */
+export function getPageForNode(nodeId) {
+  const pageNum = state.nodeToPage.get(nodeId);
+  if (pageNum && state.pageElements[pageNum - 1]) {
+    return state.pageElements[pageNum - 1].querySelector('.page-content');
+  }
+  // Fallback: search all pages
+  const container = $('pageContainer');
+  if (!container) return null;
+  const el = container.querySelector(`[data-node-id="${nodeId}"]`);
+  return el?.closest('.page-content') || null;
 }

@@ -6,7 +6,7 @@ import { getActiveNodeId } from './selection.js';
 import { broadcastOp } from './collab.js';
 
 export function setupImages(scope) {
-  const root = scope || $('docPage');
+  const root = scope || $('pageContainer');
   const imgs = root.tagName === 'IMG' ? [root] : root.querySelectorAll('img');
   imgs.forEach(img => {
     img.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); selectImage(img); });
@@ -16,7 +16,7 @@ export function setupImages(scope) {
   });
   // Set up drop targets on the page
   if (!root._dropSetup) {
-    const page = $('docPage');
+    const page = $('pageContainer');
     page.addEventListener('dragover', onDragOver);
     page.addEventListener('drop', onDrop);
     page._dropSetup = true;
@@ -99,7 +99,7 @@ function onDrop(e) {
 }
 
 function findDropTarget(e) {
-  const page = $('docPage');
+  const page = $('pageContainer');
   // Only consider body-level block elements (not header/footer content)
   const els = page.querySelectorAll(':scope > [data-node-id]');
   let closest = null;
@@ -278,7 +278,7 @@ document.addEventListener('mousedown', e => {
 
 // ─── Image Context Menu ──────────────────────────
 export function initImageContextMenu() {
-  const page = $('docPage');
+  const page = $('pageContainer');
   page.addEventListener('contextmenu', e => {
     const img = e.target.closest('img');
     if (!img || !state.doc) return;

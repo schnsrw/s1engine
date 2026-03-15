@@ -13,7 +13,7 @@ import { broadcastOp } from './collab.js';
 import { setZoomLevel } from './toolbar-handlers.js';
 
 export function initInput() {
-  const page = $('docPage');
+  const page = $('pageContainer');
 
   // ─── E-01 fix: Capture cursor offset before text insertion for pending formats ───
   page.addEventListener('beforeinput', (e) => {
@@ -712,8 +712,8 @@ export function initInput() {
     // Close find bar
     if ($('findBar').classList.contains('show')) {
       $('findBar').classList.remove('show');
-      const docPage = $('docPage');
-      if (docPage) docPage.focus();
+      const activePage = $('pageContainer')?.querySelector('.page-content');
+      if (activePage) activePage.focus();
       return;
     }
     // Close table modal
@@ -1019,10 +1019,10 @@ function doCut() {
     state.doc.delete_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset);
     broadcastOp({ action: 'deleteSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.endNodeId, endOffset: info.endOffset });
     renderDocument();
-    const el = $('docPage').querySelector(`[data-node-id="${info.startNodeId}"]`);
+    const el = $('pageContainer')?.querySelector(`[data-node-id="${info.startNodeId}"]`);
     if (el) setCursorAtOffset(el, info.startOffset);
     else {
-      const first = $('docPage').querySelector('[data-node-id]');
+      const first = $('pageContainer')?.querySelector('[data-node-id]');
       if (first) setCursorAtStart(first);
       else { state.doc.append_paragraph(''); renderDocument(); }
     }

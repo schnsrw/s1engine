@@ -1,7 +1,19 @@
 // Selection mapping: DOM ↔ WASM node IDs + character offsets
 import { state, $ } from './state.js';
 
-const PAGE = () => $('docPage');
+// Returns the nearest page-content container or the pageContainer itself
+const PAGE = () => {
+  // Try to find which page-content contains the current selection
+  const active = document.activeElement;
+  if (active && active.classList?.contains('page-content')) return active;
+  let n = active;
+  while (n) {
+    if (n.classList?.contains('page-content')) return n;
+    n = n.parentElement;
+  }
+  // Fallback: return pageContainer so walks still stop at the boundary
+  return $('pageContainer');
+};
 
 export function findParagraphEl(node) {
   let n = node;

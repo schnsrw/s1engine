@@ -49,6 +49,11 @@ export const state = {
   docFooterHtml: '',
   // Page dimensions from WASM sections (in points)
   pageDims: null,
+  // Multi-page rendering state
+  pageMap: null,           // parsed get_page_map_json() result
+  pageElements: [],        // array of .doc-page DOM elements
+  nodeToPage: new Map(),   // nodeId string → page number
+  activePageNum: 1,        // currently focused page
   // E1.5: Callback for refreshing find highlights after text changes
   _findRefreshTimer: null,
   _onTextChanged: null,

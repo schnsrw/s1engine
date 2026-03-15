@@ -61,7 +61,7 @@ function doFind() {
 }
 
 function domFind(query) {
-  const page = $('docPage');
+  const page = $('pageContainer');
   const text = page.textContent || '';
   const lower = text.toLowerCase();
   const q = query.toLowerCase();
@@ -73,7 +73,7 @@ function domFind(query) {
 }
 
 function highlightMatch(match, active) {
-  const page = $('docPage');
+  const page = $('pageContainer');
   const el = page.querySelector(`[data-node-id="${match.nodeId}"]`);
   if (!el) return;
 
@@ -110,7 +110,7 @@ function highlightMatch(match, active) {
 }
 
 function clearHighlights() {
-  $('docPage').querySelectorAll('mark.find-highlight').forEach(m => {
+  $('pageContainer').querySelectorAll('mark.find-highlight').forEach(m => {
     const parent = m.parentNode;
     while (m.firstChild) parent.insertBefore(m.firstChild, m);
     m.remove();
