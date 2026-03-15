@@ -20,26 +20,13 @@ jobs:
       - run: cargo test --workspace
 
   test-msrv:
-    name: Test (MSRV 1.75)
+    name: Test (MSRV 1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@1.85
       - uses: Swatinem/rust-cache@v2
-      - name: Test core crates (excluding pdf/wasm/c which need newer Rust)
-        run: >
-          cargo test
-          -p s1-model
-          -p s1-ops
-          -p s1-format-docx
-          -p s1-format-odt
-          -p s1-format-txt
-          -p s1-format-md
-          -p s1-convert
-          -p s1-crdt
-          -p s1-layout
-          -p s1-text
-          -p s1engine
+      - run: cargo test --workspace
 
   clippy:
     name: Clippy
