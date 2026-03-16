@@ -14,7 +14,7 @@
 # ──────────────────────────────────────────────────────────
 # Stage 1: Build WASM bindings from the Rust workspace
 # ──────────────────────────────────────────────────────────
-FROM rust:1.82-bookworm AS wasm-builder
+FROM rust:1.88-bookworm AS wasm-builder
 
 # Install wasm-pack
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
@@ -61,7 +61,9 @@ RUN for dir in \
       ffi/wasm/src \
       ffi/c/src; do \
     mkdir -p "$dir" && echo "" > "$dir/lib.rs"; \
-    done
+    done && \
+    mkdir -p crates/s1engine/benches && \
+    echo "fn main() {}" > crates/s1engine/benches/engine_bench.rs
 
 # Pre-fetch and compile dependencies (cached unless Cargo.toml/Cargo.lock change)
 RUN cargo fetch
