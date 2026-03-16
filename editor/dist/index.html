@@ -12,8 +12,8 @@
   <!-- KaTeX — equation rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script type="module" crossorigin src="/assets/index-BgiHrIve.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-UUogzr4x.css">
+  <script type="module" crossorigin src="/assets/index-BvllGdKI.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CEznNZ0F.css">
 </head>
 <body>
 <div class="app" id="app">
@@ -101,6 +101,15 @@
         <button class="app-menu-entry" id="miTOC" role="menuitem" tabindex="-1"><span class="msi">toc</span> Table of Contents</button>
         <button class="app-menu-entry" id="miHR" role="menuitem" tabindex="-1"><span class="msi">horizontal_rule</span> Horizontal Rule</button>
         <button class="app-menu-entry" id="miPageBreak" role="menuitem" tabindex="-1"><span class="msi">insert_page_break</span> Page Break</button>
+        <div class="app-menu-item app-menu-submenu" role="menuitem" aria-haspopup="true" tabindex="-1">
+          <button class="app-menu-entry app-menu-submenu-trigger" tabindex="-1"><span class="msi">view_week</span> Section Break <span class="submenu-arrow">&#9656;</span></button>
+          <div class="app-menu-dropdown app-submenu-dropdown" role="menu" aria-label="Section Break">
+            <button class="app-menu-entry" id="miSectionNextPage" role="menuitem" tabindex="-1" title="Start next section on a new page">Next Page</button>
+            <button class="app-menu-entry" id="miSectionContinuous" role="menuitem" tabindex="-1" title="Start next section on the same page">Continuous</button>
+            <button class="app-menu-entry" id="miSectionEvenPage" role="menuitem" tabindex="-1" title="Start next section on the next even page">Even Page</button>
+            <button class="app-menu-entry" id="miSectionOddPage" role="menuitem" tabindex="-1" title="Start next section on the next odd page">Odd Page</button>
+          </div>
+        </div>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="miHeaderFooter" role="menuitem" tabindex="-1"><span class="msi">vertical_split</span> Headers &amp; Footers...</button>
         <div class="app-menu-sep" role="separator"></div>
@@ -118,8 +127,25 @@
         <button class="app-menu-entry" id="menuStrike" role="menuitem" tabindex="-1"><span class="msi">strikethrough_s</span> Strikethrough</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuClearFormat" role="menuitem" tabindex="-1"><span class="msi">format_clear</span> Clear formatting</button>
+        <button class="app-menu-entry" id="menuFormatPainter" role="menuitem" tabindex="-1"><span class="msi">format_paint</span> Format Painter</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuPageSetup" role="menuitem" tabindex="-1"><span class="msi">description</span> Page Setup...</button>
+      </div>
+    </div>
+    <div class="app-menu-item" data-menu="reviewMenu">
+      <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Review</button>
+      <div class="app-menu-dropdown" id="reviewMenu" role="menu" aria-label="Review">
+        <button class="app-menu-entry" id="menuModeEditing" role="menuitem" tabindex="-1"><span class="msi">edit</span> Editing Mode</button>
+        <button class="app-menu-entry" id="menuModeSuggesting" role="menuitem" tabindex="-1"><span class="msi">rate_review</span> Suggesting Mode</button>
+        <button class="app-menu-entry" id="menuModeViewing" role="menuitem" tabindex="-1"><span class="msi">visibility</span> Viewing Mode</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuAcceptAll" role="menuitem" tabindex="-1"><span class="msi">done_all</span> Accept All Changes</button>
+        <button class="app-menu-entry" id="menuRejectAll" role="menuitem" tabindex="-1"><span class="msi">close</span> Reject All Changes</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuPrevChange" role="menuitem" tabindex="-1"><span class="msi">arrow_upward</span> Previous Change <span class="shortcut">Ctrl+Shift+[</span></button>
+        <button class="app-menu-entry" id="menuNextChange" role="menuitem" tabindex="-1"><span class="msi">arrow_downward</span> Next Change <span class="shortcut">Ctrl+Shift+]</span></button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuShowChangesPanel" role="menuitem" tabindex="-1"><span class="msi">checklist</span> Track Changes Panel</button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="toolsMenu">
@@ -160,9 +186,22 @@
     <div class="tb-sep" role="separator"></div>
 
     <!-- Zoom -->
-    <button class="tb-btn tb-collapsible-768" id="tbZoomOut" title="Zoom out" aria-label="Zoom out"><span class="msi">zoom_out</span></button>
-    <span class="tb-zoom-value tb-collapsible-768" id="tbZoomValue">100%</span>
-    <button class="tb-btn tb-collapsible-768" id="tbZoomIn" title="Zoom in" aria-label="Zoom in"><span class="msi">zoom_in</span></button>
+    <button class="tb-btn tb-collapsible-768" id="tbZoomOut" title="Zoom out (Ctrl+-)" aria-label="Zoom out"><span class="msi">zoom_out</span></button>
+    <div class="tb-zoom-wrap tb-collapsible-768">
+      <button class="tb-zoom-value" id="tbZoomValue" title="Zoom presets" aria-haspopup="true" aria-expanded="false">100%</button>
+      <div class="tb-zoom-dropdown" id="tbZoomDropdown" role="menu" aria-label="Zoom presets">
+        <button class="zoom-preset" data-zoom="50" role="menuitem">50%</button>
+        <button class="zoom-preset" data-zoom="75" role="menuitem">75%</button>
+        <button class="zoom-preset" data-zoom="100" role="menuitem">100%</button>
+        <button class="zoom-preset" data-zoom="125" role="menuitem">125%</button>
+        <button class="zoom-preset" data-zoom="150" role="menuitem">150%</button>
+        <button class="zoom-preset" data-zoom="200" role="menuitem">200%</button>
+        <div class="zoom-preset-sep"></div>
+        <button class="zoom-preset" data-zoom="fit-width" role="menuitem">Fit Width</button>
+        <button class="zoom-preset" data-zoom="fit-page" role="menuitem">Fit Page</button>
+      </div>
+    </div>
+    <button class="tb-btn tb-collapsible-768" id="tbZoomIn" title="Zoom in (Ctrl++)" aria-label="Zoom in"><span class="msi">zoom_in</span></button>
     <div class="tb-sep tb-collapsible-768" role="separator"></div>
 
     <!-- Style Gallery -->
@@ -229,6 +268,7 @@
     <button class="tb-btn" id="btnItalic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><span class="msi">format_italic</span></button>
     <button class="tb-btn tb-collapsible-480" id="btnUnderline" title="Underline (Ctrl+U)" aria-label="Underline" aria-pressed="false"><span class="msi">format_underlined</span></button>
     <button class="tb-btn tb-collapsible-1024" id="btnStrike" title="Strikethrough" aria-label="Strikethrough" aria-pressed="false"><span class="msi">strikethrough_s</span></button>
+    <button class="tb-btn tb-collapsible-1024" id="btnFormatPainter" title="Format Painter (single-click: apply once, double-click: sticky mode)" aria-label="Format Painter" aria-pressed="false"><span class="msi">format_paint</span></button>
     <div class="tb-sep tb-collapsible-1024" role="separator"></div>
 
     <!-- Superscript / Subscript -->
@@ -294,6 +334,15 @@
         <button class="ctx-item" data-action="toc" role="menuitem"><span class="msi ctx-icon">toc</span> Table of Contents</button>
         <button class="ctx-item" data-action="hr" role="menuitem"><span class="msi ctx-icon">horizontal_rule</span> Horizontal Rule</button>
         <button class="ctx-item" data-action="pagebreak" role="menuitem"><span class="msi ctx-icon">insert_page_break</span> Page Break</button>
+        <div class="ctx-item ctx-submenu-wrapper" role="menuitem" aria-haspopup="true">
+          <span class="msi ctx-icon">view_week</span> Section Break <span class="submenu-arrow">&#9656;</span>
+          <div class="ctx-submenu" role="menu">
+            <button class="ctx-item" data-action="sectionNextPage" role="menuitem" title="Start next section on a new page">Next Page</button>
+            <button class="ctx-item" data-action="sectionContinuous" role="menuitem" title="Start next section on the same page">Continuous</button>
+            <button class="ctx-item" data-action="sectionEvenPage" role="menuitem" title="Start next section on the next even page">Even Page</button>
+            <button class="ctx-item" data-action="sectionOddPage" role="menuitem" title="Start next section on the next odd page">Odd Page</button>
+          </div>
+        </div>
         <div class="ctx-sep"></div>
         <button class="ctx-item" data-action="headerfooter" role="menuitem"><span class="msi ctx-icon">vertical_split</span> Headers &amp; Footers...</button>
         <div class="ctx-sep"></div>
@@ -311,6 +360,7 @@
       <div class="more-menu" id="moreMenu" role="menu" aria-label="More toolbar options">
         <!-- Formatting options (shown when toolbar items are collapsed) -->
         <button class="ctx-item more-item more-item-1024" data-more="strikethrough" role="menuitem" title="Toggle strikethrough"><span class="msi ctx-icon">strikethrough_s</span> Strikethrough</button>
+        <button class="ctx-item more-item more-item-1024" data-more="formatPainter" role="menuitem" title="Format Painter"><span class="msi ctx-icon">format_paint</span> Format Painter</button>
         <button class="ctx-item more-item more-item-1024" data-more="superscript" role="menuitem" title="Toggle superscript"><span class="msi ctx-icon">superscript</span> Superscript</button>
         <button class="ctx-item more-item more-item-1024" data-more="subscript" role="menuitem" title="Toggle subscript"><span class="msi ctx-icon">subscript</span> Subscript</button>
         <button class="ctx-item more-item more-item-1024" data-more="textColor" role="menuitem" title="Change text color"><span class="msi ctx-icon">format_color_text</span> Text Color...
@@ -352,9 +402,16 @@
   <div class="tc-bar" id="tcBar">
     <span class="msi tc-bar-icon">rate_review</span>
     <span id="tcCount">0 tracked changes</span>
+    <div class="tc-bar-nav">
+      <button class="tc-nav-btn" id="btnPrevChange" title="Previous change (Ctrl+Shift+[)"><span class="msi">navigate_before</span></button>
+      <span class="tc-nav-pos" id="tcNavPos"></span>
+      <button class="tc-nav-btn" id="btnNextChange" title="Next change (Ctrl+Shift+])"><span class="msi">navigate_next</span></button>
+    </div>
     <div class="spacer"></div>
-    <button class="tc-btn accept" id="btnAcceptAll"><span class="msi tc-btn-icon">check</span> Accept All</button>
-    <button class="tc-btn reject" id="btnRejectAll"><span class="msi tc-btn-icon">close</span> Reject All</button>
+    <button class="tc-btn accept" id="btnAcceptAll" title="Accept all tracked changes"><span class="msi tc-btn-icon">check</span> Accept All</button>
+    <button class="tc-btn reject" id="btnRejectAll" title="Reject all tracked changes"><span class="msi tc-btn-icon">close</span> Reject All</button>
+    <div class="tc-bar-sep"></div>
+    <button class="tc-btn tc-panel-toggle" id="btnToggleChangesPanel" title="Toggle track changes panel"><span class="msi tc-btn-icon">checklist</span> Changes</button>
   </div>
 
   <!-- Welcome Screen -->
@@ -423,6 +480,34 @@
         <button class="comments-close" id="commentsClose" aria-label="Close comments panel"><span class="msi">close</span></button>
       </div>
       <div class="comments-list" id="commentsList"></div>
+    </div>
+
+    <!-- Track Changes Panel (right, docked) -->
+    <div class="tc-panel" id="tcPanel" role="complementary" aria-label="Track Changes">
+      <div class="tc-panel-header">
+        <h3>Track Changes</h3>
+        <button class="tc-panel-close" id="tcPanelClose" aria-label="Close track changes panel" title="Close panel"><span class="msi">close</span></button>
+      </div>
+      <div class="tc-panel-toolbar">
+        <div class="tc-panel-mode">
+          <label class="tc-mode-label">Mode</label>
+          <select class="tc-mode-select" id="tcModeSelect" title="Choose editing mode">
+            <option value="editing">Editing</option>
+            <option value="suggesting">Suggesting</option>
+            <option value="viewing">Viewing</option>
+          </select>
+        </div>
+        <div class="tc-panel-actions">
+          <button class="tc-panel-action-btn tc-accept-all-btn" id="tcPanelAcceptAll" title="Accept all changes"><span class="msi">done_all</span> Accept All</button>
+          <button class="tc-panel-action-btn tc-reject-all-btn" id="tcPanelRejectAll" title="Reject all changes"><span class="msi">close</span> Reject All</button>
+        </div>
+      </div>
+      <div class="tc-panel-list" id="tcPanelList">
+        <div class="tc-panel-empty" id="tcPanelEmpty">
+          <span class="msi tc-empty-icon">check_circle</span>
+          <p>No tracked changes</p>
+        </div>
+      </div>
     </div>
 
   </div><!-- end .editor-wrapper -->
@@ -502,11 +587,14 @@
 
   <!-- Status Bar -->
   <div class="statusbar" id="statusbar" role="status" aria-live="polite">
-    <select class="editing-mode-select" id="editingModeSelect" title="Editing mode: choose Editing, Suggesting, or Viewing">
-      <option value="editing">Editing</option>
-      <option value="suggesting">Suggesting</option>
-      <option value="viewing">Viewing</option>
-    </select>
+    <div class="editing-mode-wrap" id="editingModeWrap">
+      <span class="msi editing-mode-icon" id="editingModeIcon">edit</span>
+      <select class="editing-mode-select" id="editingModeSelect" title="Editing mode: choose Editing, Suggesting, or Viewing">
+        <option value="editing">Editing</option>
+        <option value="suggesting">Suggesting</option>
+        <option value="viewing">Viewing</option>
+      </select>
+    </div>
     <div class="status-sep"></div>
     <span id="statusInfo">Ready</span>
     <!-- E5.2: Peer presence dots -->
@@ -905,11 +993,25 @@
     <div style="display:flex;flex-direction:column;gap:12px">
       <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
         <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Page Size</legend>
-        <select id="psPageSize" title="Page size" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+        <select id="psPageSize" title="Page size preset" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
           <option value="letter">Letter (8.5 x 11 in)</option>
           <option value="a4">A4 (8.27 x 11.69 in)</option>
           <option value="legal">Legal (8.5 x 14 in)</option>
+          <option value="a3">A3 (11.69 x 16.54 in)</option>
+          <option value="custom">Custom</option>
         </select>
+        <div id="psCustomSize" style="display:none;margin-top:8px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+              Width (in):
+              <input type="number" id="psCustomWidth" value="8.5" min="1" max="60" step="0.01" title="Custom page width in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
+              Height (in):
+              <input type="number" id="psCustomHeight" value="11" min="1" max="60" step="0.01" title="Custom page height in inches" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">
+            </label>
+          </div>
+        </div>
       </fieldset>
       <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
         <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Orientation</legend>

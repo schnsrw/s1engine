@@ -80,13 +80,18 @@ pub fn parse_content_body(
                         parse_toc_into(reader, doc, ctx, body_id, body_child_index, e)?;
                         body_child_index += 1;
                     }
-                    // Non-image draw elements (shapes, text boxes, etc.)
-                    b"custom-shape" | b"rect" | b"circle" | b"ellipse" | b"line"
-                    | b"polygon" | b"polyline" | b"path" | b"text-box" | b"g"
-                    | b"connector" => {
+                    // ODT-11 (WONTFIX): Non-image draw elements (SVG shapes, text boxes,
+                    // connectors, etc.) are silently dropped during parsing. The s1-model
+                    // supports Image and Drawing node types, but full shape/SVG support
+                    // (geometry, transforms, grouped objects) is a separate feature that
+                    // would require significant model extensions. These elements are skipped
+                    // with a debug-mode warning.
+                    b"custom-shape" | b"rect" | b"circle" | b"ellipse" | b"line" | b"polygon"
+                    | b"polyline" | b"path" | b"text-box" | b"g" | b"connector" => {
                         #[cfg(debug_assertions)]
                         eprintln!(
-                            "[s1-format-odt] Note: non-image draw element <draw:{}> skipped (not yet supported)",
+                            "[s1-format-odt] Note: non-image draw element <draw:{}> skipped \
+                             (ODT-11 / WONTFIX — shape/SVG support is a separate feature)",
                             String::from_utf8_lossy(local.as_ref())
                         );
                         skip_element_odt(reader)?;
@@ -158,11 +163,17 @@ fn parse_paragraph_into(
                         child_index += added;
                     }
                     b"a" => {
-                        // Hyperlink — extract URL and set on child runs
-                        // TODO: Internal hyperlinks targeting bookmarks are parsed as regular
-                        // hyperlinks with href="#bookmark-name". The cross-reference resolution
-                        // (linking the href to the bookmark's actual position in the document)
-                        // is not yet implemented.
+                        // Hyperlink — extract URL and set on child runs.
+                        //
+                        // ODT-12 (known limitation): Internal hyperlinks targeting bookmarks
+                        // are parsed as regular hyperlinks with href="#bookmark-name". The
+                        // cross-reference resolution (linking the href to the actual
+                        // BookmarkStart node position in the document tree) is not performed.
+                        // Both bookmark start/end elements and the hyperlink hrefs are
+                        // preserved, so the structural data survives a round-trip — but a
+                        // consumer that needs to navigate to a bookmark target must resolve
+                        // the "#name" href against BookmarkStart nodes themselves. This is
+                        // consistent with how DOCX bookmarks + internal hyperlinks work.
                         let url = get_attr(e, b"href").unwrap_or_default();
                         let added =
                             parse_hyperlink_into(reader, doc, e, ctx, para_id, child_index, &url)?;
@@ -179,8 +190,7 @@ fn parse_paragraph_into(
                     }
                     b"note" => {
                         // Footnote or endnote (<text:note>)
-                        let added =
-                            parse_note_into(reader, doc, ctx, e, para_id, child_index)?;
+                        let added = parse_note_into(reader, doc, ctx, e, para_id, child_index)?;
                         child_index += added;
                     }
                     _ => {}
@@ -708,9 +718,12 @@ fn parse_frame_into(
     }
 
     if href.is_none() {
+        // ODT-11 (WONTFIX): Non-image content within <draw:frame> (e.g. text boxes,
+        // embedded objects) is skipped. See ODT-11 for rationale.
         #[cfg(debug_assertions)]
         eprintln!(
-            "[s1-format-odt] Note: non-image draw element within <draw:frame> skipped (not yet supported)"
+            "[s1-format-odt] Note: non-image draw element within <draw:frame> skipped \
+             (ODT-11 / WONTFIX)"
         );
         return Ok(false);
     }
@@ -852,22 +865,25 @@ fn parse_note_into(
     let ref_id = doc.next_id();
     let mut ref_node = Node::new(ref_id, ref_type);
 
-    // Store citation number
+    // Parse citation into a typed attribute value and store on both the ref
+    // node and the body node so the writer can match them during output.
     let attr_key = if is_endnote {
         AttributeKey::EndnoteNumber
     } else {
         AttributeKey::FootnoteNumber
     };
-    if !citation_text.is_empty() {
+    let citation_value: Option<AttributeValue> = if !citation_text.is_empty() {
         if let Ok(num) = citation_text.parse::<i64>() {
-            ref_node
-                .attributes
-                .set(attr_key, AttributeValue::Int(num));
+            Some(AttributeValue::Int(num))
         } else {
-            ref_node
-                .attributes
-                .set(attr_key, AttributeValue::String(citation_text));
+            Some(AttributeValue::String(citation_text))
         }
+    } else {
+        None
+    };
+
+    if let Some(ref val) = citation_value {
+        ref_node.attributes.set(attr_key.clone(), val.clone());
     }
 
     doc.insert_node(parent_id, index, ref_node)
@@ -880,7 +896,13 @@ fn parse_note_into(
         NodeType::FootnoteBody
     };
     let body_node_id = doc.next_id();
-    let body_node = Node::new(body_node_id, body_type);
+    let mut body_node = Node::new(body_node_id, body_type);
+
+    // Store the same note number on the body node so the writer can match
+    // the inline reference to its body content.
+    if let Some(val) = citation_value {
+        body_node.attributes.set(attr_key, val);
+    }
 
     let doc_root = doc.root_id();
     let root_child_count = doc.node(doc_root).map_or(0, |n| n.children.len());
@@ -937,6 +959,16 @@ fn parse_list(
 }
 
 /// Parse a `<text:list-item>` element.
+///
+/// **Design note (ODT-05 / WONTFIX):** ODF allows multi-paragraph list items
+/// (several `<text:p>` children inside one `<text:list-item>`), but the s1-model
+/// uses a flat paragraph model with `ListInfo` attributes. Each paragraph inside
+/// a list item becomes a separate body-level paragraph tagged with its list level.
+/// This means multi-paragraph list items lose their grouping — the first paragraph
+/// gets the bullet/number and subsequent paragraphs appear as continuation
+/// paragraphs at the same level. Nested `<text:list>` elements are handled by
+/// incrementing the level counter. This is by design and would require a
+/// fundamental model change to support true multi-paragraph list items.
 fn parse_list_item(
     reader: &mut Reader<&[u8]>,
     doc: &mut DocumentModel,
@@ -981,10 +1013,25 @@ fn parse_list_item(
                                 }),
                             );
                         }
+                        if count > 0 {
+                            #[cfg(debug_assertions)]
+                            eprintln!(
+                                "[s1-format-odt] Note: multi-paragraph list item detected at level {}; \
+                                 additional paragraphs are flattened (ODT-05 / WONTFIX)",
+                                level
+                            );
+                        }
                         count += 1;
                     }
                     b"list" => {
                         // Nested list → increment level
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[s1-format-odt] Note: nested <text:list> inside list-item at level {} \
+                             flattened to level {} (ODT-05 / by design)",
+                            level,
+                            level + 1
+                        );
                         let nested = parse_list(
                             reader,
                             doc,
@@ -1038,11 +1085,6 @@ fn parse_toc_into(
                 match name.as_slice() {
                     b"table-of-content-source" => {
                         // Read outline-level attribute
-                        // TODO: Additional TOC source attributes are not yet preserved on
-                        // round-trip. Only text:outline-level is captured. Other attributes
-                        // like text:use-index-marks, text:use-index-source-styles,
-                        // text:index-scope, and child elements like
-                        // <text:index-entry-tab-stop> are lost during parsing.
                         if let Some(level_str) = get_attr(e, b"outline-level") {
                             if let Ok(level) = level_str.parse::<i64>() {
                                 if let Some(toc) = doc.node_mut(toc_id) {
@@ -1051,7 +1093,35 @@ fn parse_toc_into(
                                 }
                             }
                         }
-                        // Skip to end of source element
+                        // Preserve use-index-marks attribute
+                        if let Some(val) = get_attr(e, b"use-index-marks") {
+                            let flag = val == "true";
+                            if let Some(toc) = doc.node_mut(toc_id) {
+                                toc.attributes.set(
+                                    AttributeKey::TocUseIndexMarks,
+                                    AttributeValue::Bool(flag),
+                                );
+                            }
+                        }
+                        // Preserve use-index-source-styles attribute
+                        if let Some(val) = get_attr(e, b"use-index-source-styles") {
+                            let flag = val == "true";
+                            if let Some(toc) = doc.node_mut(toc_id) {
+                                toc.attributes.set(
+                                    AttributeKey::TocUseIndexSourceStyles,
+                                    AttributeValue::Bool(flag),
+                                );
+                            }
+                        }
+                        // Preserve index-scope attribute
+                        if let Some(val) = get_attr(e, b"index-scope") {
+                            if let Some(toc) = doc.node_mut(toc_id) {
+                                toc.attributes
+                                    .set(AttributeKey::TocIndexScope, AttributeValue::String(val));
+                            }
+                        }
+                        // NOTE: Child elements like <text:index-entry-tab-stop> inside the
+                        // source element are not yet preserved on round-trip.
                         skip_element_odt(reader)?;
                     }
                     b"index-body" => {
@@ -1109,6 +1179,28 @@ fn parse_toc_into(
                                 toc.attributes
                                     .set(AttributeKey::TocMaxLevel, AttributeValue::Int(level));
                             }
+                        }
+                    }
+                    if let Some(val) = get_attr(e, b"use-index-marks") {
+                        let flag = val == "true";
+                        if let Some(toc) = doc.node_mut(toc_id) {
+                            toc.attributes
+                                .set(AttributeKey::TocUseIndexMarks, AttributeValue::Bool(flag));
+                        }
+                    }
+                    if let Some(val) = get_attr(e, b"use-index-source-styles") {
+                        let flag = val == "true";
+                        if let Some(toc) = doc.node_mut(toc_id) {
+                            toc.attributes.set(
+                                AttributeKey::TocUseIndexSourceStyles,
+                                AttributeValue::Bool(flag),
+                            );
+                        }
+                    }
+                    if let Some(val) = get_attr(e, b"index-scope") {
+                        if let Some(toc) = doc.node_mut(toc_id) {
+                            toc.attributes
+                                .set(AttributeKey::TocIndexScope, AttributeValue::String(val));
                         }
                     }
                 }
@@ -1759,6 +1851,192 @@ mod tests {
             }
         }
         panic!("CommentBody not found");
+    }
+
+    #[test]
+    fn parse_footnote_basic() {
+        let doc = parse_body_xml(
+            r#"<text:p>Hello<text:note text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>Footnote text</text:p></text:note-body></text:note> world</text:p>"#,
+        );
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let para = doc.node(body.children[0]).unwrap();
+
+        // Find FootnoteRef in the paragraph children
+        let mut found_ref = false;
+        for &cid in &para.children {
+            let child = doc.node(cid).unwrap();
+            if child.node_type == NodeType::FootnoteRef {
+                assert_eq!(
+                    child.attributes.get(&AttributeKey::FootnoteNumber),
+                    Some(&AttributeValue::Int(1))
+                );
+                found_ref = true;
+            }
+        }
+        assert!(found_ref, "FootnoteRef not found in paragraph");
+
+        // Check FootnoteBody on the Document root
+        let root_id = doc.root_id();
+        let root = doc.node(root_id).unwrap();
+        let mut found_body = false;
+        for &cid in &root.children {
+            let child = doc.node(cid).unwrap();
+            if child.node_type == NodeType::FootnoteBody {
+                // Body should have the same note number for writer matching
+                assert_eq!(
+                    child.attributes.get(&AttributeKey::FootnoteNumber),
+                    Some(&AttributeValue::Int(1))
+                );
+                assert_eq!(child.children.len(), 1);
+                found_body = true;
+            }
+        }
+        assert!(found_body, "FootnoteBody not found on document root");
+    }
+
+    #[test]
+    fn parse_endnote_basic() {
+        let doc = parse_body_xml(
+            r#"<text:p>Text<text:note text:note-class="endnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>Endnote content</text:p></text:note-body></text:note></text:p>"#,
+        );
+        let root_id = doc.root_id();
+        let root = doc.node(root_id).unwrap();
+
+        let mut found = false;
+        for &cid in &root.children {
+            let child = doc.node(cid).unwrap();
+            if child.node_type == NodeType::EndnoteBody {
+                assert_eq!(
+                    child.attributes.get(&AttributeKey::EndnoteNumber),
+                    Some(&AttributeValue::Int(1))
+                );
+                found = true;
+            }
+        }
+        assert!(found, "EndnoteBody not found");
+    }
+
+    #[test]
+    fn parse_toc_source_attributes() {
+        let doc = parse_body_xml(
+            r#"<text:table-of-content text:name="TOC">
+                <text:table-of-content-source text:outline-level="4" text:use-index-marks="true" text:use-index-source-styles="false" text:index-scope="document">
+                    <text:index-title-template>Contents</text:index-title-template>
+                </text:table-of-content-source>
+                <text:index-body>
+                    <text:p>Entry 1</text:p>
+                </text:index-body>
+            </text:table-of-content>"#,
+        );
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+
+        assert_eq!(
+            toc.attributes.get(&AttributeKey::TocMaxLevel),
+            Some(&AttributeValue::Int(4))
+        );
+        assert_eq!(
+            toc.attributes.get_bool(&AttributeKey::TocUseIndexMarks),
+            Some(true)
+        );
+        assert_eq!(
+            toc.attributes
+                .get_bool(&AttributeKey::TocUseIndexSourceStyles),
+            Some(false)
+        );
+        assert_eq!(
+            toc.attributes.get_string(&AttributeKey::TocIndexScope),
+            Some("document")
+        );
+    }
+
+    #[test]
+    fn parse_toc_source_empty_element() {
+        // Test the Empty event path (self-closing source element with attributes)
+        let doc = parse_body_xml(
+            r#"<text:table-of-content text:name="TOC">
+                <text:table-of-content-source text:outline-level="5" text:use-index-marks="false" text:index-scope="chapter"/>
+                <text:index-body>
+                    <text:p>Entry</text:p>
+                </text:index-body>
+            </text:table-of-content>"#,
+        );
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let toc = doc.node(body.children[0]).unwrap();
+
+        assert_eq!(
+            toc.attributes.get(&AttributeKey::TocMaxLevel),
+            Some(&AttributeValue::Int(5))
+        );
+        assert_eq!(
+            toc.attributes.get_bool(&AttributeKey::TocUseIndexMarks),
+            Some(false)
+        );
+        assert_eq!(
+            toc.attributes.get_string(&AttributeKey::TocIndexScope),
+            Some("chapter")
+        );
+    }
+
+    #[test]
+    fn parse_nested_list_levels() {
+        let doc = parse_body_xml(
+            r#"<text:list>
+                <text:list-item>
+                    <text:p>Level 0 item</text:p>
+                    <text:list>
+                        <text:list-item>
+                            <text:p>Level 1 item</text:p>
+                        </text:list-item>
+                    </text:list>
+                </text:list-item>
+            </text:list>"#,
+        );
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+
+        // Should have 2 flattened paragraphs
+        assert_eq!(body.children.len(), 2);
+
+        let p0 = doc.node(body.children[0]).unwrap();
+        let li0 = p0
+            .attributes
+            .get_list_info(&AttributeKey::ListInfo)
+            .unwrap();
+        assert_eq!(li0.level, 0);
+
+        let p1 = doc.node(body.children[1]).unwrap();
+        let li1 = p1
+            .attributes
+            .get_list_info(&AttributeKey::ListInfo)
+            .unwrap();
+        assert_eq!(li1.level, 1);
+    }
+
+    #[test]
+    fn parse_internal_bookmark_hyperlink() {
+        // ODT-12: Internal hyperlinks to bookmarks are preserved as regular hyperlinks
+        let doc = parse_body_xml(
+            r##"<text:p><text:bookmark-start text:name="target"/>Target text<text:bookmark-end text:name="target"/></text:p><text:p><text:a xlink:href="#target">Go to target</text:a></text:p>"##,
+        );
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        assert_eq!(body.children.len(), 2);
+
+        // Second paragraph should have a hyperlink run with href="#target"
+        let link_para = doc.node(body.children[1]).unwrap();
+        let mut found = false;
+        for &cid in &link_para.children {
+            let child = doc.node(cid).unwrap();
+            if let Some(url) = child.attributes.get_string(&AttributeKey::HyperlinkUrl) {
+                assert_eq!(url, "#target");
+                found = true;
+            }
+        }
+        assert!(found, "Internal bookmark hyperlink not preserved");
     }
 
     #[test]

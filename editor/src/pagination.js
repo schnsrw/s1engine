@@ -3,6 +3,7 @@
 import { state, $ } from './state.js';
 import { updateStatusBar as _updateStatus } from './file.js';
 import { getEditableText, isInsideNonEditable } from './selection.js';
+import { isSpellCheckEnabled } from './toolbar-handlers.js';
 
 const PT_TO_PX = 96 / 72;
 
@@ -409,8 +410,10 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
 
   // Header
   const header = document.createElement('div');
-  header.className = 'page-header';
+  header.className = 'page-header hf-hoverable';
   header.contentEditable = 'false';
+  header.setAttribute('data-hf-kind', 'header');
+  header.setAttribute('title', 'Double-click to edit header');
   if (headerHtml) {
     header.innerHTML = headerHtml;
     substitutePageNumbers(header, pageNum, totalPages);
@@ -421,7 +424,7 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
   const content = document.createElement('div');
   content.className = 'page-content';
   content.contentEditable = 'true';
-  content.spellcheck = true;
+  content.spellcheck = isSpellCheckEnabled();
   content.lang = 'en';
   content.setAttribute('role', 'textbox');
   content.setAttribute('aria-multiline', 'true');
@@ -430,8 +433,10 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
 
   // Footer
   const footer = document.createElement('div');
-  footer.className = 'page-footer';
+  footer.className = 'page-footer hf-hoverable';
   footer.contentEditable = 'false';
+  footer.setAttribute('data-hf-kind', 'footer');
+  footer.setAttribute('title', 'Double-click to edit footer');
   if (footerHtml) {
     footer.innerHTML = footerHtml;
     substitutePageNumbers(footer, pageNum, totalPages);

@@ -12,7 +12,7 @@ import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
 import { updatePageBreaks } from './pagination.js';
 import { markDirty, saveVersion, updateDirtyIndicator, updateStatusBar, openAutosaveDB } from './file.js';
 import { broadcastOp } from './collab.js';
-import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter } from './toolbar-handlers.js';
+import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode } from './toolbar-handlers.js';
 
 export function initInput() {
   const page = $('pageContainer');
@@ -20,6 +20,38 @@ export function initInput() {
   // ─── Clear pending formats on editor blur ───
   page.addEventListener('blur', () => {
     state.pendingFormats = {};
+  }, true);
+
+  // ─── UXP-02: Double-click to enter header/footer edit mode ───
+  page.addEventListener('dblclick', (e) => {
+    const hfEl = e.target.closest('.page-header, .page-footer');
+    if (!hfEl) return;
+    // Already in edit mode — let normal double-click (word select) work
+    if (hfEl.classList.contains('hf-editing')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pageEl = hfEl.closest('.doc-page');
+    if (!pageEl) return;
+    const kind = hfEl.dataset.hfKind || (hfEl.classList.contains('page-header') ? 'header' : 'footer');
+    enterHeaderFooterEditMode(kind, pageEl);
+  });
+
+  // ─── UXP-02: Click outside header/footer exits edit mode ───
+  document.addEventListener('mousedown', (e) => {
+    if (!state.hfEditingMode) return;
+    const hfEl = e.target.closest('.hf-editing');
+    if (hfEl) return; // Click is inside the editing header/footer
+    // Click on toolbar/modal elements should not exit
+    if (e.target.closest('.hf-toolbar, .hf-close-btn, .modal-overlay, .modal')) return;
+    exitHeaderFooterEditMode();
+  });
+
+  // ─── UXP-02: Escape key exits header/footer edit mode ───
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.hfEditingMode) {
+      e.preventDefault();
+      exitHeaderFooterEditMode();
+    }
   }, true);
 
   // ─── E-01 fix: Capture cursor offset before text insertion for pending formats ───
@@ -31,6 +63,7 @@ export function initInput() {
       return;
     }
     // Prevent deletion into non-editable elements (page headers/footers)
+    // UXP-02: Allow deletion when header/footer is in editing mode
     if (e.inputType && e.inputType.startsWith('delete') && e.getTargetRanges) {
       const ranges = e.getTargetRanges();
       for (const r of ranges) {
@@ -39,6 +72,9 @@ export function initInput() {
         if (!container) continue;
         const parent = container.nodeType === 1 ? container : container.parentElement;
         if (parent && parent.closest?.('.page-header, .page-footer')) {
+          // Allow deletion if the header/footer is in editing mode
+          const hfEl = parent.closest('.page-header, .page-footer');
+          if (hfEl && hfEl.classList.contains('hf-editing')) continue;
           e.preventDefault();
           return;
         }
@@ -458,6 +494,15 @@ export function initInput() {
         e.preventDefault();
         import('./toolbar-handlers.js').then(mod => {
           if (typeof mod.openEquationModal === 'function') mod.openEquationModal('');
+        });
+        return;
+      }
+
+      // Ctrl+Shift+O — toggle document outline panel
+      if (e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        import('./toolbar-handlers.js').then(mod => {
+          if (typeof mod.toggleOutlinePanel === 'function') mod.toggleOutlinePanel();
         });
         return;
       }
@@ -1517,14 +1562,45 @@ function parseClipboardHtml(html) {
 
     // Google Docs: if the wrapper contains block elements (<p>, <h*>), walk normally.
     // If it only has inline children (<span>, text, etc.), treat the whole thing as one paragraph.
+    // Also check for <br> separators — Google Docs often uses <br> between spans for multi-paragraph content.
     const hasBlockChildren = walkRoot.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, ul, ol, li, blockquote, pre, hr');
     if (gdocsWrapper && !hasBlockChildren) {
-      // All-inline Google Docs content: extract as a single paragraph with formatted runs
-      const runs = extractRunsFromElement(walkRoot);
-      if (runs.length > 0) {
-        const para = { type: 'paragraph', runs };
-        extractParagraphFormat(walkRoot, para);
-        elements.push(para);
+      // Check if there are <br> tags indicating multiple paragraphs
+      const hasBrSeparators = walkRoot.querySelector('br');
+      if (hasBrSeparators) {
+        // Split content at <br> boundaries into separate paragraphs
+        let currentRuns = [];
+        for (const child of walkRoot.childNodes) {
+          if (child.nodeType === 1 && child.tagName.toLowerCase() === 'br') {
+            // Flush current runs as a paragraph
+            if (currentRuns.length > 0) {
+              const para = { type: 'paragraph', runs: currentRuns };
+              extractParagraphFormat(walkRoot, para);
+              elements.push(para);
+              currentRuns = [];
+            }
+            continue;
+          }
+          // Extract runs from this child node
+          const childRuns = (child.nodeType === 3)
+            ? (child.textContent ? [{ text: child.textContent }] : [])
+            : extractRunsFromElement(child);
+          currentRuns.push(...childRuns);
+        }
+        // Flush remaining runs
+        if (currentRuns.length > 0) {
+          const para = { type: 'paragraph', runs: currentRuns };
+          extractParagraphFormat(walkRoot, para);
+          elements.push(para);
+        }
+      } else {
+        // All-inline Google Docs content: extract as a single paragraph with formatted runs
+        const runs = extractRunsFromElement(walkRoot);
+        if (runs.length > 0) {
+          const para = { type: 'paragraph', runs };
+          extractParagraphFormat(walkRoot, para);
+          elements.push(para);
+        }
       }
     } else {
       // Walk all top-level children
@@ -1644,16 +1720,32 @@ function walkBlockElements(container, elements) {
           const imgEl = extractImageElement(img);
           if (imgEl) elements.push(imgEl);
         });
-        // Process nested lists recursively with incremented level
+        // Process nested lists recursively with actual depth detection
         nestedLists.forEach(nested => {
-          const nestedType = nested.tagName.toLowerCase() === 'ul' ? 'bullet' : 'decimal';
-          const nestedItems = nested.querySelectorAll(':scope > li');
-          nestedItems.forEach(nli => {
-            const nRuns = extractRunsFromElement(nli);
-            if (nRuns.length > 0) {
-              elements.push({ type: 'paragraph', runs: nRuns, listType: nestedType, listLevel: 1 });
-            }
-          });
+          const processNestedList = (listEl) => {
+            const lType = listEl.tagName.toLowerCase() === 'ul' ? 'bullet' : 'decimal';
+            const lis = listEl.querySelectorAll(':scope > li');
+            lis.forEach(nli => {
+              // Walk up from this <li> counting ancestor <ul>/<ol> elements
+              // to determine the actual nesting depth (0-based)
+              let depth = 0;
+              let ancestor = nli.parentElement;
+              while (ancestor && ancestor !== child) {
+                if (ancestor.tagName && /^(ul|ol)$/i.test(ancestor.tagName)) {
+                  depth++;
+                }
+                ancestor = ancestor.parentElement;
+              }
+              const nRuns = extractRunsFromElement(nli);
+              if (nRuns.length > 0) {
+                elements.push({ type: 'paragraph', runs: nRuns, listType: lType, listLevel: depth });
+              }
+              // Recurse into nested lists inside this <li>
+              const subLists = nli.querySelectorAll(':scope > ul, :scope > ol');
+              subLists.forEach(sub => processNestedList(sub));
+            });
+          };
+          processNestedList(nested);
         });
       });
       continue;
@@ -1757,7 +1849,9 @@ function extractTableElement(tableEl) {
   for (const tr of trs) {
     const cells = [];
     for (const td of tr.querySelectorAll('td, th')) {
-      cells.push(td.textContent || '');
+      const runs = extractRunsFromElement(td);
+      const text = runs.map(r => r.text).join('');
+      cells.push({ text: text || '', runs });
     }
     if (cells.length > 0) rows.push(cells);
   }
@@ -1898,6 +1992,9 @@ function pasteStructuredContent(doc, info, parsed, page) {
               anyPasted = true;
             } catch (e) {
               console.error('[paste] paste_formatted_runs_json failed:', e.message || e);
+              import('./toolbar-handlers.js').then(({ showToast: st }) => {
+                st('Large paste \u2014 formatting may be simplified', 'info');
+              });
             }
 
             // Strategy 2: plain text + per-run formatting
@@ -2012,8 +2109,39 @@ function pasteStructuredContent(doc, info, parsed, page) {
           for (let c = 0; c < el.rows[r].length && c < dims.cols; c++) {
             try {
               const cellId = doc.get_cell_id(tableId, r, c);
-              if (cellId && el.rows[r][c]) {
-                doc.set_cell_text(cellId, el.rows[r][c]);
+              const cell = el.rows[r][c];
+              if (!cellId || !cell) continue;
+              // cell is { text, runs } — set plain text, then apply run formatting
+              const cellText = typeof cell === 'string' ? cell : (cell.text || '');
+              if (cellText) {
+                doc.set_cell_text(cellId, cellText);
+              }
+              // Apply inline formatting from runs if available
+              const cellRuns = (typeof cell === 'object' && cell.runs) ? cell.runs : null;
+              if (cellRuns && cellRuns.length > 1 && cellText) {
+                // Try to apply per-run formatting via format_selection on the cell paragraph
+                try {
+                  // Find the paragraph inside this cell from the full paragraph list
+                  // Cell paragraphs appear in paragraph_ids_json after table insertion
+                  let runOffset = 0;
+                  for (const run of cellRuns) {
+                    const runEnd = runOffset + (run.text ? run.text.length : 0);
+                    if (runEnd > runOffset) {
+                      // Apply each formatting attribute using format_selection with cellId as paragraph
+                      // Note: format_selection expects paragraph IDs; cell paragraphs use cellId as parent
+                      if (run.bold) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'bold', 'true'); } catch(_){}
+                      if (run.italic) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'italic', 'true'); } catch(_){}
+                      if (run.underline) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'underline', 'true'); } catch(_){}
+                      if (run.strikethrough) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'strikethrough', 'true'); } catch(_){}
+                      if (run.fontSize) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'fontSize', String(run.fontSize)); } catch(_){}
+                      if (run.fontFamily) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'fontFamily', run.fontFamily); } catch(_){}
+                      if (run.color) try { doc.format_selection(cellId, runOffset, cellId, runEnd, 'color', run.color); } catch(_){}
+                    }
+                    runOffset = runEnd;
+                  }
+                } catch (_) {
+                  // Formatting failed silently — plain text already set above
+                }
               }
             } catch (_) {}
           }
@@ -2593,6 +2721,7 @@ const SLASH_COMMANDS = [
   { id: 'image',      label: 'Image',           icon: '\uD83D\uDDBC',  keywords: 'image picture photo' },
   { id: 'hr',         label: 'Horizontal Rule', icon: '\u2014',  keywords: 'horizontal rule divider line separator hr' },
   { id: 'pagebreak',  label: 'Page Break',      icon: '\u23CE',  keywords: 'page break new page' },
+  { id: 'sectionbreak', label: 'Section Break', icon: '\u2500',  keywords: 'section break next page continuous' },
   { id: 'quote',      label: 'Quote',           icon: '\u201C',  keywords: 'quote blockquote' },
   { id: 'code',       label: 'Code Block',      icon: '</>',keywords: 'code block monospace' },
 ];
@@ -2747,6 +2876,11 @@ function executeSlashCommand(cmdId) {
         broadcastOp({ action: 'insertPageBreak', afterNodeId: nodeId });
         renderDocument();
         break;
+      case 'sectionbreak':
+        doc.insert_section_break(nodeId, 'nextPage');
+        broadcastOp({ action: 'insertSectionBreak', afterNodeId: nodeId, breakType: 'nextPage' });
+        renderDocument();
+        break;
       case 'quote': {
         doc.set_heading_level(nodeId, 0);
         broadcastOp({ action: 'setHeading', nodeId, level: 0 });
@@ -2773,7 +2907,7 @@ function executeSlashCommand(cmdId) {
     // E3.4: Record slash command in undo history
     const labels = { heading1: 'Set Heading 1', heading2: 'Set Heading 2', heading3: 'Set Heading 3',
       bullet: 'Insert bullet list', numbered: 'Insert numbered list', table: 'Insert table',
-      hr: 'Insert horizontal rule', pagebreak: 'Insert page break', quote: 'Apply quote style', code: 'Apply code style' };
+      hr: 'Insert horizontal rule', pagebreak: 'Insert page break', sectionbreak: 'Insert section break', quote: 'Apply quote style', code: 'Apply code style' };
     if (labels[cmdId]) recordUndoAction(labels[cmdId]);
     updateToolbarState();
     updateUndoRedo();
@@ -2864,7 +2998,7 @@ function adjustEditorZoom(delta) {
 // E9.6: Insert Footnote / Endnote at Cursor
 // ═══════════════════════════════════════════════════
 
-function insertFootnoteAtCursor() {
+export function insertFootnoteAtCursor() {
   if (!state.doc) return;
   const info = getSelectionInfo();
   if (!info) return;
@@ -2893,7 +3027,7 @@ function insertFootnoteAtCursor() {
   });
 }
 
-function insertEndnoteAtCursor() {
+export function insertEndnoteAtCursor() {
   if (!state.doc) return;
   const info = getSelectionInfo();
   if (!info) return;

@@ -14,7 +14,7 @@ Thumbs.db
 # Misc
 *.orig
 *.bak
-
+editor/dist
 editor/node_modules
 
 # Relay server data (persisted room state)

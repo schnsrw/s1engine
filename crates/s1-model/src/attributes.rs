@@ -343,6 +343,12 @@ pub enum AttributeKey {
     TocMaxLevel,
     /// Custom title for the TOC (e.g. "Table of Contents").
     TocTitle,
+    /// Whether the TOC should use index marks (ODF: text:use-index-marks).
+    TocUseIndexMarks,
+    /// Whether the TOC should use index source styles (ODF: text:use-index-source-styles).
+    TocUseIndexSourceStyles,
+    /// Scope of the TOC index (ODF: text:index-scope, e.g. "document" or "chapter").
+    TocIndexScope,
 
     // Hyphenation attributes
     /// Suppress automatic hyphenation for this paragraph.

@@ -27,13 +27,13 @@ pub enum ConvertError {
     #[error("DOC conversion incomplete: {0}")]
     PartialConversion(String),
 
-    /// DOCX format error.
+    /// DOCX format error (preserves the original error chain for inspection).
     #[error("DOCX error: {0}")]
-    Docx(String),
+    Docx(#[from] s1_format_docx::DocxError),
 
-    /// ODT format error.
+    /// ODT format error (preserves the original error chain for inspection).
     #[error("ODT error: {0}")]
-    Odt(String),
+    Odt(#[from] s1_format_odt::OdtError),
 
     /// I/O error.
     #[error("I/O error: {0}")]

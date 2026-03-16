@@ -95,6 +95,10 @@ export const state = {
   // UXP-14: Format Painter
   formatPainterMode: null, // null | 'once' | 'sticky'
   copiedFormat: null,       // { bold, italic, underline, strikethrough, ... } or null
+  // UXP-02: Header/Footer editing mode — null | 'header' | 'footer'
+  hfEditingMode: null,
+  // UXP-02: Which page (1-based) is being edited for header/footer
+  hfEditingPage: null,
   // E9.5: TOC style — 'default' | 'dotted' | 'dashed' | 'no-page-numbers'
   tocStyle: 'default',
   // PDF viewer state

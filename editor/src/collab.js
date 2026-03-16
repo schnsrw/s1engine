@@ -442,6 +442,14 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      case 'insertSectionBreak': {
+        try {
+          state.doc.insert_section_break(op.afterNodeId, op.breakType || 'nextPage');
+          renderDocument();
+        } catch (e) { console.error('remote insertSectionBreak:', e); }
+        break;
+      }
+
       case 'insertImage': {
         // Image binary data can't be easily synced via WebSocket;
         // full sync handles this instead

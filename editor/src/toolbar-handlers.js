@@ -1,13 +1,13 @@
 // Toolbar event handler wiring
 import { state, $ } from './state.js';
 import { toggleFormat, applyFormat, updateToolbarState, updateUndoRedo } from './toolbar.js';
-import { doUndo, doRedo, closeSlashMenu } from './input.js';
+import { doUndo, doRedo, closeSlashMenu, insertFootnoteAtCursor, insertEndnoteAtCursor } from './input.js';
 import { renderDocument, renderNodeById, syncParagraphText, syncAllText, applyPageDimensions, isCanvasMode, setCanvasMode, initCanvasRenderer, markLayoutDirty } from './render.js';
 import { getSelectionInfo, setCursorAtOffset, setSelectionRange, getActiveNodeId, saveSelection } from './selection.js';
 import { insertImage } from './images.js';
 import { updatePageBreaks } from './pagination.js';
 import { renderRuler } from './ruler.js';
-import { getVersions, restoreVersion, saveVersion, openAutosaveDB, newDocument, updateDirtyIndicator, updateStatusBar } from './file.js';
+import { getVersions, restoreVersion, saveVersion, openAutosaveDB, newDocument, updateDirtyIndicator, updateStatusBar, updateTrackChanges, markDirty } from './file.js';
 import { showShareDialog, broadcastOp } from './collab.js';
 import { trackEvent, getStats, clearStats, getSessionDuration } from './analytics.js';
 import { getLastError, clearErrors } from './error-tracking.js';
@@ -354,6 +354,33 @@ export function initToolbar() {
     } catch (e) { console.error('insert page break:', e); }
   });
 
+  // UXP-08: Insert section break (all 4 types via app menu bar)
+  const sectionBreakTypes = [
+    { id: 'miSectionNextPage', type: 'nextPage', label: 'Section break (next page)' },
+    { id: 'miSectionContinuous', type: 'continuous', label: 'Section break (continuous)' },
+    { id: 'miSectionEvenPage', type: 'evenPage', label: 'Section break (even page)' },
+    { id: 'miSectionOddPage', type: 'oddPage', label: 'Section break (odd page)' },
+  ];
+  for (const { id, type: breakType, label } of sectionBreakTypes) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('click', () => {
+      // Close all parent menus
+      document.querySelectorAll('.app-menu-item.open').forEach(m => m.classList.remove('open'));
+      if (!state.doc) return;
+      const nodeId = getActiveNodeId();
+      if (!nodeId) return;
+      syncAllText();
+      try {
+        state.doc.insert_section_break(nodeId, breakType);
+        broadcastOp({ action: 'insertSectionBreak', afterNodeId: nodeId, breakType });
+        renderDocument();
+        updateUndoRedo();
+        announce(label + ' inserted');
+      } catch (e) { console.error('insert section break:', e); }
+    });
+  }
+
   // Insert comment — modal
   $('miComment').addEventListener('click', () => {
     $('insertMenu').classList.remove('show');
@@ -397,9 +424,30 @@ export function initToolbar() {
   });
 
   // Headers & Footers — menu bar entry
+  // UXP-02: Opens inline editing mode on the first visible page's header.
+  // If no pages exist, falls back to the modal.
   $('miHeaderFooter').addEventListener('click', () => {
     closeAllMenus();
-    openHeaderFooterModal();
+    const firstPage = state.pageElements && state.pageElements[0];
+    if (firstPage) {
+      enterHeaderFooterEditMode('header', firstPage);
+    } else {
+      openHeaderFooterModal();
+    }
+  });
+
+  // UXP-10: Footnote — menu bar entry
+  $('miFootnote')?.addEventListener('click', () => {
+    closeAllMenus();
+    trackEvent('insert', 'footnote');
+    insertFootnoteAtCursor();
+  });
+
+  // UXP-10: Endnote — menu bar entry
+  $('miEndnote')?.addEventListener('click', () => {
+    closeAllMenus();
+    trackEvent('insert', 'endnote');
+    insertEndnoteAtCursor();
   });
 
   // Header/Footer modal handlers
@@ -439,6 +487,49 @@ export function initToolbar() {
       // First page gets no header/footer when "different first page" is checked
       state.docFirstPageHeaderHtml = '';
       state.docFirstPageFooterHtml = '';
+    }
+
+    // UXP-02: Sync to WASM backend
+    _syncHeaderFooterToWasm('header', 'default', headerText);
+    const footerSyncText = showPageNum ? (footerText ? footerText + ' \u2014 ' : '') : footerText;
+    _syncHeaderFooterToWasm('footer', 'default', footerSyncText);
+    if (differentFirst) {
+      try {
+        if (state.doc && typeof state.doc.set_title_page === 'function') {
+          state.doc.set_title_page(0, true);
+        }
+        _syncHeaderFooterToWasm('header', 'first', '');
+        _syncHeaderFooterToWasm('footer', 'first', '');
+      } catch (_) {}
+    } else {
+      try {
+        if (state.doc && typeof state.doc.set_title_page === 'function') {
+          state.doc.set_title_page(0, false);
+        }
+      } catch (_) {}
+    }
+
+    // Exit any inline editing mode if active
+    if (state.hfEditingMode) {
+      state.hfEditingMode = null;
+      state.hfEditingPage = null;
+      const container = $('pageContainer');
+      if (container) {
+        container.querySelectorAll('.hf-editing').forEach(hfEl => {
+          const label = hfEl.querySelector('.hf-editing-label');
+          const toolbar = hfEl.querySelector('.hf-toolbar');
+          if (label) label.remove();
+          if (toolbar) toolbar.remove();
+          hfEl.contentEditable = 'false';
+          hfEl.classList.remove('hf-editing');
+          hfEl.classList.add('hf-hoverable');
+          const pageEl = hfEl.closest('.doc-page');
+          if (pageEl) {
+            const contentEl = pageEl.querySelector('.page-content');
+            if (contentEl) contentEl.classList.remove('hf-dimmed');
+          }
+        });
+      }
     }
 
     $('headerFooterModal').classList.remove('show');
@@ -486,15 +577,8 @@ export function initToolbar() {
     $('findInput').focus();
   });
 
-  // Spell check toggle
-  $('btnSpellCheck').addEventListener('click', () => {
-    const page = $('pageContainer');
-    const enabled = page.getAttribute('spellcheck') === 'true';
-    page.setAttribute('spellcheck', enabled ? 'false' : 'true');
-    const btn = $('btnSpellCheck');
-    btn.classList.toggle('active', !enabled);
-    btn.setAttribute('aria-pressed', String(!enabled));
-  });
+  // Spell check toggle (UXP-19: with persistence & per-page sync)
+  initSpellCheck();
 
   // History panel (undo history + version history)
   $('btnHistory').addEventListener('click', () => {
@@ -557,17 +641,7 @@ export function initToolbar() {
   // View → Document Outline toggle (opens left panel on Outline tab)
   if ($('menuShowOutline')) $('menuShowOutline').addEventListener('click', () => {
     closeAllMenus();
-    const panel = $('pagesPanel');
-    if (!panel) return;
-    // Switch to outline tab
-    panel.querySelectorAll('.pages-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
-    panel.querySelectorAll('.pages-tab-content').forEach(c => c.classList.remove('active'));
-    const outlineTab = panel.querySelector('.pages-tab[data-tab="outline"]');
-    const outlineContent = panel.querySelector('.pages-tab-content[data-tab="outline"]');
-    if (outlineTab) { outlineTab.classList.add('active'); outlineTab.setAttribute('aria-selected', 'true'); }
-    if (outlineContent) outlineContent.classList.add('active');
-    if (!panel.classList.contains('show')) panel.classList.add('show');
-    renderOutline();
+    toggleOutlinePanel();
   });
   // View → Comments Panel toggle
   if ($('menuShowComments')) $('menuShowComments').addEventListener('click', () => {
@@ -667,7 +741,13 @@ export function initToolbar() {
         else if (action === 'toc') $('miTOC').click();
         else if (action === 'hr') $('miHR').click();
         else if (action === 'pagebreak') $('miPageBreak').click();
+        else if (action === 'sectionNextPage') $('miSectionNextPage')?.click();
+        else if (action === 'sectionContinuous') $('miSectionContinuous')?.click();
+        else if (action === 'sectionEvenPage') $('miSectionEvenPage')?.click();
+        else if (action === 'sectionOddPage') $('miSectionOddPage')?.click();
         else if (action === 'headerfooter') $('miHeaderFooter').click();
+        else if (action === 'footnote') $('miFootnote')?.click();
+        else if (action === 'endnote') $('miEndnote')?.click();
         else if (action === 'drawing') $('miDrawing')?.click();
       });
     });
@@ -699,8 +779,10 @@ export function initToolbar() {
   initDictModal();
   initAutoCorrectModal();
 
-  // E5.4: Editing mode selector
+  // E5.4 / UXP-07: Editing mode selector + Track Changes Panel
   initEditingMode();
+  initTrackChangesPanel();
+  initReviewMenu();
 
   // E9.2: Save as template
   initSaveAsTemplate();
@@ -723,7 +805,7 @@ export function initToolbar() {
     }
     $('tableContextMenu').style.display = 'none';
     // Close zoom dropdown on outside click
-    if (!e.target.closest('.zoom-value-wrap')) {
+    if (!e.target.closest('.zoom-value-wrap') && !e.target.closest('.tb-zoom-wrap')) {
       closeZoomDropdown();
     }
     // Close slash menu on outside click
@@ -1034,14 +1116,15 @@ export function setZoomLevel(level) {
       container.style.zoom = (level / 100);
     }
   }
-  // Update active state in zoom dropdown
-  const dd = $('zoomDropdown');
-  if (dd) {
-    dd.querySelectorAll('.zoom-preset').forEach(btn => {
-      const v = btn.dataset.zoom;
-      btn.classList.toggle('active', v === String(level));
-    });
-  }
+  // Update active state in zoom dropdowns (status bar + toolbar)
+  [$('zoomDropdown'), $('tbZoomDropdown')].forEach(dd => {
+    if (dd) {
+      dd.querySelectorAll('.zoom-preset').forEach(btn => {
+        const v = btn.dataset.zoom;
+        btn.classList.toggle('active', v === String(level));
+      });
+    }
+  });
   // Invalidate layout cache when zoom changes so repagination uses fresh dimensions
   if (changed) markLayoutDirty();
   try { localStorage.setItem('s1-zoom', String(level)); } catch (_) {}
@@ -1070,8 +1153,24 @@ function calcFitPageZoom() {
 }
 
 function initZoomDropdown() {
-  const valueBtn = $('zoomValue');
-  const dd = $('zoomDropdown');
+  // Status bar zoom dropdown
+  _initSingleZoomDropdown($('zoomValue'), $('zoomDropdown'));
+  // Toolbar zoom dropdown (UXP-17)
+  _initSingleZoomDropdown($('tbZoomValue'), $('tbZoomDropdown'));
+
+  // Restore saved zoom level
+  try {
+    const saved = localStorage.getItem('s1-zoom');
+    if (saved) {
+      const parsed = parseInt(saved);
+      if (!isNaN(parsed) && parsed >= 50 && parsed <= 200) {
+        setZoomLevel(parsed);
+      }
+    }
+  } catch (_) {}
+}
+
+function _initSingleZoomDropdown(valueBtn, dd) {
   if (!valueBtn || !dd) return;
 
   // Toggle dropdown on zoom value click
@@ -1100,24 +1199,16 @@ function initZoomDropdown() {
       }
     });
   });
-
-  // Restore saved zoom level
-  try {
-    const saved = localStorage.getItem('s1-zoom');
-    if (saved) {
-      const parsed = parseInt(saved);
-      if (!isNaN(parsed) && parsed >= 50 && parsed <= 200) {
-        setZoomLevel(parsed);
-      }
-    }
-  } catch (_) {}
 }
 
 function closeZoomDropdown() {
-  const dd = $('zoomDropdown');
-  const valueBtn = $('zoomValue');
-  if (dd) dd.classList.remove('show');
-  if (valueBtn) valueBtn.setAttribute('aria-expanded', 'false');
+  // Close both status bar and toolbar zoom dropdowns
+  [['zoomDropdown', 'zoomValue'], ['tbZoomDropdown', 'tbZoomValue']].forEach(([ddId, btnId]) => {
+    const dd = $(ddId);
+    const btn = $(btnId);
+    if (dd) dd.classList.remove('show');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function closeAllMenus() {
@@ -1137,6 +1228,53 @@ function toggleDarkMode() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('s1-theme', next);
   updateDarkModeIcon();
+}
+
+// ── UXP-19: Spell Check Toggle with Persistence ──
+function initSpellCheck() {
+  const btn = $('btnSpellCheck');
+  if (!btn) return;
+
+  // Restore saved preference (default: on)
+  let enabled = true;
+  try {
+    const saved = localStorage.getItem('s1-spellcheck');
+    if (saved === 'false') enabled = false;
+  } catch (_) {}
+
+  applySpellCheck(enabled);
+  btn.classList.toggle('active', enabled);
+  btn.setAttribute('aria-pressed', String(enabled));
+
+  btn.addEventListener('click', () => {
+    const page = $('pageContainer');
+    const isEnabled = page.getAttribute('spellcheck') === 'true';
+    const next = !isEnabled;
+    applySpellCheck(next);
+    btn.classList.toggle('active', next);
+    btn.setAttribute('aria-pressed', String(next));
+    try { localStorage.setItem('s1-spellcheck', String(next)); } catch (_) {}
+  });
+}
+
+function applySpellCheck(enabled) {
+  const container = $('pageContainer');
+  if (container) {
+    container.setAttribute('spellcheck', String(enabled));
+    // Sync to all page-content elements so browser spellcheck applies per-page
+    container.querySelectorAll('.page-content').forEach(el => {
+      el.spellcheck = enabled;
+    });
+  }
+}
+
+// Export for render.js to call when creating new pages
+export function isSpellCheckEnabled() {
+  try {
+    const saved = localStorage.getItem('s1-spellcheck');
+    if (saved === 'false') return false;
+  } catch (_) {}
+  return true;
 }
 
 function initAppMenubar() {
@@ -1418,6 +1556,39 @@ function scrollToCommentNode(nodeId) {
   setTimeout(() => el.classList.remove('comment-highlight'), 2000);
 }
 
+function commentInitials(name) {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
+function commentAvatarColor(name) {
+  // Deterministic color from name hash — professional muted palette
+  const colors = ['#4285f4','#ea4335','#fbbc04','#34a853','#ff6d01','#46bdc6','#7baaf7','#f07b72','#fcd04f','#57bb8a'];
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function formatCommentTime(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return escapeHtml(dateStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+  } catch (_) { return escapeHtml(dateStr); }
+}
+
 function renderCommentCard(c) {
   const cid = c.id || '';
   const isResolved = state.resolvedComments && state.resolvedComments.has(cid);
@@ -1425,10 +1596,20 @@ function renderCommentCard(c) {
   const resolveLabel = isResolved ? 'Unresolve' : 'Resolve';
   const resolvedStatus = isResolved ? 'Resolved' : 'Active';
   const startNodeId = c.start_node_id || c.startNodeId || '';
+  const author = c.author || 'Unknown';
+  const initials = commentInitials(author);
+  const avatarBg = commentAvatarColor(author);
+  const timeDisplay = formatCommentTime(c.date);
   return `
-    <div class="comment-card${resolvedClass}" data-comment-id="${escapeAttr(cid)}" data-start-node-id="${escapeAttr(startNodeId)}" style="cursor:pointer" role="article" aria-label="Comment by ${escapeAttr(c.author || 'Unknown')} - ${resolvedStatus}">
-      <div class="comment-author">${escapeHtml(c.author || 'Unknown')}</div>
-      ${c.date ? `<div class="comment-date">${escapeHtml(c.date)}</div>` : ''}
+    <div class="comment-card${resolvedClass}" data-comment-id="${escapeAttr(cid)}" data-start-node-id="${escapeAttr(startNodeId)}" style="cursor:pointer" role="article" aria-label="Comment by ${escapeAttr(author)} - ${resolvedStatus}">
+      <div class="comment-header">
+        <div class="comment-avatar" style="background:${avatarBg}" title="${escapeAttr(author)}">${escapeHtml(initials)}</div>
+        <div class="comment-meta">
+          <div class="comment-author">${escapeHtml(author)}</div>
+          ${timeDisplay ? `<div class="comment-date" title="${escapeAttr(c.date || '')}">${timeDisplay}</div>` : ''}
+        </div>
+        ${isResolved ? '<span class="comment-resolved-badge" title="Resolved">Resolved</span>' : ''}
+      </div>
       <div class="comment-text">${escapeHtml(c.text || c.body || '')}</div>
       <span class="sr-only" role="status">${resolvedStatus}</span>
       <div class="comment-actions">
@@ -1440,12 +1621,22 @@ function renderCommentCard(c) {
 }
 
 function renderReplyCard(r) {
+  const author = r.author || 'Unknown';
+  const initials = commentInitials(author);
+  const avatarBg = commentAvatarColor(author);
+  const timeDisplay = r.timestamp ? formatCommentTime(new Date(r.timestamp).toISOString()) : '';
   return `
     <div class="comment-card comment-reply" data-reply-id="${escapeAttr(r.id)}">
-      <div class="comment-author">${escapeHtml(r.author || 'Unknown')}</div>
+      <div class="comment-header">
+        <div class="comment-avatar comment-avatar-sm" style="background:${avatarBg}" title="${escapeAttr(author)}">${escapeHtml(initials)}</div>
+        <div class="comment-meta">
+          <div class="comment-author">${escapeHtml(author)}</div>
+          ${timeDisplay ? `<div class="comment-date">${timeDisplay}</div>` : ''}
+        </div>
+      </div>
       <div class="comment-text">${escapeHtml(r.text)}</div>
       <div class="comment-actions">
-        <button class="reply-delete" data-reply-id="${escapeAttr(r.id)}">Delete</button>
+        <button class="reply-delete" data-reply-id="${escapeAttr(r.id)}" title="Delete this reply">Delete</button>
       </div>
     </div>`;
 }
@@ -1550,6 +1741,263 @@ function openHeaderFooterModal() {
   saveModalSelection();
   $('headerFooterModal').classList.add('show');
   $('headerText').focus();
+}
+
+// ── UXP-02: Header/Footer Inline Editing ─────────
+
+/**
+ * Enter inline header/footer editing mode.
+ * @param {'header'|'footer'} kind — which region to edit
+ * @param {HTMLElement} pageEl — the .doc-page element
+ */
+export function enterHeaderFooterEditMode(kind, pageEl) {
+  // Exit any existing edit mode first
+  if (state.hfEditingMode) {
+    exitHeaderFooterEditMode();
+  }
+
+  const selector = kind === 'header' ? '.page-header' : '.page-footer';
+  const hfEl = pageEl.querySelector(selector);
+  if (!hfEl) return;
+
+  const pageNum = parseInt(pageEl.dataset.page, 10) || 1;
+  state.hfEditingMode = kind;
+  state.hfEditingPage = pageNum;
+
+  // Make the header/footer editable
+  hfEl.contentEditable = 'true';
+  hfEl.classList.remove('hf-hoverable');
+  hfEl.classList.add('hf-editing');
+  hfEl.removeAttribute('title');
+
+  // Add label badge
+  const label = document.createElement('span');
+  label.className = 'hf-editing-label';
+  label.textContent = kind === 'header' ? 'Header' : 'Footer';
+  hfEl.appendChild(label);
+
+  // Add mini toolbar with options and close button
+  const toolbar = document.createElement('span');
+  toolbar.className = 'hf-toolbar';
+
+  const pageNumBtn = document.createElement('button');
+  pageNumBtn.textContent = 'Insert Page Number';
+  pageNumBtn.title = 'Insert a page number field at cursor position';
+  pageNumBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _insertPageNumberField(hfEl);
+  });
+  toolbar.appendChild(pageNumBtn);
+
+  const optionsBtn = document.createElement('button');
+  optionsBtn.textContent = 'Options';
+  optionsBtn.title = 'Open header and footer options';
+  optionsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openHeaderFooterModal();
+  });
+  toolbar.appendChild(optionsBtn);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close';
+  closeBtn.title = 'Exit header/footer editing (Escape)';
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    exitHeaderFooterEditMode();
+  });
+  toolbar.appendChild(closeBtn);
+
+  hfEl.appendChild(toolbar);
+
+  // Dim the main content area
+  const contentEl = pageEl.querySelector('.page-content');
+  if (contentEl) contentEl.classList.add('hf-dimmed');
+
+  // Focus the header/footer
+  hfEl.focus();
+
+  // Place cursor at end of existing content (before our label/toolbar elements)
+  try {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    // Find the last text-bearing child (skip our label/toolbar)
+    const textNodes = [];
+    for (const child of hfEl.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE ||
+          (child.nodeType === Node.ELEMENT_NODE &&
+           !child.classList.contains('hf-editing-label') &&
+           !child.classList.contains('hf-toolbar'))) {
+        textNodes.push(child);
+      }
+    }
+    if (textNodes.length > 0) {
+      const lastChild = textNodes[textNodes.length - 1];
+      range.selectNodeContents(lastChild);
+      range.collapse(false);
+    } else {
+      range.selectNodeContents(hfEl);
+      range.collapse(false);
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (_) {}
+}
+
+/**
+ * Exit header/footer editing mode and sync content back.
+ */
+export function exitHeaderFooterEditMode() {
+  if (!state.hfEditingMode) return;
+
+  const kind = state.hfEditingMode;
+  const pageNum = state.hfEditingPage;
+  state.hfEditingMode = null;
+  state.hfEditingPage = null;
+
+  // Find all editing header/footer elements and restore them
+  const container = $('pageContainer');
+  if (!container) return;
+
+  container.querySelectorAll('.hf-editing').forEach(hfEl => {
+    // Extract the user-entered content (excluding our UI elements)
+    const label = hfEl.querySelector('.hf-editing-label');
+    const toolbar = hfEl.querySelector('.hf-toolbar');
+    if (label) label.remove();
+    if (toolbar) toolbar.remove();
+
+    // Get the text content the user entered
+    const userHtml = hfEl.innerHTML.trim();
+    const userText = hfEl.textContent.trim();
+
+    // Restore non-editable state
+    hfEl.contentEditable = 'false';
+    hfEl.classList.remove('hf-editing');
+    hfEl.classList.add('hf-hoverable');
+    hfEl.setAttribute('title',
+      hfEl.dataset.hfKind === 'header' ? 'Double-click to edit header' : 'Double-click to edit footer');
+
+    // Un-dim content
+    const pageEl = hfEl.closest('.doc-page');
+    if (pageEl) {
+      const contentEl = pageEl.querySelector('.page-content');
+      if (contentEl) contentEl.classList.remove('hf-dimmed');
+    }
+
+    // Sync the edited content back to state
+    const isHeader = hfEl.dataset.hfKind === 'header';
+    const isFirstPage = (pageNum === 1) && state.hasDifferentFirstPage;
+
+    if (userText || userHtml) {
+      // Preserve any data-field spans (page numbers) the user may have added
+      const hasFields = hfEl.querySelector('[data-field]') !== null;
+      let finalHtml;
+      if (hasFields) {
+        // Keep the HTML structure (it has field elements)
+        finalHtml = userHtml;
+      } else {
+        // Wrap in styled span
+        finalHtml = '<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">' +
+          _escapeHtmlForHF(userText) + '</span>';
+      }
+
+      if (isHeader) {
+        if (isFirstPage) {
+          state.docFirstPageHeaderHtml = finalHtml;
+        } else {
+          state.docHeaderHtml = finalHtml;
+        }
+      } else {
+        if (isFirstPage) {
+          state.docFirstPageFooterHtml = finalHtml;
+        } else {
+          state.docFooterHtml = finalHtml;
+        }
+      }
+    } else {
+      // Empty content — clear
+      if (isHeader) {
+        if (isFirstPage) {
+          state.docFirstPageHeaderHtml = '';
+        } else {
+          state.docHeaderHtml = '';
+        }
+      } else {
+        if (isFirstPage) {
+          state.docFirstPageFooterHtml = '';
+        } else {
+          state.docFooterHtml = '';
+        }
+      }
+    }
+
+    // Sync to WASM backend if available
+    _syncHeaderFooterToWasm(hfEl.dataset.hfKind, isFirstPage ? 'first' : 'default', userText);
+  });
+
+  // Re-render pages to apply updated header/footer across all pages
+  renderDocument();
+}
+
+/**
+ * Sync header/footer text to the WASM model.
+ */
+function _syncHeaderFooterToWasm(kind, hfType, text) {
+  const { doc } = state;
+  if (!doc) return;
+  try {
+    if (typeof doc.set_header_footer_text === 'function') {
+      doc.set_header_footer_text(0, kind, hfType, text);
+    }
+  } catch (e) {
+    console.warn('Failed to sync header/footer to WASM:', e);
+  }
+}
+
+/**
+ * Insert a page number field element at the current cursor position.
+ */
+function _insertPageNumberField(hfEl) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+
+  const range = sel.getRangeAt(0);
+  // Verify the selection is within the header/footer element
+  if (!hfEl.contains(range.startContainer)) {
+    // Place cursor at end
+    const newRange = document.createRange();
+    newRange.selectNodeContents(hfEl);
+    newRange.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  }
+
+  const field = document.createElement('span');
+  field.setAttribute('data-field', 'PageNumber');
+  field.style.fontWeight = 'normal';
+
+  // Show placeholder number
+  const pageEl = hfEl.closest('.doc-page');
+  const pageNum = pageEl ? (parseInt(pageEl.dataset.page, 10) || 1) : 1;
+  field.textContent = String(pageNum);
+
+  const updatedRange = sel.getRangeAt(0);
+  updatedRange.deleteContents();
+  updatedRange.insertNode(field);
+
+  // Move cursor after the inserted field
+  const afterRange = document.createRange();
+  afterRange.setStartAfter(field);
+  afterRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(afterRange);
+}
+
+/**
+ * Escape HTML for header/footer content.
+ */
+function _escapeHtmlForHF(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ── Version History ──────────────────────────────
@@ -1860,6 +2308,32 @@ function initTableContextMenu() {
   cmAction('cmInsertColRight', () => { state.doc.insert_table_column(state.ctxTable, state.ctxCol + 1); broadcastOp({ action: 'insertTableColumn', tableId: state.ctxTable, index: state.ctxCol + 1 }); });
   cmAction('cmDeleteCol', () => { state.doc.delete_table_column(state.ctxTable, state.ctxCol); broadcastOp({ action: 'deleteTableColumn', tableId: state.ctxTable, index: state.ctxCol }); });
 
+  // UXP-12: Merge cells — uses existing WASM merge_cells API
+  cmAction('cmMergeCells', () => {
+    // Merge a 2x2 block starting from the right-clicked cell.
+    // If cell is at the last row/col, merge just the available range.
+    const dims = JSON.parse(state.doc.get_table_dimensions(state.ctxTable));
+    const endRow = Math.min(state.ctxRow + 1, dims.rows - 1);
+    const endCol = Math.min(state.ctxCol + 1, dims.cols - 1);
+    state.doc.merge_cells(state.ctxTable, state.ctxRow, state.ctxCol, endRow, endCol);
+    broadcastOp({ action: 'mergeCells', tableId: state.ctxTable, startRow: state.ctxRow, startCol: state.ctxCol, endRow, endCol });
+    announce('Cells merged');
+  });
+
+  // UXP-12: Split cell — removes ColSpan/RowSpan from the clicked cell.
+  // Uses split_merged_cell WASM API if available, otherwise clears spans via merge_cells(1x1).
+  cmAction('cmSplitCell', () => {
+    if (typeof state.doc.split_merged_cell === 'function') {
+      state.doc.split_merged_cell(state.ctxTable, state.ctxRow, state.ctxCol);
+      broadcastOp({ action: 'splitCell', tableId: state.ctxTable, row: state.ctxRow, col: state.ctxCol });
+    } else {
+      // Fallback: merge a 1x1 range to reset spans (effectively clears ColSpan/RowSpan)
+      state.doc.merge_cells(state.ctxTable, state.ctxRow, state.ctxCol, state.ctxRow, state.ctxCol);
+      broadcastOp({ action: 'splitCell', tableId: state.ctxTable, row: state.ctxRow, col: state.ctxCol });
+    }
+    announce('Cell split');
+  });
+
   // Cell background — color picker instead of prompt
   $('cmCellBg').addEventListener('click', e => {
     e.preventDefault();
@@ -1894,6 +2368,106 @@ function initTableContextMenu() {
   $('cmCellBgPicker').addEventListener('change', () => {
     $('cmCellBgPicker').style.pointerEvents = 'none';
   });
+
+  // UXP-12: Column resize — drag handles between columns
+  initTableColumnResize();
+}
+
+// ── UXP-12: Table Column Resize ──────────────────
+function initTableColumnResize() {
+  const page = $('pageContainer');
+  if (!page) return;
+
+  let _colDrag = null; // { table, colIndex, startX, startWidths, tableWidth }
+
+  // Show col-resize cursor when hovering near column borders in tables
+  page.addEventListener('mousemove', e => {
+    if (_colDrag) return; // Dragging in progress
+    const cell = e.target.closest('td, th');
+    if (!cell) return;
+    const rect = cell.getBoundingClientRect();
+    const nearRight = Math.abs(e.clientX - rect.right) < 5;
+    const nearLeft = Math.abs(e.clientX - rect.left) < 5 && cell !== cell.parentElement.firstElementChild;
+    if (nearRight || nearLeft) {
+      cell.style.cursor = 'col-resize';
+    } else {
+      cell.style.cursor = '';
+    }
+  });
+
+  // Start column resize drag
+  page.addEventListener('mousedown', e => {
+    const cell = e.target.closest('td, th');
+    if (!cell) return;
+    const rect = cell.getBoundingClientRect();
+    const nearRight = Math.abs(e.clientX - rect.right) < 5;
+    const nearLeft = Math.abs(e.clientX - rect.left) < 5 && cell !== cell.parentElement.firstElementChild;
+    if (!nearRight && !nearLeft) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const table = cell.closest('table');
+    if (!table) return;
+
+    // Determine which column border we're dragging
+    const row = cell.parentElement;
+    const cells = Array.from(row.children);
+    let colIndex;
+    if (nearRight) {
+      colIndex = cells.indexOf(cell);
+    } else {
+      // Near left border = right border of previous column
+      colIndex = cells.indexOf(cell) - 1;
+    }
+    if (colIndex < 0 || colIndex >= cells.length - 1) return; // Can't resize last col's right border beyond table
+
+    // Capture current column widths
+    const firstRow = table.querySelector('tr');
+    if (!firstRow) return;
+    const allCells = Array.from(firstRow.children);
+    const startWidths = allCells.map(c => c.getBoundingClientRect().width);
+    const tableWidth = table.getBoundingClientRect().width;
+
+    _colDrag = { table, colIndex, startX: e.clientX, startWidths, tableWidth };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    document.addEventListener('mousemove', onColResize);
+    document.addEventListener('mouseup', endColResize);
+  });
+
+  function onColResize(e) {
+    if (!_colDrag) return;
+    const delta = e.clientX - _colDrag.startX;
+    const { table, colIndex, startWidths, tableWidth } = _colDrag;
+
+    // Calculate new widths (min 30px per column)
+    const newLeftW = Math.max(30, startWidths[colIndex] + delta);
+    const newRightW = Math.max(30, startWidths[colIndex + 1] - delta);
+
+    // Apply column widths via colgroup or cell styles
+    const rows = table.querySelectorAll('tr');
+    rows.forEach(row => {
+      const cells = row.children;
+      if (cells[colIndex]) {
+        cells[colIndex].style.width = newLeftW + 'px';
+      }
+      if (cells[colIndex + 1]) {
+        cells[colIndex + 1].style.width = newRightW + 'px';
+      }
+    });
+  }
+
+  function endColResize(e) {
+    if (!_colDrag) return;
+    onColResize(e); // Final position
+    _colDrag = null;
+    document.removeEventListener('mousemove', onColResize);
+    document.removeEventListener('mouseup', endColResize);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }
 }
 
 // ── E10.1: Dark Mode ─────────────────────────────
@@ -1909,6 +2483,18 @@ function initDarkMode() {
   updateDarkModeIcon();
 
   btn.addEventListener('click', () => toggleDarkMode());
+
+  // UXP-18: Listen for OS dark mode preference changes
+  try {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener('change', () => {
+      // Only react if user hasn't set an explicit preference
+      const explicit = localStorage.getItem('s1-theme');
+      if (!explicit) {
+        updateDarkModeIcon();
+      }
+    });
+  } catch (_) {}
 }
 
 function updateDarkModeIcon() {
@@ -3727,19 +4313,50 @@ function initSharePermissionSync() {
 }
 
 // ═══════════════════════════════════════════════════════
-// E5.4 — Editing Mode (Editing / Suggesting / Viewing)
+// E5.4 / UXP-07 — Editing Mode + Track Changes UI
 // ═══════════════════════════════════════════════════════
 
-function initEditingMode() {
-  const sel = $('editingModeSelect');
-  if (!sel) return;
-
-  sel.addEventListener('change', () => {
-    const mode = sel.value;
-    state.editingMode = mode;
-    applyEditingMode(mode);
-    announce('Mode: ' + mode.charAt(0).toUpperCase() + mode.slice(1));
+/** Sync all mode selectors (status bar, panel, Review menu) to a given mode. */
+function syncModeSelectors(mode) {
+  const statusSel = $('editingModeSelect');
+  if (statusSel && statusSel.value !== mode) statusSel.value = mode;
+  const panelSel = $('tcModeSelect');
+  if (panelSel && panelSel.value !== mode) panelSel.value = mode;
+  // Update mode icon in status bar
+  const wrap = $('editingModeWrap');
+  if (wrap) wrap.dataset.mode = mode;
+  const icon = $('editingModeIcon');
+  if (icon) {
+    const icons = { editing: 'edit', suggesting: 'rate_review', viewing: 'visibility' };
+    icon.textContent = icons[mode] || 'edit';
+  }
+  // Update Review menu entries (mark active)
+  ['Editing', 'Suggesting', 'Viewing'].forEach(m => {
+    const btn = $('menuMode' + m);
+    if (btn) btn.classList.toggle('active', mode === m.toLowerCase());
   });
+}
+
+function setEditingMode(mode) {
+  state.editingMode = mode;
+  syncModeSelectors(mode);
+  applyEditingMode(mode);
+  announce('Mode: ' + mode.charAt(0).toUpperCase() + mode.slice(1));
+}
+
+function initEditingMode() {
+  // Status bar selector
+  const sel = $('editingModeSelect');
+  if (sel) {
+    sel.addEventListener('change', () => setEditingMode(sel.value));
+  }
+  // TC panel selector
+  const panelSel = $('tcModeSelect');
+  if (panelSel) {
+    panelSel.addEventListener('change', () => setEditingMode(panelSel.value));
+  }
+  // Set initial icon state
+  syncModeSelectors(state.editingMode || 'editing');
 }
 
 function applyEditingMode(mode) {
@@ -3775,6 +4392,339 @@ function applyEditingMode(mode) {
       state.trackChangesMode = false;
       break;
   }
+}
+
+// ═══════════════════════════════════════════════════════
+// UXP-07 — Review Menu
+// ═══════════════════════════════════════════════════════
+
+function initReviewMenu() {
+  // Mode entries
+  const menuEditing = $('menuModeEditing');
+  const menuSuggesting = $('menuModeSuggesting');
+  const menuViewing = $('menuModeViewing');
+  if (menuEditing) menuEditing.addEventListener('click', () => {
+    setEditingMode('editing');
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+  if (menuSuggesting) menuSuggesting.addEventListener('click', () => {
+    setEditingMode('suggesting');
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+  if (menuViewing) menuViewing.addEventListener('click', () => {
+    setEditingMode('viewing');
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+
+  // Accept / Reject all from Review menu
+  const menuAcceptAll = $('menuAcceptAll');
+  const menuRejectAll = $('menuRejectAll');
+  if (menuAcceptAll) menuAcceptAll.addEventListener('click', () => {
+    acceptAllChanges();
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+  if (menuRejectAll) menuRejectAll.addEventListener('click', () => {
+    rejectAllChanges();
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+
+  // Prev / Next change from Review menu
+  const menuPrev = $('menuPrevChange');
+  const menuNext = $('menuNextChange');
+  if (menuPrev) menuPrev.addEventListener('click', () => {
+    navigateChange(-1);
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+  if (menuNext) menuNext.addEventListener('click', () => {
+    navigateChange(1);
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+
+  // Show changes panel
+  const menuShowPanel = $('menuShowChangesPanel');
+  if (menuShowPanel) menuShowPanel.addEventListener('click', () => {
+    toggleTrackChangesPanel();
+    document.querySelectorAll('.app-menu-item').forEach(m => m.classList.remove('open'));
+  });
+
+  // Keyboard shortcuts: Ctrl+Shift+[ and Ctrl+Shift+]
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.key === '[') {
+      e.preventDefault();
+      navigateChange(-1);
+    }
+    if (e.ctrlKey && e.shiftKey && e.key === ']') {
+      e.preventDefault();
+      navigateChange(1);
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// UXP-07 — Track Changes Panel
+// ═══════════════════════════════════════════════════════
+
+/** Current change index for navigation (0-based, -1 = none). */
+let _tcNavIndex = -1;
+/** Cached list of TC DOM elements (sorted by document order). */
+let _tcElements = [];
+
+function initTrackChangesPanel() {
+  // Close button
+  const closeBtn = $('tcPanelClose');
+  if (closeBtn) closeBtn.addEventListener('click', () => toggleTrackChangesPanel(false));
+
+  // Toggle button in TC bar
+  const toggleBtn = $('btnToggleChangesPanel');
+  if (toggleBtn) toggleBtn.addEventListener('click', () => toggleTrackChangesPanel());
+
+  // Accept All / Reject All in panel
+  const panelAcceptAll = $('tcPanelAcceptAll');
+  const panelRejectAll = $('tcPanelRejectAll');
+  if (panelAcceptAll) panelAcceptAll.addEventListener('click', acceptAllChanges);
+  if (panelRejectAll) panelRejectAll.addEventListener('click', rejectAllChanges);
+
+  // Navigation buttons in TC bar
+  const prevBtn = $('btnPrevChange');
+  const nextBtn = $('btnNextChange');
+  if (prevBtn) prevBtn.addEventListener('click', () => navigateChange(-1));
+  if (nextBtn) nextBtn.addEventListener('click', () => navigateChange(1));
+}
+
+function toggleTrackChangesPanel(forceShow) {
+  const panel = $('tcPanel');
+  if (!panel) return;
+  const show = forceShow !== undefined ? forceShow : !panel.classList.contains('show');
+  panel.classList.toggle('show', show);
+  if (show) refreshTrackChangesPanel();
+}
+
+function acceptAllChanges() {
+  if (!state.doc) return;
+  try {
+    state.doc.accept_all_changes();
+    broadcastOp({ action: 'acceptAllChanges' });
+    markDirty();
+    renderDocument();
+    updateTrackChanges();
+    refreshTrackChangesPanel();
+    _tcNavIndex = -1;
+    updateTcNavPos();
+  } catch (e) { console.error('accept all:', e); }
+}
+
+function rejectAllChanges() {
+  if (!state.doc) return;
+  try {
+    state.doc.reject_all_changes();
+    broadcastOp({ action: 'rejectAllChanges' });
+    markDirty();
+    renderDocument();
+    updateTrackChanges();
+    refreshTrackChangesPanel();
+    _tcNavIndex = -1;
+    updateTcNavPos();
+  } catch (e) { console.error('reject all:', e); }
+}
+
+/** Refresh the cached list of TC elements from the DOM. */
+function refreshTcElements() {
+  const container = $('pageContainer');
+  if (!container) { _tcElements = []; return; }
+  _tcElements = Array.from(container.querySelectorAll('[data-tc-node-id]'));
+}
+
+/** Navigate to the next/previous tracked change in the document.
+ *  direction: +1 for next, -1 for previous. */
+function navigateChange(direction) {
+  refreshTcElements();
+  if (_tcElements.length === 0) return;
+
+  // Clear previous highlight
+  _tcElements.forEach(el => el.classList.remove('tc-active'));
+
+  _tcNavIndex += direction;
+  if (_tcNavIndex >= _tcElements.length) _tcNavIndex = 0;
+  if (_tcNavIndex < 0) _tcNavIndex = _tcElements.length - 1;
+
+  const target = _tcElements[_tcNavIndex];
+  if (target) {
+    target.classList.add('tc-active');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Highlight matching card in panel
+    highlightPanelCard(target.dataset.tcNodeId);
+  }
+  updateTcNavPos();
+}
+
+/** Update the nav position indicator in the TC bar. */
+function updateTcNavPos() {
+  const posEl = $('tcNavPos');
+  if (!posEl) return;
+  if (_tcElements.length === 0 || _tcNavIndex < 0) {
+    posEl.textContent = '';
+  } else {
+    posEl.textContent = (_tcNavIndex + 1) + '/' + _tcElements.length;
+  }
+}
+
+/** Highlight a specific change card in the side panel. */
+function highlightPanelCard(nodeId) {
+  const panel = $('tcPanelList');
+  if (!panel) return;
+  panel.querySelectorAll('.tc-change-card').forEach(card => {
+    card.classList.toggle('tc-card-active', card.dataset.nodeId === nodeId);
+  });
+}
+
+/** Populate the Track Changes side panel with all tracked changes from the document. */
+export function refreshTrackChangesPanel() {
+  const panel = $('tcPanel');
+  if (!panel || !panel.classList.contains('show')) return;
+
+  const list = $('tcPanelList');
+  const empty = $('tcPanelEmpty');
+  if (!list) return;
+
+  // Clear existing cards (but not the empty placeholder)
+  list.querySelectorAll('.tc-change-card').forEach(c => c.remove());
+
+  if (!state.doc) {
+    if (empty) empty.style.display = '';
+    return;
+  }
+
+  // Get tracked changes from WASM
+  let changes = [];
+  try {
+    if (typeof state.doc.tracked_changes_json === 'function') {
+      const json = state.doc.tracked_changes_json();
+      changes = JSON.parse(json);
+    }
+  } catch (_) {}
+
+  // Also gather from DOM to get text preview
+  refreshTcElements();
+  const tcTextMap = new Map();
+  _tcElements.forEach(el => {
+    tcTextMap.set(el.dataset.tcNodeId, {
+      text: (el.textContent || '').slice(0, 80),
+      type: el.dataset.tcType || 'insert',
+    });
+  });
+
+  if (changes.length === 0 && _tcElements.length === 0) {
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  // If WASM returned changes, use them; otherwise fall back to DOM elements
+  const items = changes.length > 0 ? changes : _tcElements.map(el => ({
+    nodeId: el.dataset.tcNodeId,
+    type: el.dataset.tcType === 'delete' ? 'Delete' : el.dataset.tcType === 'format' ? 'FormatChange' : 'Insert',
+    author: '',
+    date: '',
+  }));
+
+  items.forEach((ch, idx) => {
+    const nodeId = ch.nodeId;
+    const card = document.createElement('div');
+    card.className = 'tc-change-card';
+    card.dataset.nodeId = nodeId;
+    card.dataset.index = idx;
+
+    // Header with badge + author
+    const header = document.createElement('div');
+    header.className = 'tc-change-card-header';
+
+    const badge = document.createElement('span');
+    const type = (ch.type || 'Insert').toLowerCase();
+    const isInsert = type === 'insert';
+    const isDelete = type === 'delete';
+    const isFormat = type === 'formatchange' || type === 'format';
+    badge.className = 'tc-change-badge ' + (isInsert ? 'tc-badge-insert' : isDelete ? 'tc-badge-delete' : 'tc-badge-format');
+    const badgeIcon = isInsert ? 'add' : isDelete ? 'remove' : 'format_paint';
+    const badgeLabel = isInsert ? 'Insert' : isDelete ? 'Delete' : 'Format';
+    badge.innerHTML = '<span class="msi">' + badgeIcon + '</span> ' + badgeLabel;
+    header.appendChild(badge);
+
+    if (ch.author) {
+      const author = document.createElement('span');
+      author.className = 'tc-change-author';
+      author.textContent = ch.author;
+      author.title = ch.author + (ch.date ? ' (' + ch.date + ')' : '');
+      header.appendChild(author);
+    }
+    card.appendChild(header);
+
+    // Text preview
+    const domInfo = tcTextMap.get(nodeId);
+    if (domInfo && domInfo.text) {
+      const preview = document.createElement('div');
+      preview.className = 'tc-change-preview';
+      const span = document.createElement('span');
+      span.className = isInsert ? 'tc-change-preview-ins' : isDelete ? 'tc-change-preview-del' : '';
+      span.textContent = domInfo.text;
+      preview.appendChild(span);
+      card.appendChild(preview);
+    }
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'tc-change-actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'tc-card-btn tc-card-accept';
+    acceptBtn.textContent = 'Accept';
+    acceptBtn.title = 'Accept this change';
+    acceptBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      try {
+        state.doc.accept_change(nodeId);
+        broadcastOp({ action: 'acceptChange', nodeId });
+        markDirty();
+        renderDocument();
+        updateTrackChanges();
+        refreshTrackChangesPanel();
+      } catch (err) { console.error('accept change:', err); }
+    });
+    actions.appendChild(acceptBtn);
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.className = 'tc-card-btn tc-card-reject';
+    rejectBtn.textContent = 'Reject';
+    rejectBtn.title = 'Reject this change';
+    rejectBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      try {
+        state.doc.reject_change(nodeId);
+        broadcastOp({ action: 'rejectChange', nodeId });
+        markDirty();
+        renderDocument();
+        updateTrackChanges();
+        refreshTrackChangesPanel();
+      } catch (err) { console.error('reject change:', err); }
+    });
+    actions.appendChild(rejectBtn);
+    card.appendChild(actions);
+
+    // Click card to navigate to the change in the document
+    card.addEventListener('click', () => {
+      refreshTcElements();
+      const target = _tcElements.find(el => el.dataset.tcNodeId === nodeId);
+      if (target) {
+        _tcElements.forEach(el => el.classList.remove('tc-active'));
+        target.classList.add('tc-active');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        _tcNavIndex = _tcElements.indexOf(target);
+        updateTcNavPos();
+      }
+      highlightPanelCard(nodeId);
+    });
+
+    list.appendChild(card);
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -4262,53 +5212,238 @@ function setupPageScrollTracking() {
   });
 }
 
-// ── Outline (Table of Contents) ─────────────────────────────────
+// ── Outline (Document Heading Hierarchy) ────────────────────────
 
+/** Cache of the last heading fingerprint to avoid unnecessary DOM rebuilds. */
+let _lastOutlineFingerprint = '';
+
+/**
+ * Render the outline panel from the heading hierarchy.
+ * Uses the WASM get_headings_json API when available (authoritative source),
+ * falling back to DOM scraping for compatibility.
+ */
 function renderOutline() {
   const list = $('outlineList');
   const pageContainer = $('pageContainer');
   if (!list || !pageContainer) return;
 
-  const headings = pageContainer.querySelectorAll('h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
+  // Try WASM-based heading extraction first (authoritative, survives DOM inconsistencies)
+  let headingData = null;
+  if (state.doc && typeof state.doc.get_headings_json === 'function') {
+    try {
+      const json = state.doc.get_headings_json();
+      headingData = JSON.parse(json);
+    } catch (_) {
+      headingData = null;
+    }
+  }
 
-  if (!headings.length) {
+  // Fallback: scrape headings from rendered DOM
+  if (!headingData) {
+    headingData = [];
+    const domHeadings = pageContainer.querySelectorAll(
+      'h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]'
+    );
+    domHeadings.forEach(h => {
+      const text = h.textContent.trim();
+      if (text) {
+        headingData.push({
+          nodeId: h.dataset.nodeId || '',
+          level: parseInt(h.tagName[1], 10),
+          text,
+        });
+      }
+    });
+  }
+
+  // Fingerprint check: skip rebuild if nothing changed
+  const fp = headingData.map(h => `${h.level}:${h.nodeId}:${h.text}`).join('|');
+  if (fp === _lastOutlineFingerprint && list.children.length > 0) return;
+  _lastOutlineFingerprint = fp;
+
+  if (!headingData.length) {
     list.innerHTML = '<div class="outline-empty">No headings found.<br><br>Add headings (H1\u2013H6) to your document to see the outline here.</div>';
+    updateOutlineTabBadge(0);
     return;
   }
 
   list.innerHTML = '';
-  headings.forEach(h => {
-    const level = parseInt(h.tagName[1], 10);
-    const text = h.textContent.trim();
-    if (!text) return;
-
+  headingData.forEach(h => {
     const item = document.createElement('div');
     item.className = 'outline-item';
-    item.dataset.level = level;
-    item.dataset.nodeId = h.dataset.nodeId || '';
-    item.textContent = text;
-    item.title = text;
+    item.dataset.level = h.level;
+    item.dataset.nodeId = h.nodeId;
+    item.textContent = h.text;
+    item.title = `${h.text} (H${h.level})`;
+    item.setAttribute('role', 'link');
+    item.setAttribute('tabindex', '0');
 
-    item.addEventListener('click', () => {
-      h.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Brief highlight
-      h.style.transition = 'background 0.3s';
-      h.style.background = 'rgba(26, 115, 232, 0.12)';
-      setTimeout(() => { h.style.background = ''; }, 1500);
-      // Mark active
-      list.querySelectorAll('.outline-item').forEach(it => it.classList.remove('active'));
-      item.classList.add('active');
+    // Click to scroll to heading in document
+    item.addEventListener('click', () => scrollToHeading(h.nodeId, list, item));
+    // Keyboard: Enter/Space to activate
+    item.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        scrollToHeading(h.nodeId, list, item);
+      }
     });
 
     list.appendChild(item);
+  });
+
+  updateOutlineTabBadge(headingData.length);
+}
+
+/** Scroll to a heading element by its node ID, with highlight feedback. */
+function scrollToHeading(nodeId, list, activeItem) {
+  const pageContainer = $('pageContainer');
+  if (!pageContainer) return;
+  const headingEl = pageContainer.querySelector(`[data-node-id="${nodeId}"]`);
+  if (!headingEl) return;
+
+  headingEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Brief highlight flash
+  headingEl.style.transition = 'background 0.3s';
+  headingEl.style.background = 'rgba(26, 115, 232, 0.12)';
+  setTimeout(() => { headingEl.style.background = ''; }, 1500);
+
+  // Mark active in outline
+  if (list && activeItem) {
+    list.querySelectorAll('.outline-item').forEach(it => it.classList.remove('active'));
+    activeItem.classList.add('active');
+  }
+}
+
+/** Update the outline tab with a heading count badge. */
+function updateOutlineTabBadge(count) {
+  const panel = $('pagesPanel');
+  if (!panel) return;
+  const tab = panel.querySelector('.pages-tab[data-tab="outline"]');
+  if (!tab) return;
+  // Remove existing badge
+  const existing = tab.querySelector('.outline-badge');
+  if (existing) existing.remove();
+  if (count > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'outline-badge';
+    badge.textContent = count;
+    badge.title = `${count} heading${count !== 1 ? 's' : ''}`;
+    tab.appendChild(badge);
+  }
+}
+
+/**
+ * Toggle the outline panel open and switch to the Outline tab.
+ * Exported for use by keyboard shortcuts (Ctrl+Shift+O).
+ */
+export function toggleOutlinePanel() {
+  const panel = $('pagesPanel');
+  if (!panel) return;
+
+  // If panel is open on outline tab, close it
+  const isOpen = panel.classList.contains('show');
+  const activeTab = panel.querySelector('.pages-tab.active');
+  if (isOpen && activeTab?.dataset.tab === 'outline') {
+    panel.classList.remove('show');
+    return;
+  }
+
+  // Open and switch to outline tab
+  if (!isOpen) panel.classList.add('show');
+  panel.querySelectorAll('.pages-tab').forEach(t => {
+    t.classList.remove('active');
+    t.setAttribute('aria-selected', 'false');
+  });
+  panel.querySelectorAll('.pages-tab-content').forEach(c => c.classList.remove('active'));
+  const outlineTab = panel.querySelector('.pages-tab[data-tab="outline"]');
+  const outlineContent = panel.querySelector('.pages-tab-content[data-tab="outline"]');
+  if (outlineTab) { outlineTab.classList.add('active'); outlineTab.setAttribute('aria-selected', 'true'); }
+  if (outlineContent) outlineContent.classList.add('active');
+  renderOutline();
+}
+
+// ── In-document TOC interaction delegation ─────────────────────
+
+let _tocDelegationSetup = false;
+
+/** Wire up event delegation for in-document TOC blocks (click entries, update button, style selector). */
+function initTOCInteraction() {
+  if (_tocDelegationSetup) return;
+  const container = $('pageContainer');
+  if (!container) return;
+  _tocDelegationSetup = true;
+
+  container.addEventListener('click', e => {
+    // TOC entry click — navigate to heading
+    const entry = e.target.closest('.toc-entry[data-target-node]');
+    if (entry) {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetNodeId = entry.dataset.targetNode;
+      if (targetNodeId) {
+        const heading = container.querySelector(`[data-node-id="${targetNodeId}"]`);
+        if (heading) {
+          heading.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          heading.style.transition = 'background 0.3s';
+          heading.style.background = 'rgba(26, 115, 232, 0.12)';
+          setTimeout(() => { heading.style.background = ''; }, 1500);
+        }
+      }
+      return;
+    }
+
+    // TOC update button
+    const updateBtn = e.target.closest('.toc-update-btn');
+    if (updateBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.doc && typeof state.doc.update_table_of_contents === 'function') {
+        try {
+          syncAllText();
+          state.doc.update_table_of_contents();
+          renderDocument();
+          announce('Table of Contents updated');
+        } catch (err) { console.error('TOC update:', err); }
+      }
+      return;
+    }
+  });
+
+  // TOC style selector — change leader style (dotted, dashed, plain)
+  container.addEventListener('change', e => {
+    const sel = e.target.closest('.toc-style-select');
+    if (!sel) return;
+    e.stopPropagation();
+    const tocBlock = sel.closest('.doc-toc');
+    if (!tocBlock) return;
+    const style = sel.value; // 'plain', 'dotted', 'dashed'
+    tocBlock.querySelectorAll('.toc-entry').forEach(entry => {
+      entry.classList.remove('toc-dotted', 'toc-dashed');
+      if (style === 'dotted') entry.classList.add('toc-dotted');
+      else if (style === 'dashed') entry.classList.add('toc-dashed');
+    });
+  });
+
+  // Keyboard: Enter/Space on TOC entries
+  container.addEventListener('keydown', e => {
+    const entry = e.target.closest('.toc-entry[data-target-node]');
+    if (entry && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      entry.click();
+    }
   });
 }
 
 /** Re-render page thumbnails / outline after document changes. */
 export function refreshPageThumbnails() {
   const panel = $('pagesPanel');
+  // Always refresh outline data (fingerprinting prevents unnecessary DOM rebuilds)
+  renderOutline();
+  // Initialize TOC interaction delegation (idempotent)
+  initTOCInteraction();
+  // Only refresh visual panel content if panel is visible
   if (!panel || !panel.classList.contains('show')) return;
   const activeTab = panel.querySelector('.pages-tab.active');
   if (activeTab?.dataset.tab === 'pages') renderPageThumbnails();
-  else renderOutline();
 }

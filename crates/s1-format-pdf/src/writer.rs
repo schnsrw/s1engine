@@ -194,8 +194,27 @@ impl RefAllocator {
 }
 
 /// Collect all unique FontIds used in the layout.
-fn collect_font_usage(layout: &LayoutDocument) -> HashMap<FontId, Vec<u16>> {
-    let mut usage: HashMap<FontId, Vec<u16>> = HashMap::new();
+/// Per-font usage data: the set of glyph IDs used and a mapping from each
+/// glyph ID to the Unicode string it represents (derived from the original
+/// source text and the shaping cluster information).
+struct FontUsage {
+    glyph_ids: Vec<u16>,
+    /// Maps glyph ID → Unicode string.  For simple 1:1 mappings this is a
+    /// single character; for ligatures it can be multiple characters.
+    glyph_to_unicode: HashMap<u16, String>,
+}
+
+impl FontUsage {
+    fn new() -> Self {
+        Self {
+            glyph_ids: Vec::new(),
+            glyph_to_unicode: HashMap::new(),
+        }
+    }
+}
+
+fn collect_font_usage(layout: &LayoutDocument) -> HashMap<FontId, FontUsage> {
+    let mut usage: HashMap<FontId, FontUsage> = HashMap::new();
 
     for page in &layout.pages {
         collect_blocks_font_usage(&page.blocks, &mut usage);
@@ -212,21 +231,47 @@ fn collect_font_usage(layout: &LayoutDocument) -> HashMap<FontId, Vec<u16>> {
     usage
 }
 
-fn collect_blocks_font_usage(blocks: &[LayoutBlock], usage: &mut HashMap<FontId, Vec<u16>>) {
+fn collect_blocks_font_usage(blocks: &[LayoutBlock], usage: &mut HashMap<FontId, FontUsage>) {
     for block in blocks {
         collect_block_font_usage(block, usage);
     }
 }
 
-fn collect_block_font_usage(block: &LayoutBlock, usage: &mut HashMap<FontId, Vec<u16>>) {
+fn collect_block_font_usage(block: &LayoutBlock, usage: &mut HashMap<FontId, FontUsage>) {
     match &block.kind {
         LayoutBlockKind::Paragraph { lines, .. } => {
             for line in lines {
                 for run in &line.runs {
-                    let glyphs = usage.entry(run.font_id).or_default();
-                    for g in &run.glyphs {
-                        if !glyphs.contains(&g.glyph_id) {
-                            glyphs.push(g.glyph_id);
+                    let font_usage = usage.entry(run.font_id).or_insert_with(FontUsage::new);
+                    let text = &run.text;
+                    let text_bytes = text.as_bytes();
+
+                    for (i, g) in run.glyphs.iter().enumerate() {
+                        // Record the glyph ID
+                        if !font_usage.glyph_ids.contains(&g.glyph_id) {
+                            font_usage.glyph_ids.push(g.glyph_id);
+                        }
+
+                        // Derive the Unicode string this glyph maps to using
+                        // the cluster (byte offset) field.  The cluster of the
+                        // *next* glyph (or end of text) gives the byte range.
+                        if let std::collections::hash_map::Entry::Vacant(e) =
+                            font_usage.glyph_to_unicode.entry(g.glyph_id)
+                        {
+                            let start = g.cluster as usize;
+                            let end = run
+                                .glyphs
+                                .get(i + 1)
+                                .map(|next| next.cluster as usize)
+                                .unwrap_or(text_bytes.len());
+                            // Ensure valid range within the text
+                            if start <= end && end <= text_bytes.len() {
+                                if let Ok(s) = std::str::from_utf8(&text_bytes[start..end]) {
+                                    if !s.is_empty() {
+                                        e.insert(s.to_string());
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -249,11 +294,12 @@ fn embed_fonts(
     pdf: &mut Pdf,
     alloc: &mut RefAllocator,
     font_db: &FontDatabase,
-    font_usage: &HashMap<FontId, Vec<u16>>,
+    font_usage: &HashMap<FontId, FontUsage>,
 ) -> Result<HashMap<FontId, PdfFont>, PdfError> {
     let mut font_map = HashMap::new();
 
-    for (font_idx, (font_id, glyph_ids)) in font_usage.iter().enumerate() {
+    for (font_idx, (font_id, fu)) in font_usage.iter().enumerate() {
+        let glyph_ids = &fu.glyph_ids;
         let font_name = format!("F{}", font_idx);
 
         let font_ref = alloc.next();
@@ -339,8 +385,9 @@ fn embed_fonts(
             }
             cid_font.finish();
 
-            // ToUnicode CMap (minimal)
-            let cmap_data = build_tounicode_cmap();
+            // ToUnicode CMap — maps glyph IDs to Unicode code points for
+            // correct text extraction / copy-paste from the PDF.
+            let cmap_data = build_tounicode_cmap(&fu.glyph_to_unicode);
             pdf.stream(cmap_ref, &cmap_data);
 
             // Type0 font
@@ -1479,33 +1526,69 @@ fn write_metadata(pdf: &mut Pdf, alloc: &mut RefAllocator, meta: &DocumentMetada
     info.finish();
 }
 
-/// Build a minimal ToUnicode CMap.
+/// Build a ToUnicode CMap from the actual glyph-to-Unicode mapping collected
+/// during font usage analysis.
 ///
-/// TODO: The ToUnicode CMap currently maps glyph IDs linearly. For fonts with
-/// ligatures, alternate glyphs, or OpenType features, this mapping may be
-/// incorrect, resulting in wrong text when copy-pasting from the PDF.
-/// A proper implementation should build the CMap from the actual glyph-to-Unicode
-/// mapping used during text shaping.
-fn build_tounicode_cmap() -> Vec<u8> {
-    // Minimal CMap that maps glyph IDs to Unicode code points.
-    let cmap = b"/CIDInit /ProcSet findresource begin
-12 dict begin
-begincmap
-/CIDSystemInfo
-<< /Registry (Adobe)
-/Ordering (UCS)
-/Supplement 0
->> def
-/CMapName /Adobe-Identity-UCS def
-/CMapType 2 def
-1 begincodespacerange
-<0000> <FFFF>
-endcodespacerange
-endcmap
-CMapName currentdict /CMap defineresource pop
-end
-end";
-    cmap.to_vec()
+/// Each entry maps a glyph ID (CID) to the Unicode string it represents.
+/// This enables correct text extraction and copy-paste from the PDF, even for
+/// fonts with ligatures, contextual alternates, or complex OpenType features.
+///
+/// When the mapping is empty (no shaping data available), a minimal identity
+/// codespace range is emitted as a fallback.
+fn build_tounicode_cmap(glyph_to_unicode: &HashMap<u16, String>) -> Vec<u8> {
+    use std::fmt::Write;
+
+    let mut cmap = String::new();
+    cmap.push_str("/CIDInit /ProcSet findresource begin\n");
+    cmap.push_str("12 dict begin\n");
+    cmap.push_str("begincmap\n");
+    cmap.push_str("/CIDSystemInfo\n");
+    cmap.push_str("<< /Registry (Adobe)\n");
+    cmap.push_str("/Ordering (UCS)\n");
+    cmap.push_str("/Supplement 0\n");
+    cmap.push_str(">> def\n");
+    cmap.push_str("/CMapName /Adobe-Identity-UCS def\n");
+    cmap.push_str("/CMapType 2 def\n");
+    cmap.push_str("1 begincodespacerange\n");
+    cmap.push_str("<0000> <FFFF>\n");
+    cmap.push_str("endcodespacerange\n");
+
+    if !glyph_to_unicode.is_empty() {
+        // Sort entries by glyph ID for deterministic output
+        let mut entries: Vec<(u16, &String)> =
+            glyph_to_unicode.iter().map(|(&k, v)| (k, v)).collect();
+        entries.sort_by_key(|&(gid, _)| gid);
+
+        // PDF CMap bfchar sections can hold at most 100 entries each
+        for chunk in entries.chunks(100) {
+            let _ = writeln!(cmap, "{} beginbfchar", chunk.len());
+            for &(gid, unicode_str) in chunk {
+                // Encode the glyph ID as a 2-byte hex value
+                let _ = write!(cmap, "<{:04X}> <", gid);
+                // Encode Unicode string as UTF-16BE hex
+                for ch in unicode_str.chars() {
+                    let code = ch as u32;
+                    if code <= 0xFFFF {
+                        let _ = write!(cmap, "{:04X}", code);
+                    } else {
+                        // Supplementary plane — encode as surrogate pair
+                        let hi = ((code - 0x10000) >> 10) + 0xD800;
+                        let lo = ((code - 0x10000) & 0x3FF) + 0xDC00;
+                        let _ = write!(cmap, "{:04X}{:04X}", hi, lo);
+                    }
+                }
+                cmap.push_str(">\n");
+            }
+            cmap.push_str("endbfchar\n");
+        }
+    }
+
+    cmap.push_str("endcmap\n");
+    cmap.push_str("CMapName currentdict /CMap defineresource pop\n");
+    cmap.push_str("end\n");
+    cmap.push_str("end");
+
+    cmap.into_bytes()
 }
 
 /// Write a PDF/A output intent with a minimal sRGB ICC profile.

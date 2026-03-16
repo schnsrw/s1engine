@@ -7,7 +7,7 @@ import { markDirty, updateTrackChanges, updateStatusBar } from './file.js';
 import { broadcastTextSync, broadcastOp } from './collab.js';
 import { getEditableText } from './selection.js';
 import { getFontDb } from './fonts.js';
-import { renderDocumentEquations, refreshPageThumbnails } from './toolbar-handlers.js';
+import { renderDocumentEquations, refreshPageThumbnails, isSpellCheckEnabled, refreshTrackChangesPanel } from './toolbar-handlers.js';
 import {
   isCanvasMode,
   setCanvasMode,
@@ -125,6 +125,14 @@ export function renderDocument() {
       f.remove();
     });
 
+    // UXP-10: Extract footnotes/endnotes sections from WASM output and store for placement
+    const footnotesSection = temp.querySelector(':scope > .footnotes-section');
+    const endnotesSection = temp.querySelector(':scope > .endnotes-section');
+    state._footnotesHtml = footnotesSection ? footnotesSection.outerHTML : '';
+    state._endnotesHtml = endnotesSection ? endnotesSection.outerHTML : '';
+    if (footnotesSection) footnotesSection.remove();
+    if (endnotesSection) endnotesSection.remove();
+
     // Clear nodeIdToElement map (DOM is rebuilt)
     state.nodeIdToElement.clear();
 
@@ -153,8 +161,10 @@ export function renderDocument() {
       pageEl.style.minHeight = Math.round((dims.heightPt || 792) * ptToPx) + 'px';
 
       const header = document.createElement('div');
-      header.className = 'page-header';
+      header.className = 'page-header hf-hoverable';
       header.contentEditable = 'false';
+      header.setAttribute('data-hf-kind', 'header');
+      header.setAttribute('title', 'Double-click to edit header');
       if (state.docHeaderHtml) {
         header.innerHTML = state.docHeaderHtml;
         // Substitute page number fields for page 1 of 1
@@ -168,7 +178,7 @@ export function renderDocument() {
       const content = document.createElement('div');
       content.className = 'page-content';
       content.contentEditable = 'true';
-      content.spellcheck = true;
+      content.spellcheck = isSpellCheckEnabled();
       content.lang = 'en';
       content.setAttribute('role', 'textbox');
       content.setAttribute('aria-multiline', 'true');
@@ -178,8 +188,10 @@ export function renderDocument() {
       pageEl.appendChild(content);
 
       const footer = document.createElement('div');
-      footer.className = 'page-footer';
+      footer.className = 'page-footer hf-hoverable';
       footer.contentEditable = 'false';
+      footer.setAttribute('data-hf-kind', 'footer');
+      footer.setAttribute('title', 'Double-click to edit footer');
       if (state.docFooterHtml) {
         footer.innerHTML = state.docFooterHtml;
         // Substitute page number fields for page 1 of 1
@@ -193,6 +205,9 @@ export function renderDocument() {
       container.appendChild(pageEl);
       state.pageElements = [pageEl];
     }
+
+    // UXP-10: Place footnotes/endnotes sections on the last page
+    placeFootnoteSections();
 
     // Post-render fixups across all pages
     fixEmptyBlocks();
@@ -217,6 +232,7 @@ export function renderDocument() {
 
     updateUndoRedo();
     updateTrackChanges();
+    refreshTrackChangesPanel();
     updateStatusBar();
     checkLargeDocumentWarning();
 
@@ -842,6 +858,55 @@ function injectTOCUpdateButtons(container) {
       titleEl.appendChild(btn);
     }
   });
+}
+
+// ═══════════════════════════════════════════════════
+// UXP-10: Place Footnote/Endnote Sections on Pages
+// ═══════════════════════════════════════════════════
+
+/**
+ * Place footnotes section at the bottom of the last page's content area,
+ * and endnotes at the end of the last page.
+ *
+ * Footnotes appear with a thin separator line above them at the bottom of
+ * the page content. Endnotes appear after all body content on the last page.
+ */
+function placeFootnoteSections() {
+  const footnotesHtml = state._footnotesHtml || '';
+  const endnotesHtml = state._endnotesHtml || '';
+  if (!footnotesHtml && !endnotesHtml) return;
+
+  // Remove any existing footnote/endnote sections from all pages
+  const container = $('pageContainer');
+  if (!container) return;
+  container.querySelectorAll('.footnotes-section, .endnotes-section').forEach(el => el.remove());
+
+  // Find the last page with content
+  const pages = state.pageElements;
+  if (!pages || pages.length === 0) return;
+  const lastPage = pages[pages.length - 1];
+  const contentEl = lastPage.querySelector('.page-content');
+  if (!contentEl) return;
+
+  // Insert footnotes at the end of the last page's content
+  if (footnotesHtml) {
+    const temp = document.createElement('div');
+    temp.innerHTML = footnotesHtml;
+    const fnSection = temp.firstElementChild;
+    if (fnSection) {
+      contentEl.appendChild(fnSection);
+    }
+  }
+
+  // Insert endnotes after footnotes
+  if (endnotesHtml) {
+    const temp = document.createElement('div');
+    temp.innerHTML = endnotesHtml;
+    const enSection = temp.firstElementChild;
+    if (enSection) {
+      contentEl.appendChild(enSection);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════

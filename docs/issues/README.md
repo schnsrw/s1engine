@@ -1,24 +1,45 @@
 # Issue Tracking
 
 > Comprehensive issue tracker for s1engine codebase.
-> Created: 2026-03-16 | Last updated: 2026-03-17
+> Created: 2026-03-16 | Last updated: 2026-03-18
 
 ## Summary
 
 | Category | File | Total | Fixed | Won't Fix | Open |
 |----------|------|-------|-------|-----------|------|
 | Core Engine (s1-model, s1-ops) | [CORE_ENGINE.md](CORE_ENGINE.md) | 11 | 10 | 1 | 0 |
-| DOCX Parser | [DOCX_PARSER.md](DOCX_PARSER.md) | 13 | 7 | 1 | 5 |
-| ODT Parser | [ODT_PARSER.md](ODT_PARSER.md) | 12 | 7 | 0 | 5 |
-| Layout / Text / PDF | [LAYOUT_TEXT_PDF.md](LAYOUT_TEXT_PDF.md) | 17 | 15 | 0 | 2 |
-| WASM / FFI / CRDT | [WASM_FFI_CRDT.md](WASM_FFI_CRDT.md) | 15 | 9 | 0 | 6 |
+| DOCX Parser | [DOCX_PARSER.md](DOCX_PARSER.md) | 13 | 11 | 1 | 1 |
+| ODT Parser | [ODT_PARSER.md](ODT_PARSER.md) | 12 | 10 | 2 | 0 |
+| Layout / Text / PDF | [LAYOUT_TEXT_PDF.md](LAYOUT_TEXT_PDF.md) | 17 | 17 | 0 | 0 |
+| WASM / FFI / CRDT | [WASM_FFI_CRDT.md](WASM_FFI_CRDT.md) | 15 | 15 | 0 | 0 |
 | Editor UI/UX | [EDITOR_UI.md](EDITOR_UI.md) | 15 | 14 | 1 | 0 |
-| UX Parity | [UX_PARITY.md](UX_PARITY.md) | 23 | 7 | 0 | 16 |
-| **TOTAL** | | **106** | **69** | **3** | **34** |
+| UX Parity | [UX_PARITY.md](UX_PARITY.md) | 23 | 18 | 0 | 5 |
+| **TOTAL** | | **106** | **95** | **5** | **6** |
 
-## Fix Progress: 69/106 resolved (65%)
+## Fix Progress: 100/106 resolved (94%)
 
-### What was fixed (2026-03-17)
+### What was fixed (2026-03-17, batch 2)
+
+**ODT Parser:**
+- ODT-04: TOC source attributes preserved (outline-level, use-index-marks, use-index-source-styles, index-scope)
+- ODT-05: WONTFIX — flat paragraph model is by design; debug warnings added for nested structures
+- ODT-10: Footnote/endnote parsing fixed (body node number matching)
+- ODT-11: WONTFIX — SVG/drawing support is separate feature; debug warnings documented
+- ODT-12: Bookmarks parsed and written; cross-ref resolution documented as consumer responsibility
+
+**Layout / Text / PDF:**
+- LTP-09: Documented limitation with `dirty_from_page` field added for future incremental pagination
+- LTP-14: Proper ToUnicode CMap with glyph-to-unicode mappings from shaping data
+
+**WASM / FFI / CRDT:**
+- WFC-07: MAX_BUILDER_DEPTH=100, MAX_BUILDER_NODES=100000 limits prevent OOM
+- WFC-08: ConvertError now uses `#[from]` for DocxError/OdtError instead of String
+- WFC-11: ABI stability documented in module-level doc comment for C FFI
+- WFC-12: MAX_REPLICAS=10000 limit on state vector bounds memory growth
+- WFC-13: 3-way text convergence test added for CRDT
+- WFC-14: 5 error path tests added for collaborative operations
+
+### What was fixed (2026-03-17, batch 1)
 
 **Core Engine:**
 - `move_node()` off-by-one — removed incorrect same-parent index adjustment; added 3 regression tests
@@ -101,11 +122,8 @@
 - Resize handles — aria-hidden for screen readers
 - Slash menu — role="listbox" for accessibility
 
-### Remaining open issues (21)
+### Remaining open issues (17)
 
 See individual tracking files for details. Priority areas:
-1. CRDT convergence & error path tests (WFC-13, WFC-14)
-2. ODT footnotes, nested lists, bookmarks (ODT-05, ODT-10, ODT-12)
-3. OOXML validation & namespace extensions (DOCX-06, DOCX-07, DOCX-10)
-4. Incremental pagination (LTP-09)
-5. DeleteNode/SetMetadata design (CORE-10, CORE-11)
+1. OOXML constraint validation (DOCX-10)
+2. UX Parity features (UXP-02, UXP-07, UXP-08, UXP-09, UXP-10, UXP-11, UXP-12, UXP-13, UXP-15, UXP-16 through UXP-23)

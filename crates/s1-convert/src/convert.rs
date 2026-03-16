@@ -172,23 +172,15 @@ pub fn detect_format(data: &[u8]) -> Option<SourceFormat> {
 fn read_source(data: &[u8], from: SourceFormat) -> Result<DocumentModel, ConvertError> {
     match from {
         SourceFormat::Doc => doc_reader::read_doc(data),
-        SourceFormat::Docx => {
-            s1_format_docx::read(data).map_err(|e| ConvertError::Docx(format!("{e}")))
-        }
-        SourceFormat::Odt => {
-            s1_format_odt::read(data).map_err(|e| ConvertError::Odt(format!("{e}")))
-        }
+        SourceFormat::Docx => s1_format_docx::read(data).map_err(ConvertError::from),
+        SourceFormat::Odt => s1_format_odt::read(data).map_err(ConvertError::from),
     }
 }
 
 fn write_target(doc: &DocumentModel, to: TargetFormat) -> Result<Vec<u8>, ConvertError> {
     match to {
-        TargetFormat::Docx => {
-            s1_format_docx::write(doc).map_err(|e| ConvertError::Docx(format!("{e}")))
-        }
-        TargetFormat::Odt => {
-            s1_format_odt::write(doc).map_err(|e| ConvertError::Odt(format!("{e}")))
-        }
+        TargetFormat::Docx => s1_format_docx::write(doc).map_err(ConvertError::from),
+        TargetFormat::Odt => s1_format_odt::write(doc).map_err(ConvertError::from),
     }
 }
 

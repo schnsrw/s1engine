@@ -28,6 +28,12 @@ let _pageDims = { widthPt: DEFAULT_PAGE_WIDTH_PT, marginLeftPt: DEFAULT_MARGIN_L
 // Drag state
 let _dragging = null; // { type: 'left'|'right'|'firstLine', startX, startPt, nodeId }
 
+// UXP-15: Tab stops state
+// Each tab stop: { positionPt: number, type: 'left'|'center'|'right'|'decimal' }
+let _tabStops = [];
+let _draggingTab = null; // { index, startX, startPt }
+const TAB_TYPES = ['left', 'center', 'right', 'decimal'];
+
 /**
  * Read page dimensions from the current WASM document's first section.
  */
@@ -301,6 +307,205 @@ function endDrag(e) {
   updateIndentHandles();
 }
 
+// ── UXP-15: Tab Stop Helpers ─────────────────────
+
+/**
+ * Add a tab stop marker to the ruler DOM.
+ */
+function renderTabStopMarker(ruler, tab, index) {
+  const marginLeftPx = ptToPx(_pageDims.marginLeftPt);
+  const x = marginLeftPx + ptToPx(tab.positionPt);
+  const typeLabel = tab.type.charAt(0).toUpperCase() + tab.type.slice(1);
+  const inches = (tab.positionPt / PT_PER_INCH).toFixed(2);
+
+  const el = document.createElement('div');
+  el.className = `ruler-tab-stop tab-${tab.type}`;
+  el.style.left = x + 'px';
+  el.title = `${typeLabel} tab stop (${inches} in) — Drag to move, double-click to change type`;
+  el.dataset.tabIndex = index;
+
+  // Drag to move tab stop
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _draggingTab = { index, startX: e.clientX, startPt: tab.positionPt };
+    document.addEventListener('mousemove', onTabDrag);
+    document.addEventListener('mouseup', endTabDrag);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  // Double-click to cycle tab type
+  el.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const currentIdx = TAB_TYPES.indexOf(tab.type);
+    const nextIdx = (currentIdx + 1) % TAB_TYPES.length;
+    _tabStops[index].type = TAB_TYPES[nextIdx];
+    applyTabStopsToDocument();
+    refreshTabStopMarkers();
+  });
+
+  ruler.appendChild(el);
+}
+
+function onTabDrag(e) {
+  if (!_draggingTab) return;
+  const zoom = (state.zoomLevel || 100) / 100;
+  const deltaPx = (e.clientX - _draggingTab.startX) / zoom;
+  const deltaPt = pxToPt(deltaPx);
+  const contentWidthPt = _pageDims.widthPt - _pageDims.marginLeftPt - _pageDims.marginRightPt;
+  const newPt = clamp(_draggingTab.startPt + deltaPt, 0, contentWidthPt);
+
+  // Snap to eighth-inch (9pt)
+  const snapped = Math.round(newPt / 9) * 9;
+
+  // Update marker position live
+  const ruler = document.getElementById('ruler');
+  if (!ruler) return;
+  const marker = ruler.querySelector(`.ruler-tab-stop[data-tab-index="${_draggingTab.index}"]`);
+  if (marker) {
+    const marginLeftPx = ptToPx(_pageDims.marginLeftPt);
+    marker.style.left = (marginLeftPx + ptToPx(snapped)) + 'px';
+  }
+}
+
+function endTabDrag(e) {
+  if (!_draggingTab) return;
+  const zoom = (state.zoomLevel || 100) / 100;
+  const deltaPx = (e.clientX - _draggingTab.startX) / zoom;
+  const deltaPt = pxToPt(deltaPx);
+  const contentWidthPt = _pageDims.widthPt - _pageDims.marginLeftPt - _pageDims.marginRightPt;
+  let newPt = clamp(_draggingTab.startPt + deltaPt, 0, contentWidthPt);
+  newPt = Math.round(newPt / 9) * 9;
+
+  const idx = _draggingTab.index;
+  _draggingTab = null;
+  document.removeEventListener('mousemove', onTabDrag);
+  document.removeEventListener('mouseup', endTabDrag);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+
+  // Check if dragged off ruler (below ruler = remove)
+  const ruler = document.getElementById('ruler');
+  if (ruler) {
+    const rulerRect = ruler.getBoundingClientRect();
+    if (e.clientY > rulerRect.bottom + 20) {
+      // Remove the tab stop (dragged off ruler)
+      _tabStops.splice(idx, 1);
+      applyTabStopsToDocument();
+      refreshTabStopMarkers();
+      return;
+    }
+  }
+
+  // Update position
+  if (_tabStops[idx]) {
+    _tabStops[idx].positionPt = newPt;
+    // Sort tab stops by position
+    _tabStops.sort((a, b) => a.positionPt - b.positionPt);
+    applyTabStopsToDocument();
+    refreshTabStopMarkers();
+  }
+}
+
+/**
+ * Refresh tab stop markers on the ruler without full rebuild.
+ */
+function refreshTabStopMarkers() {
+  const ruler = document.getElementById('ruler');
+  if (!ruler) return;
+
+  // Remove existing tab stop markers
+  ruler.querySelectorAll('.ruler-tab-stop').forEach(el => el.remove());
+
+  // Re-render all tab stops
+  _tabStops.forEach((tab, i) => {
+    renderTabStopMarker(ruler, tab, i);
+  });
+}
+
+/**
+ * Apply tab stops to the current paragraph via WASM (if API exists).
+ * Falls back to storing in state for UI display.
+ */
+function applyTabStopsToDocument() {
+  if (!state.doc) return;
+  const nodeId = getSelectionInfo()?.startNodeId || state.lastSelInfo?.startNodeId;
+  if (!nodeId) return;
+
+  // Try WASM API if available
+  try {
+    if (typeof state.doc.set_tab_stops === 'function') {
+      const tabJson = JSON.stringify(_tabStops.map(t => ({
+        position: t.positionPt,
+        alignment: t.type,
+      })));
+      state.doc.set_tab_stops(nodeId, tabJson);
+      broadcastOp({ action: 'setTabStops', nodeId, tabs: tabJson });
+    }
+  } catch (e) {
+    // WASM API may not exist — tab stops stored in JS state for UI display
+    console.warn('set_tab_stops not available:', e);
+  }
+}
+
+/**
+ * Load tab stops from the current paragraph (if WASM API exists).
+ */
+function loadTabStopsFromDocument() {
+  if (!state.doc) return;
+  const nodeId = getSelectionInfo()?.startNodeId || state.lastSelInfo?.startNodeId;
+  if (!nodeId) return;
+
+  try {
+    if (typeof state.doc.get_tab_stops === 'function') {
+      const json = state.doc.get_tab_stops(nodeId);
+      const tabs = JSON.parse(json);
+      _tabStops = tabs.map(t => ({
+        positionPt: t.position || 0,
+        type: t.alignment || 'left',
+      }));
+    }
+  } catch (_) {
+    // API may not exist — keep current JS-side tab stops
+  }
+}
+
+/**
+ * Handle click on the ruler content area to add a new tab stop.
+ */
+function handleRulerClick(e) {
+  const ruler = document.getElementById('ruler');
+  if (!ruler) return;
+
+  // Don't add tab stops when clicking on handles or existing tab stops
+  if (e.target.closest('.ruler-handle, .ruler-tab-stop')) return;
+
+  const rulerRect = ruler.getBoundingClientRect();
+  const zoom = (state.zoomLevel || 100) / 100;
+  const clickX = (e.clientX - rulerRect.left) / zoom;
+  const marginLeftPx = ptToPx(_pageDims.marginLeftPt);
+  const marginRightPx = ptToPx(_pageDims.marginRightPt);
+  const totalPx = ptToPx(_pageDims.widthPt);
+
+  // Only allow tab stops in the content area (between margins)
+  if (clickX < marginLeftPx || clickX > totalPx - marginRightPx) return;
+
+  const positionPt = pxToPt(clickX - marginLeftPx);
+  // Snap to eighth-inch (9pt)
+  const snapped = Math.round(positionPt / 9) * 9;
+
+  // Don't add duplicate tab stops (within 5pt of existing)
+  if (_tabStops.some(t => Math.abs(t.positionPt - snapped) < 5)) return;
+
+  _tabStops.push({ positionPt: snapped, type: 'left' });
+  _tabStops.sort((a, b) => a.positionPt - b.positionPt);
+
+  applyTabStopsToDocument();
+  refreshTabStopMarkers();
+}
+
 export function renderRuler() {
   const ruler = document.getElementById('ruler');
   if (!ruler) return;
@@ -386,16 +591,26 @@ export function renderRuler() {
   if (firstLineHandle) firstLineHandle.addEventListener('mousedown', (e) => startDrag('firstLine', e));
   if (rightHandle) rightHandle.addEventListener('mousedown', (e) => startDrag('right', e));
 
+  // UXP-15: Click on ruler to add tab stops
+  ruler.addEventListener('click', handleRulerClick);
+
   // Reset indent cache so they get positioned
   _lastIndentLeftPt = -1;
   _lastIndentRightPt = -1;
   _lastFirstLinePt = -1;
   updateIndentHandles();
+
+  // UXP-15: Load and render tab stops from the current paragraph
+  loadTabStopsFromDocument();
+  refreshTabStopMarkers();
 }
 
-// Listen for selection changes to update indent handles
+// Listen for selection changes to update indent handles and tab stops
 document.addEventListener('selectionchange', () => {
   if (state.currentView === 'editor') {
     updateIndentHandles();
+    // UXP-15: Reload tab stops for the newly selected paragraph
+    loadTabStopsFromDocument();
+    refreshTabStopMarkers();
   }
 });

@@ -829,14 +829,34 @@ fn write_toc_odt(
         .unwrap_or("Table of Contents");
 
     xml.push_str(r#"<text:table-of-content text:name="TOC" text:protected="false">"#);
-    // TODO: Only text:outline-level is written back on the TOC source element.
-    // Other attributes (text:use-index-marks, text:use-index-source-styles,
-    // text:index-scope) and child elements (text:index-entry-tab-stop, etc.)
-    // are not preserved on round-trip. See also content_parser.rs TOC parsing.
-    xml.push_str(&format!(
-        r#"<text:table-of-content-source text:outline-level="{}">"#,
-        max_level
-    ));
+
+    // Build TOC source element with preserved attributes
+    let use_index_marks = toc.attributes.get_bool(&AttributeKey::TocUseIndexMarks);
+    let use_index_source_styles = toc
+        .attributes
+        .get_bool(&AttributeKey::TocUseIndexSourceStyles);
+    let index_scope = toc.attributes.get_string(&AttributeKey::TocIndexScope);
+
+    let mut source_attrs = format!(r#" text:outline-level="{}""#, max_level);
+    if let Some(flag) = use_index_marks {
+        source_attrs.push_str(&format!(
+            r#" text:use-index-marks="{}""#,
+            if flag { "true" } else { "false" }
+        ));
+    }
+    if let Some(flag) = use_index_source_styles {
+        source_attrs.push_str(&format!(
+            r#" text:use-index-source-styles="{}""#,
+            if flag { "true" } else { "false" }
+        ));
+    }
+    if let Some(scope) = index_scope {
+        source_attrs.push_str(&format!(r#" text:index-scope="{}""#, escape_xml(scope)));
+    }
+
+    xml.push_str(&format!("<text:table-of-content-source{}>", source_attrs));
+    // NOTE: Child elements like <text:index-entry-tab-stop> inside the source
+    // element are not yet preserved on round-trip.
     xml.push_str(&format!(
         "<text:index-title-template>{}</text:index-title-template>",
         escape_xml(title)
@@ -1210,6 +1230,57 @@ mod tests {
         assert!(xml.contains("text:index-body"));
         assert!(xml.contains("Contents")); // title
         assert!(xml.contains("Chapter One")); // cached entry
+    }
+
+    #[test]
+    fn write_toc_source_attributes() {
+        use s1_model::{AttributeKey, AttributeValue};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let toc_id = doc.next_id();
+        let mut toc = Node::new(toc_id, NodeType::TableOfContents);
+        toc.attributes
+            .set(AttributeKey::TocMaxLevel, AttributeValue::Int(4));
+        toc.attributes.set(
+            AttributeKey::TocTitle,
+            AttributeValue::String("TOC Title".into()),
+        );
+        toc.attributes
+            .set(AttributeKey::TocUseIndexMarks, AttributeValue::Bool(true));
+        toc.attributes.set(
+            AttributeKey::TocUseIndexSourceStyles,
+            AttributeValue::Bool(false),
+        );
+        toc.attributes.set(
+            AttributeKey::TocIndexScope,
+            AttributeValue::String("document".into()),
+        );
+        doc.insert_node(body_id, 0, toc).unwrap();
+
+        let p_id = doc.next_id();
+        doc.insert_node(toc_id, 0, Node::new(p_id, NodeType::Paragraph))
+            .unwrap();
+
+        let (xml, _) = write_content_xml(&doc);
+
+        assert!(
+            xml.contains(r#"text:outline-level="4""#),
+            "outline-level should be 4. XML: {xml}"
+        );
+        assert!(
+            xml.contains(r#"text:use-index-marks="true""#),
+            "use-index-marks should be written. XML: {xml}"
+        );
+        assert!(
+            xml.contains(r#"text:use-index-source-styles="false""#),
+            "use-index-source-styles should be written. XML: {xml}"
+        );
+        assert!(
+            xml.contains(r#"text:index-scope="document""#),
+            "index-scope should be written. XML: {xml}"
+        );
     }
 
     #[test]

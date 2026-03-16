@@ -621,6 +621,62 @@ impl WasmDocument {
         // Render body content
         render_children(model, body_id, &mut html);
 
+        // Render footnote/endnote bodies from root node.
+        // These are children of the Document root (not Body) with type FootnoteBody/EndnoteBody.
+        let root_id = model.root_id();
+        if let Some(root_node) = model.node(root_id) {
+            let mut has_footnotes = false;
+            let mut has_endnotes = false;
+            // First pass: check if any footnotes/endnotes exist
+            for &child_id in &root_node.children {
+                if let Some(child) = model.node(child_id) {
+                    match child.node_type {
+                        NodeType::FootnoteBody => {
+                            has_footnotes = true;
+                        }
+                        NodeType::EndnoteBody => {
+                            has_endnotes = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Render footnotes section
+            if has_footnotes {
+                html.push_str(
+                    "<div class=\"footnotes-section\" data-footnotes=\"true\" contenteditable=\"false\">"
+                );
+                html.push_str(
+                    "<hr class=\"footnote-separator\" style=\"border:none;border-top:1px solid #dadce0;width:33%;margin:12px 0 8px 0;text-align:left\" />"
+                );
+                for &child_id in &root_node.children {
+                    if let Some(child) = model.node(child_id) {
+                        if child.node_type == NodeType::FootnoteBody {
+                            render_node(model, child_id, &mut html);
+                        }
+                    }
+                }
+                html.push_str("</div>");
+            }
+            // Render endnotes section
+            if has_endnotes {
+                html.push_str(
+                    "<div class=\"endnotes-section\" data-endnotes=\"true\" contenteditable=\"false\">"
+                );
+                html.push_str(
+                    "<div class=\"endnotes-title\" style=\"font-weight:600;font-size:11pt;margin:16px 0 8px 0;border-bottom:1px solid #dadce0;padding-bottom:4px\">Endnotes</div>"
+                );
+                for &child_id in &root_node.children {
+                    if let Some(child) = model.node(child_id) {
+                        if child.node_type == NodeType::EndnoteBody {
+                            render_node(model, child_id, &mut html);
+                        }
+                    }
+                }
+                html.push_str("</div>");
+            }
+        }
+
         // Render footers from ALL sections, tagged with data-section-index
         for (sec_idx, sec) in sections.iter().enumerate() {
             let footer_ref = sec
@@ -2830,6 +2886,114 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Split a previously merged cell back to individual cells.
+    ///
+    /// Removes ColSpan/RowSpan attributes from the target cell and clears
+    /// the "continue" RowSpan from cells that were part of the merge.
+    pub fn split_merged_cell(
+        &mut self,
+        table_id_str: &str,
+        row: u32,
+        col: u32,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let table_id = parse_node_id(table_id_str)?;
+        let table = doc
+            .node(table_id)
+            .ok_or_else(|| JsError::new("Table not found"))?;
+        let row_ids: Vec<NodeId> = table.children.clone();
+
+        if row as usize >= row_ids.len() {
+            return Err(JsError::new("Row index out of bounds"));
+        }
+
+        // Read current spans from the target cell
+        let target_cell_id = {
+            let row_node = doc
+                .node(row_ids[row as usize])
+                .ok_or_else(|| JsError::new("Row not found"))?;
+            *row_node
+                .children
+                .get(col as usize)
+                .ok_or_else(|| JsError::new("Column index out of bounds"))?
+        };
+
+        let (col_span, row_span) = {
+            let cell = doc
+                .node(target_cell_id)
+                .ok_or_else(|| JsError::new("Cell not found"))?;
+            let cs = cell
+                .attributes
+                .get(&AttributeKey::ColSpan)
+                .and_then(|v| {
+                    if let AttributeValue::Int(n) = v {
+                        Some(*n as u32)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1);
+            let rs = match cell.attributes.get(&AttributeKey::RowSpan) {
+                Some(AttributeValue::String(s)) if s == "restart" => {
+                    // Count continuation rows below
+                    let mut count = 1u32;
+                    for r in (row + 1)..row_ids.len() as u32 {
+                        if let Some(rn) = doc.node(row_ids[r as usize]) {
+                            if let Some(&cid) = rn.children.get(col as usize) {
+                                if let Some(cn) = doc.node(cid) {
+                                    if let Some(AttributeValue::String(s)) =
+                                        cn.attributes.get(&AttributeKey::RowSpan)
+                                    {
+                                        if s == "continue" {
+                                            count += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    count
+                }
+                _ => 1,
+            };
+            (cs, rs)
+        };
+
+        if col_span <= 1 && row_span <= 1 {
+            return Ok(()); // Not merged — nothing to do
+        }
+
+        let mut txn = Transaction::with_label("Split merged cell");
+
+        // Clear spans on the target cell
+        let mut clear_attrs = s1_model::AttributeMap::new();
+        clear_attrs.set(AttributeKey::ColSpan, AttributeValue::Int(1));
+        clear_attrs.set(AttributeKey::RowSpan, AttributeValue::String(String::new()));
+        txn.push(Operation::set_attributes(target_cell_id, clear_attrs));
+
+        // Clear continuation markers on cells that were part of the merge
+        for r in row..(row + row_span) {
+            if let Some(row_node) = doc.node(row_ids[r as usize]) {
+                let cells: Vec<NodeId> = row_node.children.clone();
+                for c in col..(col + col_span) {
+                    if r == row && c == col {
+                        continue; // Already handled
+                    }
+                    if let Some(&cell_id) = cells.get(c as usize) {
+                        let mut attrs = s1_model::AttributeMap::new();
+                        attrs.set(AttributeKey::RowSpan, AttributeValue::String(String::new()));
+                        txn.push(Operation::set_attributes(cell_id, attrs));
+                    }
+                }
+            }
+        }
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Set the background color of a table cell.
     pub fn set_cell_background(&mut self, cell_id_str: &str, hex: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
@@ -3146,6 +3310,118 @@ impl WasmDocument {
         Ok(format!("{}:{}", para_id.replica, para_id.counter))
     }
 
+    /// Insert a section break after the given node.
+    ///
+    /// `break_type` is one of: `"nextPage"`, `"continuous"`, `"evenPage"`, `"oddPage"`.
+    ///
+    /// This creates a new section in the document model. Content after the break
+    /// belongs to the new section with the specified break type.
+    /// Returns the new section's paragraph node ID (the first paragraph in the new section).
+    pub fn insert_section_break(
+        &mut self,
+        after_node_str: &str,
+        break_type: &str,
+    ) -> Result<String, JsError> {
+        use s1_model::section::{SectionBreakType, SectionProperties};
+
+        let bt = match break_type {
+            "nextPage" => SectionBreakType::NextPage,
+            "continuous" => SectionBreakType::Continuous,
+            "evenPage" => SectionBreakType::EvenPage,
+            "oddPage" => SectionBreakType::OddPage,
+            _ => {
+                return Err(JsError::new(&format!(
+                    "Unknown section break type: '{}'. Expected: nextPage, continuous, evenPage, oddPage",
+                    break_type
+                )))
+            }
+        };
+
+        let doc = self.doc_mut()?;
+        let after_id = parse_node_id(after_node_str)?;
+        let body_id = doc.body_id().ok_or_else(|| JsError::new("No body node"))?;
+        let body = doc
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+        let index = body
+            .children
+            .iter()
+            .position(|&c| c == after_id)
+            .ok_or_else(|| JsError::new("Node not found in body"))?
+            + 1;
+
+        // Create a new paragraph that starts the next section.
+        // The paragraph carries a SectionIndex attribute and PageBreakBefore to
+        // trigger visual rendering of the section break.
+        let para_id = doc.next_id();
+        let run_id = doc.next_id();
+        let text_id = doc.next_id();
+
+        // Add a new section to the document model with the chosen break type.
+        let sections = doc.model_mut().sections_mut();
+        // Ensure the initial/default section exists before adding a new one.
+        if sections.is_empty() {
+            sections.push(SectionProperties::default());
+        }
+        let new_sec_idx = sections.len();
+        // Copy page dimensions from the last section (or use defaults).
+        let mut new_sec = sections
+            .last()
+            .cloned()
+            .unwrap_or_else(SectionProperties::default);
+        new_sec.break_type = Some(bt);
+        // Clear headers/footers for the new section — they inherit visually but
+        // the user can override them later.
+        new_sec.headers.clear();
+        new_sec.footers.clear();
+        sections.push(new_sec);
+
+        // Build the paragraph node with section metadata.
+        let mut para = Node::new(para_id, NodeType::Paragraph);
+        para.attributes.set(
+            AttributeKey::SectionIndex,
+            AttributeValue::Int(new_sec_idx as i64),
+        );
+
+        let mut txn = Transaction::with_label("Insert section break");
+        txn.push(Operation::insert_node(body_id, index, para));
+        txn.push(Operation::insert_node(
+            para_id,
+            0,
+            Node::new(run_id, NodeType::Run),
+        ));
+        txn.push(Operation::insert_node(run_id, 0, Node::text(text_id, "")));
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(format!("{}:{}", para_id.replica, para_id.counter))
+    }
+
+    /// Get section break information for all sections as JSON.
+    ///
+    /// Returns a JSON array of objects with section index, break type, and
+    /// page dimensions for each section.
+    pub fn get_section_breaks_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let sections = doc.sections();
+        let mut entries = Vec::new();
+        for (i, sec) in sections.iter().enumerate() {
+            let bt = match sec.break_type {
+                Some(s1_model::SectionBreakType::NextPage) => "nextPage",
+                Some(s1_model::SectionBreakType::Continuous) => "continuous",
+                Some(s1_model::SectionBreakType::EvenPage) => "evenPage",
+                Some(s1_model::SectionBreakType::OddPage) => "oddPage",
+                Some(_) => "nextPage",
+                None => "none",
+            };
+            entries.push(format!(
+                "{{\"index\":{},\"breakType\":\"{}\",\"pageWidth\":{:.2},\"pageHeight\":{:.2},\"marginTop\":{:.2},\"marginBottom\":{:.2},\"marginLeft\":{:.2},\"marginRight\":{:.2}}}",
+                i, bt, sec.page_width, sec.page_height, sec.margin_top, sec.margin_bottom, sec.margin_left, sec.margin_right
+            ));
+        }
+        Ok(format!("[{}]", entries.join(",")))
+    }
+
     /// Insert a horizontal rule (thematic break) after the given node.
     ///
     /// Returns the new node ID.
@@ -3435,10 +3711,14 @@ impl WasmDocument {
         }
         // Ensure margins don't exceed page dimensions
         if margin_left + margin_right >= page_width {
-            return Err(JsError::new("Left + right margins must be less than page width"));
+            return Err(JsError::new(
+                "Left + right margins must be less than page width",
+            ));
         }
         if margin_top + margin_bottom >= page_height {
-            return Err(JsError::new("Top + bottom margins must be less than page height"));
+            return Err(JsError::new(
+                "Top + bottom margins must be less than page height",
+            ));
         }
 
         let doc = self.doc_mut()?;
@@ -3460,6 +3740,246 @@ impl WasmDocument {
         }
 
         Ok(())
+    }
+
+    // ─── UXP-02: Header/Footer Editing API ──────────────────────
+
+    /// Set header or footer text for a given section.
+    ///
+    /// `section_index`: 0-based section index.
+    /// `hf_kind`: `"header"` or `"footer"`.
+    /// `hf_type`: `"default"` or `"first"`.
+    /// `text`: Plain text content. If empty, the header/footer content is cleared.
+    ///
+    /// If the section does not have a header/footer of the specified type,
+    /// one is created with a new Paragraph > Run > Text structure.
+    pub fn set_header_footer_text(
+        &mut self,
+        section_index: usize,
+        hf_kind: &str,
+        hf_type_str: &str,
+        text: &str,
+    ) -> Result<(), JsError> {
+        use s1_model::section::{HeaderFooterRef, HeaderFooterType};
+
+        let hf_type = match hf_type_str {
+            "first" => HeaderFooterType::First,
+            "even" => HeaderFooterType::Even,
+            _ => HeaderFooterType::Default,
+        };
+
+        let doc = self.doc_mut()?;
+        let sections = doc.model().sections().to_vec();
+        if section_index >= sections.len() {
+            return Err(JsError::new(&format!(
+                "Section index {} out of range (have {})",
+                section_index,
+                sections.len()
+            )));
+        }
+
+        let sec = &sections[section_index];
+        let is_header = hf_kind == "header";
+        let refs = if is_header {
+            &sec.headers
+        } else {
+            &sec.footers
+        };
+        let existing = refs.iter().find(|r| r.hf_type == hf_type);
+
+        if let Some(hf_ref) = existing {
+            // Header/footer node exists — update the first paragraph's text
+            let hf_node_id = hf_ref.node_id;
+            let hf_node = doc
+                .model()
+                .node(hf_node_id)
+                .ok_or_else(|| JsError::new("Header/Footer node not found"))?;
+
+            if hf_node.children.is_empty() {
+                // Create Paragraph > Run > Text inside the header/footer
+                let para_id = doc.next_id();
+                let para_node = Node::new(para_id, NodeType::Paragraph);
+                doc.apply(Operation::insert_node(hf_node_id, 0, para_node))
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+
+                let run_id = doc.next_id();
+                let run_node = Node::new(run_id, NodeType::Run);
+                doc.apply(Operation::insert_node(para_id, 0, run_node))
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+
+                let text_id = doc.next_id();
+                let text_node = Node::text(text_id, "");
+                doc.apply(Operation::insert_node(run_id, 0, text_node))
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+
+                if !text.is_empty() {
+                    doc.apply(Operation::insert_text(text_id, 0, text))
+                        .map_err(|e| JsError::new(&e.to_string()))?;
+                }
+            } else {
+                // Find the first paragraph and update its text
+                let first_para_id = hf_node.children[0];
+                // Use the same logic as set_paragraph_text
+                let existing_text = extract_paragraph_text(doc.model(), first_para_id);
+                if existing_text != text {
+                    // Clear all text and rewrite
+                    let (text_node_id, text_len) = ensure_run_and_text(doc, first_para_id)?;
+                    if text_len > 0 {
+                        doc.apply(Operation::delete_text(text_node_id, 0, text_len))
+                            .map_err(|e| JsError::new(&e.to_string()))?;
+                    }
+                    if !text.is_empty() {
+                        doc.apply(Operation::insert_text(text_node_id, 0, text))
+                            .map_err(|e| JsError::new(&e.to_string()))?;
+                    }
+                }
+            }
+        } else {
+            // No header/footer of this type exists — create one
+            let root_id = doc.model().root_id();
+            let root_children_len = doc
+                .model()
+                .node(root_id)
+                .map(|n| n.children.len())
+                .unwrap_or(0);
+
+            // Create Header or Footer node
+            let hf_node_id = doc.next_id();
+            let node_type = if is_header {
+                NodeType::Header
+            } else {
+                NodeType::Footer
+            };
+            let hf_node = Node::new(hf_node_id, node_type);
+            doc.apply(Operation::insert_node(root_id, root_children_len, hf_node))
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            // Create Paragraph > Run > Text inside
+            let para_id = doc.next_id();
+            let para_node = Node::new(para_id, NodeType::Paragraph);
+            doc.apply(Operation::insert_node(hf_node_id, 0, para_node))
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let run_id = doc.next_id();
+            let run_node = Node::new(run_id, NodeType::Run);
+            doc.apply(Operation::insert_node(para_id, 0, run_node))
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let text_id = doc.next_id();
+            let text_node = Node::text(text_id, "");
+            doc.apply(Operation::insert_node(run_id, 0, text_node))
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            if !text.is_empty() {
+                doc.apply(Operation::insert_text(text_id, 0, text))
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+            }
+
+            // Register in section properties
+            let sections_mut = doc.model_mut().sections_mut();
+            if let Some(sec) = sections_mut.get_mut(section_index) {
+                let hf_ref = HeaderFooterRef {
+                    hf_type,
+                    node_id: hf_node_id,
+                };
+                if is_header {
+                    sec.headers.push(hf_ref);
+                } else {
+                    sec.footers.push(hf_ref);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set or clear the "different first page" flag for a section.
+    ///
+    /// When enabled, the first page of the section uses the "first" header/footer
+    /// instead of the "default" one.
+    pub fn set_title_page(&mut self, section_index: usize, enabled: bool) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let sections = doc.model_mut().sections_mut();
+        if section_index >= sections.len() {
+            return Err(JsError::new(&format!(
+                "Section index {} out of range (have {})",
+                section_index,
+                sections.len()
+            )));
+        }
+        sections[section_index].title_page = enabled;
+        Ok(())
+    }
+
+    /// Get header/footer info for a section as JSON.
+    ///
+    /// Returns JSON: `{"hasDefaultHeader":true,"hasFirstHeader":false,
+    /// "defaultHeaderText":"My Header","firstHeaderText":"",
+    /// "hasDefaultFooter":true,"hasFirstFooter":false,
+    /// "defaultFooterText":"Page 1","firstFooterText":"",
+    /// "titlePage":false}`
+    pub fn get_header_footer_info(&self, section_index: usize) -> Result<String, JsError> {
+        use s1_model::section::HeaderFooterType;
+
+        let doc = self.doc()?;
+        let sections = doc.sections();
+        if section_index >= sections.len() {
+            return Err(JsError::new(&format!(
+                "Section index {} out of range (have {})",
+                section_index,
+                sections.len()
+            )));
+        }
+
+        let sec = &sections[section_index];
+        let model = doc.model();
+
+        let get_text =
+            |refs: &[s1_model::section::HeaderFooterRef], hf_type: HeaderFooterType| -> String {
+                if let Some(hf_ref) = refs.iter().find(|r| r.hf_type == hf_type) {
+                    if let Some(hf_node) = model.node(hf_ref.node_id) {
+                        if let Some(&first_para) = hf_node.children.first() {
+                            return extract_paragraph_text(model, first_para);
+                        }
+                    }
+                }
+                String::new()
+            };
+
+        let default_header_text = get_text(&sec.headers, HeaderFooterType::Default);
+        let first_header_text = get_text(&sec.headers, HeaderFooterType::First);
+        let default_footer_text = get_text(&sec.footers, HeaderFooterType::Default);
+        let first_footer_text = get_text(&sec.footers, HeaderFooterType::First);
+
+        let has_default_header = sec
+            .headers
+            .iter()
+            .any(|h| h.hf_type == HeaderFooterType::Default);
+        let has_first_header = sec
+            .headers
+            .iter()
+            .any(|h| h.hf_type == HeaderFooterType::First);
+        let has_default_footer = sec
+            .footers
+            .iter()
+            .any(|f| f.hf_type == HeaderFooterType::Default);
+        let has_first_footer = sec
+            .footers
+            .iter()
+            .any(|f| f.hf_type == HeaderFooterType::First);
+
+        Ok(format!(
+            "{{\"hasDefaultHeader\":{},\"hasFirstHeader\":{},\"defaultHeaderText\":\"{}\",\"firstHeaderText\":\"{}\",\"hasDefaultFooter\":{},\"hasFirstFooter\":{},\"defaultFooterText\":\"{}\",\"firstFooterText\":\"{}\",\"titlePage\":{}}}",
+            has_default_header,
+            has_first_header,
+            default_header_text.replace('\\', "\\\\").replace('"', "\\\""),
+            first_header_text.replace('\\', "\\\\").replace('"', "\\\""),
+            has_default_footer,
+            has_first_footer,
+            default_footer_text.replace('\\', "\\\\").replace('"', "\\\""),
+            first_footer_text.replace('\\', "\\\\").replace('"', "\\\""),
+            sec.title_page,
+        ))
     }
 
     // ─── P.5: Find & Replace + Clipboard API ────────────────────
@@ -3682,10 +4202,11 @@ impl WasmDocument {
             return Ok(());
         }
 
-        const MAX_PASTE_PARAGRAPHS: usize = 1000;
+        const MAX_PASTE_PARAGRAPHS: usize = 10_000;
         if paste_data.len() > MAX_PASTE_PARAGRAPHS {
             return Err(JsError::new(&format!(
-                "Paste exceeds maximum paragraph count ({MAX_PASTE_PARAGRAPHS})"
+                "Paste exceeds maximum paragraph count ({MAX_PASTE_PARAGRAPHS}). \
+                 Try pasting smaller sections."
             )));
         }
 
@@ -3994,6 +4515,30 @@ impl WasmDocument {
         let doc = self.doc_mut()?;
         doc.update_toc();
         Ok(())
+    }
+
+    /// Get the document heading hierarchy as JSON.
+    ///
+    /// Returns a JSON array of objects: `[{"nodeId":"r:c","level":1,"text":"..."},...]`
+    /// Useful for building outline panels and TOC navigation.
+    pub fn get_headings_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let headings = doc.model().collect_headings();
+        let mut json = String::from("[");
+        for (i, (node_id, level, text)) in headings.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(
+                "{{\"nodeId\":\"{}:{}\",\"level\":{},\"text\":\"{}\"}}",
+                node_id.replica,
+                node_id.counter,
+                level,
+                escape_json(text)
+            ));
+        }
+        json.push(']');
+        Ok(json)
     }
 
     // ─── E5.4: Threaded Comment Replies ──────────────────────────
@@ -4338,11 +4883,17 @@ impl WasmDocument {
 /// Prevents OOM from excessively large documents in the WASM environment.
 const MAX_BUILDER_NODES: usize = 100_000;
 
+/// Maximum nesting depth allowed during builder chaining.
+/// Prevents stack overflow from deeply nested structures.
+const MAX_BUILDER_DEPTH: usize = 100;
+
 /// A fluent builder for constructing documents.
 #[wasm_bindgen]
 pub struct WasmDocumentBuilder {
     inner: Option<s1engine::DocumentBuilder>,
     node_count: usize,
+    depth: usize,
+    error: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -4353,41 +4904,76 @@ impl WasmDocumentBuilder {
         Self {
             inner: Some(s1engine::DocumentBuilder::new()),
             node_count: 0,
+            depth: 0,
+            error: None,
         }
+    }
+
+    /// Check builder limits and record an error if exceeded.
+    /// Returns `true` if the builder is still within limits.
+    fn check_limits(&mut self) -> bool {
+        if self.error.is_some() {
+            return false;
+        }
+        if self.node_count > MAX_BUILDER_NODES {
+            self.error = Some(format!(
+                "Builder exceeded maximum node limit ({} > {MAX_BUILDER_NODES})",
+                self.node_count
+            ));
+            return false;
+        }
+        if self.depth > MAX_BUILDER_DEPTH {
+            self.error = Some(format!(
+                "Builder exceeded maximum depth limit ({} > {MAX_BUILDER_DEPTH})",
+                self.depth
+            ));
+            return false;
+        }
+        true
     }
 
     /// Add a heading at the specified level (1-6).
     pub fn heading(mut self, level: u8, text: &str) -> Self {
-        if let Some(builder) = self.inner.take() {
-            self.inner = Some(builder.heading(level, text));
-            // heading creates ~3 nodes (paragraph, run, text)
-            self.node_count += 3;
+        self.depth += 1;
+        // heading creates ~3 nodes (paragraph, run, text)
+        self.node_count += 3;
+        if self.check_limits() {
+            if let Some(builder) = self.inner.take() {
+                self.inner = Some(builder.heading(level, text));
+            }
         }
         self
     }
 
     /// Add a paragraph with plain text.
     pub fn text(mut self, text: &str) -> Self {
-        if let Some(builder) = self.inner.take() {
-            self.inner = Some(builder.text(text));
-            // text creates ~3 nodes (paragraph, run, text)
-            self.node_count += 3;
+        self.depth += 1;
+        // text creates ~3 nodes (paragraph, run, text)
+        self.node_count += 3;
+        if self.check_limits() {
+            if let Some(builder) = self.inner.take() {
+                self.inner = Some(builder.text(text));
+            }
         }
         self
     }
 
     /// Set the document title.
     pub fn title(mut self, title: &str) -> Self {
-        if let Some(builder) = self.inner.take() {
-            self.inner = Some(builder.title(title));
+        if self.check_limits() {
+            if let Some(builder) = self.inner.take() {
+                self.inner = Some(builder.title(title));
+            }
         }
         self
     }
 
     /// Set the document author.
     pub fn author(mut self, author: &str) -> Self {
-        if let Some(builder) = self.inner.take() {
-            self.inner = Some(builder.author(author));
+        if self.check_limits() {
+            if let Some(builder) = self.inner.take() {
+                self.inner = Some(builder.author(author));
+            }
         }
         self
     }
@@ -4395,8 +4981,14 @@ impl WasmDocumentBuilder {
     /// Build the document. Consumes the builder.
     ///
     /// Returns an error if the document exceeds the maximum node count
-    /// limit (100,000 nodes) to prevent OOM in the WASM environment.
+    /// limit (100,000 nodes) or the maximum depth limit (100) to prevent
+    /// OOM in the WASM environment.
     pub fn build(mut self) -> Result<WasmDocument, JsError> {
+        // Check for deferred errors from builder chaining
+        if let Some(err) = self.error.take() {
+            return Err(JsError::new(&err));
+        }
+
         let builder = self
             .inner
             .take()
@@ -4419,6 +5011,45 @@ impl WasmDocumentBuilder {
 impl Default for WasmDocumentBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod builder_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn builder_depth_limit_exceeded() {
+        let mut builder = WasmDocumentBuilder::new();
+        for i in 0..=MAX_BUILDER_DEPTH {
+            builder = builder.text(&format!("paragraph {i}"));
+        }
+        let result = builder.build();
+        assert!(
+            result.is_err(),
+            "build should fail when depth limit exceeded"
+        );
+    }
+
+    #[test]
+    fn builder_depth_tracking() {
+        // Verify depth tracking works without needing wasm JsError
+        let mut builder = WasmDocumentBuilder::new();
+        assert_eq!(builder.depth, 0);
+        builder = builder.text("a");
+        assert_eq!(builder.depth, 1);
+        builder = builder.text("b");
+        assert_eq!(builder.depth, 2);
+    }
+
+    #[test]
+    fn builder_within_limits_succeeds() {
+        let builder = WasmDocumentBuilder::new()
+            .heading(1, "Title")
+            .text("Hello world");
+        let result = builder.build();
+        assert!(result.is_ok());
     }
 }
 
@@ -6009,9 +6640,45 @@ fn render_node(model: &DocumentModel, node_id: NodeId, html: &mut String) {
             html.push_str("<hr class=\"page-break\" contenteditable=\"false\" style=\"border:none;page-break-after:always;margin:0\" />");
         }
         NodeType::TableOfContents => {
-            html.push_str("<div class=\"toc\" style=\"margin:1em 0;padding:1em;border:1px solid #dadce0;border-radius:4px\">");
-            html.push_str("<strong>Table of Contents</strong><br/>");
-            render_children(model, node_id, html);
+            let toc_title = node
+                .attributes
+                .get_string(&AttributeKey::TocTitle)
+                .unwrap_or("Table of Contents");
+            html.push_str(&format!(
+                "<div class=\"doc-toc\" data-node-id=\"{}:{}\" contenteditable=\"false\">",
+                node_id.replica, node_id.counter
+            ));
+            html.push_str(&format!(
+                "<div class=\"doc-toc-title\">{}<button class=\"toc-update-btn\" title=\"Refresh table of contents\">Update</button>",
+                escape_html(toc_title)
+            ));
+            html.push_str("<select class=\"toc-style-select\" title=\"TOC style\">");
+            html.push_str("<option value=\"plain\">Plain</option>");
+            html.push_str("<option value=\"dotted\" selected>Dotted</option>");
+            html.push_str("<option value=\"dashed\">Dashed</option>");
+            html.push_str("</select></div>");
+            // Render TOC entries from heading hierarchy
+            let headings = model.collect_headings();
+            let max_level = node
+                .attributes
+                .get_i64(&AttributeKey::TocMaxLevel)
+                .unwrap_or(3) as u8;
+            let mut has_entries = false;
+            for (h_id, level, text) in &headings {
+                if *level > max_level {
+                    continue;
+                }
+                has_entries = true;
+                html.push_str(&format!(
+                    "<div class=\"toc-entry toc-level-{} toc-dotted\" data-target-node=\"{}:{}\" tabindex=\"0\" role=\"link\" title=\"Go to: {}\">",
+                    level, h_id.replica, h_id.counter, escape_html(text)
+                ));
+                html.push_str(&escape_html(text));
+                html.push_str("</div>");
+            }
+            if !has_entries {
+                html.push_str("<div style=\"color:#5f6368;font-size:12px;font-style:italic;padding:8px 0\">No headings found. Add headings to populate the table of contents.</div>");
+            }
             html.push_str("</div>");
         }
         NodeType::BookmarkStart => {
@@ -6043,6 +6710,62 @@ fn render_node(model: &DocumentModel, node_id: NodeId, html: &mut String) {
         NodeType::CommentBody => {
             // Comment bodies rendered as tooltip or hidden
         }
+        NodeType::FootnoteRef => {
+            let fn_num = node
+                .attributes
+                .get_i64(&AttributeKey::FootnoteNumber)
+                .unwrap_or(0);
+            html.push_str(&format!(
+                "<sup class=\"footnote-ref\" data-footnote-ref=\"{}\" data-node-id=\"{}:{}\" \
+                 title=\"Footnote {}\" contenteditable=\"false\">{}</sup>",
+                fn_num, node_id.replica, node_id.counter, fn_num, fn_num
+            ));
+        }
+        NodeType::EndnoteRef => {
+            let en_num = node
+                .attributes
+                .get_i64(&AttributeKey::EndnoteNumber)
+                .unwrap_or(0);
+            html.push_str(&format!(
+                "<sup class=\"endnote-ref\" data-endnote-ref=\"{}\" data-node-id=\"{}:{}\" \
+                 title=\"Endnote {}\" contenteditable=\"false\">{}</sup>",
+                en_num, node_id.replica, node_id.counter, en_num, en_num
+            ));
+        }
+        NodeType::FootnoteBody => {
+            let fn_num = node
+                .attributes
+                .get_i64(&AttributeKey::FootnoteNumber)
+                .unwrap_or(0);
+            html.push_str(&format!(
+                "<div class=\"footnote-body\" data-footnote-id=\"{}\" data-node-id=\"{}:{}\" \
+                 contenteditable=\"true\">",
+                fn_num, node_id.replica, node_id.counter
+            ));
+            html.push_str(&format!(
+                "<span class=\"footnote-number\" contenteditable=\"false\">{}.</span> ",
+                fn_num
+            ));
+            render_children(model, node_id, html);
+            html.push_str("</div>");
+        }
+        NodeType::EndnoteBody => {
+            let en_num = node
+                .attributes
+                .get_i64(&AttributeKey::EndnoteNumber)
+                .unwrap_or(0);
+            html.push_str(&format!(
+                "<div class=\"endnote-body\" data-endnote-id=\"{}\" data-node-id=\"{}:{}\" \
+                 contenteditable=\"true\">",
+                en_num, node_id.replica, node_id.counter
+            ));
+            html.push_str(&format!(
+                "<span class=\"endnote-number\" contenteditable=\"false\">{}.</span> ",
+                en_num
+            ));
+            render_children(model, node_id, html);
+            html.push_str("</div>");
+        }
         NodeType::Field => {
             render_field_html(node, html);
         }
@@ -6070,6 +6793,29 @@ fn render_paragraph(
         Some(n) => n,
         None => return,
     };
+
+    // UXP-08: Render section break indicator before paragraphs that start a new section.
+    if let Some(AttributeValue::Int(sec_idx)) = para.attributes.get(&AttributeKey::SectionIndex) {
+        let sections = model.sections();
+        let label = if let Some(sec) = sections.get(*sec_idx as usize) {
+            match sec.break_type {
+                Some(s1_model::SectionBreakType::NextPage) => "Section Break (Next Page)",
+                Some(s1_model::SectionBreakType::Continuous) => "Section Break (Continuous)",
+                Some(s1_model::SectionBreakType::EvenPage) => "Section Break (Even Page)",
+                Some(s1_model::SectionBreakType::OddPage) => "Section Break (Odd Page)",
+                Some(_) => "Section Break",
+                None => "Section Break",
+            }
+        } else {
+            "Section Break"
+        };
+        html.push_str(&format!(
+            "<div class=\"section-break\" contenteditable=\"false\" \
+             data-section-index=\"{}\" data-node-id=\"{}:{}\">\
+             <span class=\"section-break-label\">{}</span></div>",
+            sec_idx, para_id.replica, para_id.counter, label
+        ));
+    }
 
     // Detect heading level from style ID (e.g. "Heading1", "heading 2", etc.)
     let style_id = para.attributes.get_string(&AttributeKey::StyleId);
@@ -6337,9 +7083,7 @@ fn render_paragraph(
         _ => {
             // Apply non-heading paragraph style (Title, Subtitle, Quote, Code)
             let mut para_style = style.clone();
-            let sid_lower = style_id
-                .map(|s| s.to_lowercase())
-                .unwrap_or_default();
+            let sid_lower = style_id.map(|s| s.to_lowercase()).unwrap_or_default();
             let data_style_attr = if !sid_lower.is_empty() {
                 format!(" data-style-id=\"{}\"", escape_html(style_id.unwrap_or("")))
             } else {
@@ -6393,7 +7137,8 @@ fn render_paragraph(
                         para_style.push_str("font-size:11pt;");
                     }
                     if !para_style.contains("background") {
-                        para_style.push_str("background:#f5f5f5;padding:2pt 4pt;border-radius:2px;");
+                        para_style
+                            .push_str("background:#f5f5f5;padding:2pt 4pt;border-radius:2px;");
                     }
                 }
                 _ => {}
@@ -6441,6 +7186,28 @@ fn render_inline_children(model: &DocumentModel, parent_id: NodeId, html: &mut S
             NodeType::Tab => html.push_str("&emsp;"),
             NodeType::Field => {
                 render_field_html(child, html);
+            }
+            NodeType::FootnoteRef => {
+                let fn_num = child
+                    .attributes
+                    .get_i64(&AttributeKey::FootnoteNumber)
+                    .unwrap_or(0);
+                html.push_str(&format!(
+                    "<sup class=\"footnote-ref\" data-footnote-ref=\"{}\" data-node-id=\"{}:{}\" \
+                     title=\"Footnote {}\" contenteditable=\"false\">{}</sup>",
+                    fn_num, child_id.replica, child_id.counter, fn_num, fn_num
+                ));
+            }
+            NodeType::EndnoteRef => {
+                let en_num = child
+                    .attributes
+                    .get_i64(&AttributeKey::EndnoteNumber)
+                    .unwrap_or(0);
+                html.push_str(&format!(
+                    "<sup class=\"endnote-ref\" data-endnote-ref=\"{}\" data-node-id=\"{}:{}\" \
+                     title=\"Endnote {}\" contenteditable=\"false\">{}</sup>",
+                    en_num, child_id.replica, child_id.counter, en_num, en_num
+                ));
             }
             _ => {}
         }
@@ -8462,6 +9229,77 @@ fn to_html_from_model(model: &DocumentModel) -> String {
     for child in &children {
         html.push_str(&render_node_to_html(model, child));
     }
+
+    // Render footnote/endnote bodies from root (they are root children, not body children)
+    let root_id = model.root_id();
+    let root_children = model.children(root_id);
+    let mut has_fn = false;
+    let mut has_en = false;
+    for child in &root_children {
+        if child.node_type == NodeType::FootnoteBody {
+            has_fn = true;
+        }
+        if child.node_type == NodeType::EndnoteBody {
+            has_en = true;
+        }
+    }
+    if has_fn {
+        html.push_str(
+            "<div class=\"footnotes-section\" data-footnotes=\"true\" contenteditable=\"false\">",
+        );
+        html.push_str("<hr class=\"footnote-separator\" style=\"border:none;border-top:1px solid #dadce0;width:33%;margin:12px 0 8px 0\" />");
+        for child in &root_children {
+            if child.node_type == NodeType::FootnoteBody {
+                let fn_num = child
+                    .attributes
+                    .get_i64(&AttributeKey::FootnoteNumber)
+                    .unwrap_or(0);
+                html.push_str(&format!(
+                    "<div class=\"footnote-body\" data-footnote-id=\"{}\" contenteditable=\"true\">",
+                    fn_num
+                ));
+                html.push_str(&format!(
+                    "<span class=\"footnote-number\" contenteditable=\"false\">{}.</span> ",
+                    fn_num
+                ));
+                let para_children = model.children(child.id);
+                for pc in &para_children {
+                    html.push_str(&render_node_to_html(model, pc));
+                }
+                html.push_str("</div>");
+            }
+        }
+        html.push_str("</div>");
+    }
+    if has_en {
+        html.push_str(
+            "<div class=\"endnotes-section\" data-endnotes=\"true\" contenteditable=\"false\">",
+        );
+        html.push_str("<div class=\"endnotes-title\" style=\"font-weight:600;font-size:11pt;margin:16px 0 8px 0;border-bottom:1px solid #dadce0;padding-bottom:4px\">Endnotes</div>");
+        for child in &root_children {
+            if child.node_type == NodeType::EndnoteBody {
+                let en_num = child
+                    .attributes
+                    .get_i64(&AttributeKey::EndnoteNumber)
+                    .unwrap_or(0);
+                html.push_str(&format!(
+                    "<div class=\"endnote-body\" data-endnote-id=\"{}\" contenteditable=\"true\">",
+                    en_num
+                ));
+                html.push_str(&format!(
+                    "<span class=\"endnote-number\" contenteditable=\"false\">{}.</span> ",
+                    en_num
+                ));
+                let para_children = model.children(child.id);
+                for pc in &para_children {
+                    html.push_str(&render_node_to_html(model, pc));
+                }
+                html.push_str("</div>");
+            }
+        }
+        html.push_str("</div>");
+    }
+
     html
 }
 
@@ -8587,6 +9425,26 @@ fn render_node_to_html(model: &DocumentModel, node: &Node) -> String {
             }
         }
         NodeType::Text => html_escape(node.text_content.as_deref().unwrap_or("")),
+        NodeType::FootnoteRef => {
+            let fn_num = node
+                .attributes
+                .get_i64(&AttributeKey::FootnoteNumber)
+                .unwrap_or(0);
+            format!(
+                "<sup class=\"footnote-ref\" data-footnote-ref=\"{}\" title=\"Footnote {}\">{}</sup>",
+                fn_num, fn_num, fn_num
+            )
+        }
+        NodeType::EndnoteRef => {
+            let en_num = node
+                .attributes
+                .get_i64(&AttributeKey::EndnoteNumber)
+                .unwrap_or(0);
+            format!(
+                "<sup class=\"endnote-ref\" data-endnote-ref=\"{}\" title=\"Endnote {}\">{}</sup>",
+                en_num, en_num, en_num
+            )
+        }
         _ => String::new(),
     }
 }
@@ -9346,6 +10204,78 @@ mod tests {
         assert!(!id.is_empty());
         let text = doc.to_plain_text().unwrap();
         assert!(text.contains("My Title"));
+    }
+
+    #[test]
+    fn test_get_headings_json() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_heading(1, "Chapter One").unwrap();
+        doc.append_paragraph("Some text").unwrap();
+        doc.append_heading(2, "Section A").unwrap();
+        doc.append_heading(3, "Subsection").unwrap();
+        doc.append_heading(1, "Chapter Two").unwrap();
+
+        let json = doc.get_headings_json().unwrap();
+        assert!(json.starts_with('['), "should be a JSON array");
+        assert!(json.ends_with(']'), "should end with ]");
+        // Verify all 4 headings are present (not the paragraph)
+        assert!(
+            json.contains("\"Chapter One\""),
+            "should contain Chapter One"
+        );
+        assert!(json.contains("\"Section A\""), "should contain Section A");
+        assert!(json.contains("\"Subsection\""), "should contain Subsection");
+        assert!(
+            json.contains("\"Chapter Two\""),
+            "should contain Chapter Two"
+        );
+        assert!(
+            !json.contains("\"Some text\""),
+            "should not contain paragraph text"
+        );
+        // Verify levels
+        assert!(json.contains("\"level\":1"), "should have level 1 headings");
+        assert!(json.contains("\"level\":2"), "should have level 2 heading");
+        assert!(json.contains("\"level\":3"), "should have level 3 heading");
+        // Verify nodeId format
+        assert!(json.contains("\"nodeId\":\""), "should have nodeId fields");
+        // Count occurrences of nodeId to verify 4 entries
+        let count = json.matches("\"nodeId\":").count();
+        assert_eq!(count, 4, "should have exactly 4 heading entries");
+    }
+
+    #[test]
+    fn test_get_headings_json_empty() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("No headings here").unwrap();
+
+        let json = doc.get_headings_json().unwrap();
+        assert_eq!(json, "[]");
+    }
+
+    #[test]
+    fn test_toc_render_with_headings() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_heading(1, "Introduction").unwrap();
+        doc.append_heading(2, "Background").unwrap();
+        let para_id = doc.append_paragraph("Text").unwrap();
+        doc.insert_table_of_contents(&para_id, 3, "Contents")
+            .unwrap();
+
+        let html = doc.to_html().unwrap();
+        assert!(html.contains("doc-toc"), "should render with doc-toc class");
+        assert!(html.contains("toc-update-btn"), "should have update button");
+        assert!(html.contains("toc-entry"), "should have toc entries");
+        assert!(html.contains("Introduction"), "should contain heading text");
+        assert!(html.contains("Background"), "should contain heading text");
+        assert!(html.contains("Contents"), "should contain custom title");
+        assert!(
+            html.contains("data-target-node"),
+            "entries should have navigation targets"
+        );
     }
 
     #[test]
@@ -10282,6 +11212,76 @@ mod tests {
     }
 
     #[test]
+    fn test_split_merged_cell() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("p").unwrap();
+        let table_id = doc.insert_table(&p, 3, 3).unwrap();
+
+        // Merge cells (0,0)-(1,1) — 2x2 block
+        doc.merge_cells(&table_id, 0, 0, 1, 1).unwrap();
+
+        // Verify merge happened
+        {
+            let table_nid = parse_node_id(&table_id).unwrap();
+            let table = doc.inner.as_ref().unwrap().model().node(table_nid).unwrap();
+            let row0 = doc
+                .inner
+                .as_ref()
+                .unwrap()
+                .model()
+                .node(table.children[0])
+                .unwrap();
+            let cell00 = doc
+                .inner
+                .as_ref()
+                .unwrap()
+                .model()
+                .node(row0.children[0])
+                .unwrap();
+            assert_eq!(cell00.attributes.get_i64(&AttributeKey::ColSpan), Some(2));
+        }
+
+        // Split the cell
+        doc.split_merged_cell(&table_id, 0, 0).unwrap();
+
+        // Verify ColSpan is reset to 1
+        {
+            let table_nid = parse_node_id(&table_id).unwrap();
+            let table = doc.inner.as_ref().unwrap().model().node(table_nid).unwrap();
+            let row0 = doc
+                .inner
+                .as_ref()
+                .unwrap()
+                .model()
+                .node(table.children[0])
+                .unwrap();
+            let cell00_after = doc
+                .inner
+                .as_ref()
+                .unwrap()
+                .model()
+                .node(row0.children[0])
+                .unwrap();
+            assert_eq!(
+                cell00_after.attributes.get_i64(&AttributeKey::ColSpan),
+                Some(1)
+            );
+        }
+    }
+
+    #[test]
+    fn test_split_unmerged_cell_noop() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("p").unwrap();
+        let table_id = doc.insert_table(&p, 2, 2).unwrap();
+
+        // Splitting an unmerged cell should succeed silently (no-op)
+        doc.split_merged_cell(&table_id, 0, 0).unwrap();
+    }
+
+    #[test]
     fn test_set_cell_background() {
         let engine = WasmEngine::new();
         let mut doc = engine.create();
@@ -10559,6 +11559,118 @@ mod tests {
         assert_eq!(
             pb.attributes.get_bool(&AttributeKey::PageBreakBefore),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn test_insert_section_break_next_page() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Before section break").unwrap();
+        let sb_id = doc.insert_section_break(&p, "nextPage").unwrap();
+        assert!(!sb_id.is_empty());
+
+        // The new paragraph should have SectionIndex attribute
+        let sb_nid = parse_node_id(&sb_id).unwrap();
+        let sb = doc.inner.as_ref().unwrap().model().node(sb_nid).unwrap();
+        assert!(
+            sb.attributes.get(&AttributeKey::SectionIndex).is_some(),
+            "Section break paragraph should have SectionIndex attribute"
+        );
+
+        // There should now be 2 sections (original + new)
+        let sections = doc.inner.as_ref().unwrap().sections();
+        assert_eq!(sections.len(), 2, "Should have 2 sections after insert");
+        assert_eq!(
+            sections[1].break_type,
+            Some(s1_model::SectionBreakType::NextPage)
+        );
+    }
+
+    #[test]
+    fn test_insert_section_break_continuous() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Before").unwrap();
+        let sb_id = doc.insert_section_break(&p, "continuous").unwrap();
+        assert!(!sb_id.is_empty());
+
+        let sections = doc.inner.as_ref().unwrap().sections();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(
+            sections[1].break_type,
+            Some(s1_model::SectionBreakType::Continuous)
+        );
+    }
+
+    #[test]
+    fn test_insert_section_break_even_odd() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p1 = doc.append_paragraph("Section 1").unwrap();
+        let _ = doc.insert_section_break(&p1, "evenPage").unwrap();
+        // Insert another paragraph after the section break for the next break
+        let p2 = doc.append_paragraph("Section 2").unwrap();
+        let _ = doc.insert_section_break(&p2, "oddPage").unwrap();
+
+        let sections = doc.inner.as_ref().unwrap().sections();
+        assert_eq!(sections.len(), 3, "Should have 3 sections");
+        assert_eq!(
+            sections[1].break_type,
+            Some(s1_model::SectionBreakType::EvenPage)
+        );
+        assert_eq!(
+            sections[2].break_type,
+            Some(s1_model::SectionBreakType::OddPage)
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_insert_section_break_invalid_type() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Test").unwrap();
+        // JsError::new panics on non-wasm targets; in real wasm it returns Err
+        let _ = doc.insert_section_break(&p, "invalid");
+    }
+
+    #[test]
+    fn test_get_section_breaks_json() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Before").unwrap();
+        doc.insert_section_break(&p, "nextPage").unwrap();
+
+        let json = doc.get_section_breaks_json().unwrap();
+        assert!(
+            json.contains("nextPage"),
+            "JSON should contain break type: {}",
+            json
+        );
+        assert!(
+            json.contains("\"index\":1"),
+            "JSON should contain section index 1: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_section_break_html_rendering() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Before section break").unwrap();
+        doc.insert_section_break(&p, "continuous").unwrap();
+
+        let html = doc.to_html().unwrap();
+        assert!(
+            html.contains("section-break"),
+            "HTML should contain section-break class: {}",
+            &html[..html.len().min(500)]
+        );
+        assert!(
+            html.contains("Section Break (Continuous)"),
+            "HTML should contain break type label"
         );
     }
 

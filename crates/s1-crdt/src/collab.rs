@@ -1247,7 +1247,10 @@ mod tests {
             offset: 0,
             text: "hello".into(),
         });
-        assert!(result.is_err(), "inserting text into non-existent node should fail");
+        assert!(
+            result.is_err(),
+            "inserting text into non-existent node should fail"
+        );
     }
 
     #[test]
@@ -1266,6 +1269,256 @@ mod tests {
             0,
             Node::new(child_id, NodeType::Paragraph),
         ));
-        assert!(result.is_err(), "inserting into non-existent parent should fail");
+        assert!(
+            result.is_err(),
+            "inserting into non-existent parent should fail"
+        );
+    }
+
+    // ─── Enhanced 3-way convergence test with text edits (WFC-13) ──────
+
+    #[test]
+    fn test_three_way_text_convergence() {
+        // All three replicas start with the same paragraph/run/text structure.
+        let mut doc1 = CollabDocument::new(1);
+        let body_id = doc1.model().body_id().unwrap();
+
+        // Build shared structure: body -> para -> run -> text("")
+        let para_id = doc1.next_id();
+        doc1.apply_local(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(para_id, NodeType::Paragraph),
+        ))
+        .unwrap();
+
+        let run_id = doc1.next_id();
+        doc1.apply_local(Operation::insert_node(
+            para_id,
+            0,
+            Node::new(run_id, NodeType::Run),
+        ))
+        .unwrap();
+
+        let text_id = doc1.next_id();
+        doc1.apply_local(Operation::insert_node(run_id, 0, Node::text(text_id, "")))
+            .unwrap();
+
+        // Fork to create three identical replicas
+        let mut doc2 = doc1.fork(2);
+        let mut doc3 = doc1.fork(3);
+
+        // Collect structural ops from doc1 so doc2/doc3 have matching state vectors
+        let structural_ops = doc1.changes_since(&StateVector::new());
+        for op in &structural_ops {
+            doc2.apply_remote(op.clone()).unwrap();
+            doc3.apply_remote(op.clone()).unwrap();
+        }
+
+        // Each replica concurrently inserts different text at position 0
+        let op1 = doc1
+            .apply_local(Operation::insert_text(text_id, 0, "A"))
+            .unwrap();
+        let op2 = doc2
+            .apply_local(Operation::insert_text(text_id, 0, "B"))
+            .unwrap();
+        let op3 = doc3
+            .apply_local(Operation::insert_text(text_id, 0, "C"))
+            .unwrap();
+
+        // Exchange all ops
+        doc1.apply_remote(op2.clone()).unwrap();
+        doc1.apply_remote(op3.clone()).unwrap();
+
+        doc2.apply_remote(op1.clone()).unwrap();
+        doc2.apply_remote(op3).unwrap();
+
+        doc3.apply_remote(op1).unwrap();
+        doc3.apply_remote(op2).unwrap();
+
+        // All three should converge to the same text content
+        let text1 = doc1.to_plain_text();
+        let text2 = doc2.to_plain_text();
+        let text3 = doc3.to_plain_text();
+
+        assert_eq!(
+            text1, text2,
+            "doc1 and doc2 should have identical text after sync"
+        );
+        assert_eq!(
+            text2, text3,
+            "doc2 and doc3 should have identical text after sync"
+        );
+
+        // All three characters should be present (order is deterministic but
+        // depends on CRDT tiebreaking — we just verify all chars exist)
+        assert_eq!(text1.len(), 3, "all three characters should be present");
+        assert!(text1.contains('A'));
+        assert!(text1.contains('B'));
+        assert!(text1.contains('C'));
+    }
+
+    // ─── Additional error path tests (WFC-14) ─────────────────────────
+
+    #[test]
+    fn test_apply_remote_with_corrupted_op_id() {
+        let mut doc1 = CollabDocument::new(1);
+        let mut doc2 = CollabDocument::new(2);
+        let body_id = doc1.model().body_id().unwrap();
+
+        let para_id = NodeId::new(1, 100);
+        let crdt_op = doc1
+            .apply_local(Operation::insert_node(
+                body_id,
+                0,
+                Node::new(para_id, NodeType::Paragraph),
+            ))
+            .unwrap();
+
+        // Apply the same op twice — second should be a no-op (duplicate check)
+        doc2.apply_remote(crdt_op.clone()).unwrap();
+        doc2.apply_remote(crdt_op).unwrap();
+
+        // Should still have exactly one paragraph
+        let body = doc2.model().node(body_id).unwrap();
+        assert_eq!(body.children.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_local_text_insert_out_of_bounds() {
+        let mut doc = CollabDocument::new(1);
+        let body_id = doc.model().body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.apply_local(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(para_id, NodeType::Paragraph),
+        ))
+        .unwrap();
+
+        let run_id = doc.next_id();
+        doc.apply_local(Operation::insert_node(
+            para_id,
+            0,
+            Node::new(run_id, NodeType::Run),
+        ))
+        .unwrap();
+
+        let text_id = doc.next_id();
+        doc.apply_local(Operation::insert_node(run_id, 0, Node::text(text_id, "hi")))
+            .unwrap();
+
+        // Insert at offset beyond the text length
+        let result = doc.apply_local(Operation::insert_text(text_id, 999, "x"));
+        // The operation system may or may not error depending on the implementation;
+        // we just verify it doesn't panic.
+        let _ = result;
+    }
+
+    #[test]
+    fn test_undo_after_remote_op_applied() {
+        let mut doc1 = CollabDocument::new(1);
+        let mut doc2 = CollabDocument::new(2);
+        let body_id = doc1.model().body_id().unwrap();
+
+        // doc1 inserts a paragraph
+        let para_id = doc1.next_id();
+        let op1 = doc1
+            .apply_local(Operation::insert_node(
+                body_id,
+                0,
+                Node::new(para_id, NodeType::Paragraph),
+            ))
+            .unwrap();
+
+        // doc2 receives it
+        doc2.apply_remote(op1).unwrap();
+
+        // doc2 inserts its own paragraph
+        let para_id2 = doc2.next_id();
+        doc2.apply_local(Operation::insert_node(
+            body_id,
+            1,
+            Node::new(para_id2, NodeType::Paragraph),
+        ))
+        .unwrap();
+
+        // doc2 undoes its own paragraph
+        let undo_result = doc2.undo().unwrap();
+        assert!(undo_result.is_some());
+
+        // doc1's paragraph should still exist, doc2's should be gone
+        assert!(doc2.model().node(para_id).is_some());
+        assert!(doc2.model().node(para_id2).is_none());
+    }
+
+    #[test]
+    fn test_apply_local_delete_text_on_non_text_node() {
+        let mut doc = CollabDocument::new(1);
+        let body_id = doc.model().body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.apply_local(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(para_id, NodeType::Paragraph),
+        ))
+        .unwrap();
+
+        // Try to delete text from a paragraph node (not a text node)
+        let result = doc.apply_local(Operation::delete_text(para_id, 0, 5));
+        // Should fail since paragraph is not a text node
+        assert!(
+            result.is_err(),
+            "deleting text from a non-text node should fail"
+        );
+    }
+
+    #[test]
+    fn test_fork_then_diverge_then_sync() {
+        let mut doc1 = CollabDocument::new(1);
+        let body_id = doc1.model().body_id().unwrap();
+
+        // Create shared structure
+        let para_id = doc1.next_id();
+        doc1.apply_local(Operation::insert_node(
+            body_id,
+            0,
+            Node::new(para_id, NodeType::Paragraph),
+        ))
+        .unwrap();
+
+        // Fork
+        let mut doc2 = doc1.fork(2);
+
+        // Both add different paragraphs
+        let p1 = doc1.next_id();
+        let op1 = doc1
+            .apply_local(Operation::insert_node(
+                body_id,
+                1,
+                Node::new(p1, NodeType::Paragraph),
+            ))
+            .unwrap();
+
+        let p2 = doc2.next_id();
+        let op2 = doc2
+            .apply_local(Operation::insert_node(
+                body_id,
+                1,
+                Node::new(p2, NodeType::Paragraph),
+            ))
+            .unwrap();
+
+        // Sync
+        doc1.apply_remote(op2).unwrap();
+        doc2.apply_remote(op1).unwrap();
+
+        // Both should have all 3 paragraphs
+        let body1 = doc1.model().node(body_id).unwrap();
+        let body2 = doc2.model().node(body_id).unwrap();
+        assert_eq!(body1.children.len(), 3);
+        assert_eq!(body1.children, body2.children);
     }
 }

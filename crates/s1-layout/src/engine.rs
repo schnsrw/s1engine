@@ -22,6 +22,23 @@ pub struct LayoutConfig {
     pub min_orphan_lines: usize,
     /// Minimum number of lines at the bottom before a break (widow control).
     pub min_widow_lines: usize,
+    /// Optional hint for incremental pagination: the first page index that
+    /// needs re-layout.
+    ///
+    /// When set, pages before this index are considered unchanged and *could*
+    /// be reused from a previous `LayoutDocument` result. This field is
+    /// currently advisory — the engine does not yet skip pages — but it
+    /// provides the hook needed for a future incremental pagination
+    /// implementation:
+    ///
+    /// 1. The caller detects which `NodeId`s changed (via CRDT / ops).
+    /// 2. It resolves the earliest page that contains one of those nodes.
+    /// 3. It sets `dirty_from_page` to that page index.
+    /// 4. A future version of `layout()` can memcpy the unchanged prefix of
+    ///    pages and only re-paginate from `dirty_from_page` onward.
+    ///
+    /// Defaults to `None` (full re-layout).
+    pub dirty_from_page: Option<usize>,
 }
 
 impl Default for LayoutConfig {
@@ -30,6 +47,7 @@ impl Default for LayoutConfig {
             default_page_layout: PageLayout::letter(),
             min_orphan_lines: 2,
             min_widow_lines: 2,
+            dirty_from_page: None,
         }
     }
 }
@@ -76,10 +94,32 @@ impl<'a> LayoutEngine<'a> {
     /// If a `LayoutCache` was provided via `new_with_cache`, cached block
     /// layouts are reused for unchanged content (same content hash).
     ///
+    /// # Current limitation — pagination is not truly incremental
+    ///
+    /// Although individual block layouts are cached (avoiding re-shaping of
+    /// unchanged paragraphs), **pagination itself always runs from scratch**:
+    /// every block is visited sequentially to determine page breaks, column
+    /// flow, and vertical positioning.  True incremental pagination would:
+    ///
+    /// 1. Accept a `dirty_from_page` hint (see [`LayoutConfig::dirty_from_page`]).
+    /// 2. Copy the unchanged page prefix verbatim from the previous result.
+    /// 3. Resume the pagination loop from the first dirty page onward.
+    ///
+    /// This is a large architectural change because page breaks depend on
+    /// cumulative vertical space, so any height change in an early block
+    /// invalidates all subsequent pages.  A practical middle ground is to
+    /// binary-search for the first affected page, then re-paginate only from
+    /// that point.  The `dirty_from_page` field on `LayoutConfig` is the
+    /// intended entry point for this future optimization.
+    ///
     /// # Errors
     ///
     /// Returns `LayoutError` if fonts cannot be found or text shaping fails.
     pub fn layout(&mut self) -> Result<LayoutDocument, LayoutError> {
+        // TODO(LTP-09): When `self.config.dirty_from_page` is set, reuse
+        // the page prefix from a previous LayoutDocument instead of
+        // re-paginating everything.
+
         // Collect all block-level nodes in document order
         let blocks = self.collect_blocks();
 
@@ -315,8 +355,7 @@ impl<'a> LayoutEngine<'a> {
                                 let is_short_orphan = page_blocks
                                     .last()
                                     .map(|b| {
-                                        if let LayoutBlockKind::Paragraph { ref lines, .. } =
-                                            b.kind
+                                        if let LayoutBlockKind::Paragraph { ref lines, .. } = b.kind
                                         {
                                             lines.len() < min_orphan && lines.len() == 1
                                         } else {
@@ -1045,10 +1084,7 @@ impl<'a> LayoutEngine<'a> {
             | ((para_style.bidi as u64) << 3);
         hash = hash.wrapping_mul(0x100000001b3);
         // Include default_font_size (affects empty paragraph height)
-        hash ^= para_style
-            .default_font_size
-            .unwrap_or(0.0)
-            .to_bits();
+        hash ^= para_style.default_font_size.unwrap_or(0.0).to_bits();
         hash = hash.wrapping_mul(0x100000001b3);
 
         // Check cache
@@ -4973,6 +5009,7 @@ mod tests {
             default_page_layout: PageLayout::letter(),
             min_orphan_lines: 2,
             min_widow_lines: 2,
+            ..Default::default()
         };
 
         let texts: Vec<&str> = (0..100).map(|_| "Lorem ipsum dolor sit amet").collect();

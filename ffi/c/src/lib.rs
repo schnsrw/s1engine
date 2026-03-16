@@ -3,6 +3,17 @@
 //! Provides a C-compatible API using opaque handles and `extern "C"` functions.
 //! All functions follow the naming convention `s1_<type>_<action>`.
 //!
+//! # ABI Stability
+//!
+//! **No ABI stability is guaranteed across versions.** All handle types
+//! (`S1Engine`, `S1Document`, `S1Error`, `S1Bytes`, `S1String`) are opaque
+//! and must only be accessed through the provided `s1_*` functions. The
+//! internal layout, size, and alignment of these types may change in any
+//! release. C consumers must never dereference or inspect handle pointers
+//! directly, cast them to concrete struct types, or make assumptions about
+//! their memory layout. Recompile and re-link against the matching version
+//! of this library whenever upgrading.
+//!
 //! # Safety
 //!
 //! All functions that accept pointers check for null before dereferencing.

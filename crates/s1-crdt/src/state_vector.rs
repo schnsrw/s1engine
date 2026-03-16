@@ -8,6 +8,11 @@ use std::collections::HashMap;
 
 use crate::op_id::OpId;
 
+/// Maximum number of distinct replicas tracked in a state vector.
+/// Exceeding this limit emits a debug warning and refuses to insert new entries.
+/// This prevents unbounded memory growth in adversarial or misconfigured clusters.
+pub const MAX_REPLICAS: usize = 10_000;
+
 /// Tracks the highest operation timestamp seen from each replica.
 ///
 /// Used in the sync protocol to compute deltas: `changes_since(remote_sv)` returns
@@ -33,13 +38,33 @@ impl StateVector {
     /// Update the state vector with an operation ID.
     ///
     /// Sets the entry to `max(current, op_id.lamport)`.
+    /// If the replica is new and the state vector is at the `MAX_REPLICAS` limit,
+    /// the update is silently ignored and a debug warning is emitted.
     pub fn update(&mut self, op_id: OpId) {
+        if !self.entries.contains_key(&op_id.replica) && self.entries.len() >= MAX_REPLICAS {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Warning: StateVector at MAX_REPLICAS limit ({MAX_REPLICAS}), ignoring new replica {}",
+                op_id.replica
+            );
+            return;
+        }
         let entry = self.entries.entry(op_id.replica).or_insert(0);
         *entry = (*entry).max(op_id.lamport);
     }
 
     /// Set the timestamp for a specific replica.
+    ///
+    /// If the replica is new and the state vector is at the `MAX_REPLICAS` limit,
+    /// the set is silently ignored and a debug warning is emitted.
     pub fn set(&mut self, replica: u64, lamport: u64) {
+        if !self.entries.contains_key(&replica) && self.entries.len() >= MAX_REPLICAS {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Warning: StateVector at MAX_REPLICAS limit ({MAX_REPLICAS}), ignoring new replica {replica}"
+            );
+            return;
+        }
         self.entries.insert(replica, lamport);
     }
 
@@ -236,5 +261,40 @@ mod tests {
 
         sv.set(1, 15); // update existing
         assert_eq!(sv.len(), 2);
+    }
+
+    #[test]
+    fn max_replicas_limit_on_set() {
+        let mut sv = StateVector::new();
+        // Fill to the limit
+        for i in 0..MAX_REPLICAS as u64 {
+            sv.set(i, 1);
+        }
+        assert_eq!(sv.len(), MAX_REPLICAS);
+
+        // Attempting to add a new replica should be ignored
+        sv.set(MAX_REPLICAS as u64 + 1, 999);
+        assert_eq!(sv.len(), MAX_REPLICAS);
+
+        // Updating an existing replica should still work
+        sv.set(0, 42);
+        assert_eq!(sv.get(0), 42);
+    }
+
+    #[test]
+    fn max_replicas_limit_on_update() {
+        let mut sv = StateVector::new();
+        for i in 0..MAX_REPLICAS as u64 {
+            sv.update(OpId::new(i, 1));
+        }
+        assert_eq!(sv.len(), MAX_REPLICAS);
+
+        // New replica via update should be ignored
+        sv.update(OpId::new(MAX_REPLICAS as u64 + 1, 5));
+        assert_eq!(sv.len(), MAX_REPLICAS);
+
+        // Existing replica update should still work
+        sv.update(OpId::new(0, 100));
+        assert_eq!(sv.get(0), 100);
     }
 }

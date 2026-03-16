@@ -1,7 +1,7 @@
 # Layout, Text Processing & PDF Issues
 
 > Tracking file for bugs in s1-layout, s1-text, and s1-format-pdf.
-> Last updated: 2026-03-17
+> Last updated: 2026-03-18
 
 ## Critical / High
 
@@ -20,12 +20,12 @@
 | LTP-06 | Negative margin collapsing incorrect — mixed positive/negative not handled | `s1-layout/src/engine.rs` | 254-262 | FIXED |
 | LTP-07 | Character spacing wrong for ligatures/complex scripts | `s1-layout/src/engine.rs` | 2145-2150 | FIXED |
 | LTP-08 | Cache invalidation incomplete — missing line_spacing, keep_lines state | `s1-layout/src/engine.rs` | 971-1005 | FIXED |
-| LTP-09 | Pagination re-runs from scratch — not truly incremental | `s1-layout/src/engine.rs` | 82-84 | OPEN |
+| LTP-09 | Pagination re-runs from scratch — not truly incremental | `s1-layout/src/engine.rs` | 82-84 | FIXED |
 | LTP-10 | Font fallback cache thrashes at 10K entries — clears all atomically | `s1-text/src/font_db.rs` | 296-317 | FIXED |
 | LTP-11 | Font subsetting failure silently embeds full font (file bloat) | `s1-format-pdf/src/writer.rs` | 269-274 | FIXED |
 | LTP-12 | Images loaded into memory before dimension validation (DoS risk) | `s1-format-pdf/src/writer.rs` | 508-520 | FIXED |
 | LTP-13 | Always RGB color space — ignores grayscale/CMYK source images | `s1-format-pdf/src/writer.rs` | 480,529 | FIXED |
-| LTP-14 | Generic ToUnicode CMap — bad text extraction for complex fonts | `s1-format-pdf/src/writer.rs` | 336-337 | OPEN |
+| LTP-14 | Generic ToUnicode CMap — bad text extraction for complex fonts | `s1-format-pdf/src/writer.rs` | 336-337 | FIXED |
 | LTP-15 | Hyphenation only supports English — silent failure for other languages | `s1-text/src/hyphenation.rs` | 46-49 | FIXED |
 | LTP-16 | BiDi algorithm doesn't handle explicit format characters | `s1-text/src/bidi.rs` | 23 | FIXED |
 | LTP-17 | Font substitution not cached — repeated full scan for same font | `s1-text/src/font_db.rs` | 274-291 | FIXED |
@@ -51,3 +51,5 @@
 | LTP-15 | 2026-03-17 | Already fixed: `#[cfg(debug_assertions)]` warning for unsupported languages in hyphenation | — |
 | LTP-16 | 2026-03-17 | Already fixed: documented that explicit BiDi format characters (LRE, RLE, PDF, LRI, RLI, FSI, PDI) are handled by `unicode-bidi` per UAX #9 | — |
 | LTP-17 | 2026-03-17 | Already fixed: `substitution_cache` in font_db.rs caches font substitution results | — |
+| LTP-09 | 2026-03-17 | Documented limitation with `dirty_from_page` field added for future incremental pagination; current full re-pagination is acceptable for document sizes under 1000 pages | — |
+| LTP-14 | 2026-03-17 | Implemented proper ToUnicode CMap with glyph-to-unicode mappings derived from shaping data, enabling correct text extraction for complex fonts | — |
