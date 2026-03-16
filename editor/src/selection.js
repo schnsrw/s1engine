@@ -71,7 +71,7 @@ export function findNodeEl(node, offset) {
 }
 
 // Check if a node is inside a non-editable element (like list markers)
-function isInsideNonEditable(node, container) {
+export function isInsideNonEditable(node, container) {
   let n = node.nodeType === 1 ? node : node.parentElement;
   while (n && n !== container) {
     if (n.getAttribute?.('contenteditable') === 'false') return true;

@@ -7,12 +7,12 @@ use s1_model::{
     Alignment, AttributeKey, AttributeValue, Color, DocumentModel, LineSpacing, Node, NodeId,
 };
 
-/// Default font family used when none is specified.
+/// Default font family used when none is specified (OOXML fallback).
 pub const DEFAULT_FONT_FAMILY: &str = "Times New Roman";
-/// Default font size in points.
-pub const DEFAULT_FONT_SIZE: f64 = 12.0;
-/// Default line spacing.
-pub const DEFAULT_LINE_SPACING: f64 = 1.15;
+/// Default font size in points (OOXML standard: 10pt = w:sz 20).
+pub const DEFAULT_FONT_SIZE: f64 = 10.0;
+/// Default line spacing (OOXML standard: single = 240/240).
+pub const DEFAULT_LINE_SPACING: f64 = 1.0;
 /// Default text color (black).
 pub const DEFAULT_COLOR: Color = Color {
     r: 0,
@@ -46,6 +46,8 @@ pub struct ResolvedParagraphStyle {
     pub page_break_before: bool,
     /// BiDi (right-to-left) paragraph direction.
     pub bidi: bool,
+    /// Default font size from the paragraph's run properties (for empty paragraph height).
+    pub default_font_size: Option<f64>,
 }
 
 impl Default for ResolvedParagraphStyle {
@@ -53,8 +55,8 @@ impl Default for ResolvedParagraphStyle {
         Self {
             alignment: Alignment::Left,
             space_before: 0.0,
-            space_after: 8.0,
-            line_spacing: LineSpacing::Multiple(DEFAULT_LINE_SPACING),
+            space_after: 0.0,
+            line_spacing: LineSpacing::Single,
             indent_left: 0.0,
             indent_right: 0.0,
             indent_first_line: 0.0,
@@ -62,6 +64,7 @@ impl Default for ResolvedParagraphStyle {
             keep_lines: false,
             page_break_before: false,
             bidi: false,
+            default_font_size: None,
         }
     }
 }
@@ -121,6 +124,18 @@ impl Default for ResolvedRunStyle {
 pub fn resolve_paragraph_style(doc: &DocumentModel, node_id: NodeId) -> ResolvedParagraphStyle {
     let mut style = ResolvedParagraphStyle::default();
 
+    // Apply document-level defaults (from docDefaults/pPrDefault)
+    let defaults = doc.doc_defaults();
+    if let Some(sa) = defaults.space_after {
+        style.space_after = sa;
+    }
+    if let Some(sb) = defaults.space_before {
+        style.space_before = sb;
+    }
+    if let Some(m) = defaults.line_spacing_multiple {
+        style.line_spacing = LineSpacing::Multiple(m);
+    }
+
     let node = match doc.node(node_id) {
         Some(n) => n,
         None => return style,
@@ -134,12 +149,35 @@ pub fn resolve_paragraph_style(doc: &DocumentModel, node_id: NodeId) -> Resolved
     // Then apply direct attributes (they override style)
     apply_paragraph_attrs(node, &mut style);
 
+    // Resolve default font size from paragraph's run properties or style chain
+    if let Some(AttributeValue::Float(fs)) = node.attributes.get(&AttributeKey::FontSize) {
+        style.default_font_size = Some(*fs);
+    } else if let Some(style_id) = node.attributes.get_string(&AttributeKey::StyleId) {
+        let chain = build_style_chain(doc, style_id);
+        for sid in chain {
+            if let Some(s) = doc.style_by_id(&sid) {
+                if let Some(AttributeValue::Float(fs)) = s.attributes.get(&AttributeKey::FontSize) {
+                    style.default_font_size = Some(*fs);
+                }
+            }
+        }
+    }
+
     style
 }
 
 /// Resolve run style from a run node.
 pub fn resolve_run_style(doc: &DocumentModel, node_id: NodeId) -> ResolvedRunStyle {
     let mut style = ResolvedRunStyle::default();
+
+    // Apply document-level defaults (from docDefaults/rPrDefault)
+    let defaults = doc.doc_defaults();
+    if let Some(ref ff) = defaults.font_family {
+        style.font_family = ff.clone();
+    }
+    if let Some(fs) = defaults.font_size {
+        style.font_size = fs;
+    }
 
     let node = match doc.node(node_id) {
         Some(n) => n,
@@ -313,7 +351,7 @@ mod tests {
     fn default_run_style() {
         let style = ResolvedRunStyle::default();
         assert_eq!(style.font_family, "Times New Roman");
-        assert_eq!(style.font_size, 12.0);
+        assert_eq!(style.font_size, 10.0); // OOXML standard default
         assert!(!style.bold);
         assert!(!style.italic);
     }

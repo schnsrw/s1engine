@@ -15,6 +15,25 @@ use crate::numbering::NumberingDefinitions;
 use crate::section::SectionProperties;
 use crate::styles::{resolve_style_chain, Style};
 
+/// Document-level default formatting from `w:docDefaults` in styles.xml.
+///
+/// These values are used as the base defaults for style resolution when
+/// no explicit formatting is specified on a node or in its style chain.
+#[derive(Debug, Clone, Default)]
+pub struct DocumentDefaults {
+    /// Default font family (from `rPrDefault`).
+    pub font_family: Option<String>,
+    /// Default font size in points (from `rPrDefault/w:sz`).
+    pub font_size: Option<f64>,
+    /// Default line spacing as a multiple (from `pPrDefault/w:spacing/w:line`).
+    /// Value of 276 in OOXML = 276/240 = 1.15x.
+    pub line_spacing_multiple: Option<f64>,
+    /// Default space after paragraph in points (from `pPrDefault/w:spacing/w:after`).
+    pub space_after: Option<f64>,
+    /// Default space before paragraph in points (from `pPrDefault/w:spacing/w:before`).
+    pub space_before: Option<f64>,
+}
+
 /// Error type for document model operations.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -90,6 +109,7 @@ pub struct DocumentModel {
     media: MediaStore,
     numbering: NumberingDefinitions,
     sections: Vec<SectionProperties>,
+    doc_defaults: DocumentDefaults,
 }
 
 impl DocumentModel {
@@ -125,6 +145,7 @@ impl DocumentModel {
             media: MediaStore::new(),
             numbering: NumberingDefinitions::default(),
             sections: Vec::new(),
+            doc_defaults: DocumentDefaults::default(),
         }
     }
 
@@ -612,6 +633,16 @@ impl DocumentModel {
     /// Get mutable section properties.
     pub fn sections_mut(&mut self) -> &mut Vec<SectionProperties> {
         &mut self.sections
+    }
+
+    /// Get document-level defaults (from `docDefaults` in styles.xml).
+    pub fn doc_defaults(&self) -> &DocumentDefaults {
+        &self.doc_defaults
+    }
+
+    /// Get mutable document defaults.
+    pub fn doc_defaults_mut(&mut self) -> &mut DocumentDefaults {
+        &mut self.doc_defaults
     }
 
     // ─── Plain text extraction ──────────────────────────────────────────

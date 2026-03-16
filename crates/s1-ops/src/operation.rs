@@ -572,7 +572,7 @@ pub fn validate(model: &DocumentModel, op: &Operation) -> Result<(), OperationEr
                 return Err(OperationError::Model(ModelError::NotATextNode(*target_id)));
             }
 
-            let text_len = node.text_content.as_ref().map_or(0, |t| t.len());
+            let text_len = node.text_content.as_ref().map_or(0, |t| t.chars().count());
             if *offset > text_len {
                 return Err(OperationError::Model(ModelError::TextOffsetOutOfBounds {
                     node_id: *target_id,
@@ -598,7 +598,7 @@ pub fn validate(model: &DocumentModel, op: &Operation) -> Result<(), OperationEr
                 return Err(OperationError::Model(ModelError::NotATextNode(*target_id)));
             }
 
-            let text_len = node.text_content.as_ref().map_or(0, |t| t.len());
+            let text_len = node.text_content.as_ref().map_or(0, |t| t.chars().count());
             if offset + length > text_len {
                 return Err(OperationError::Model(ModelError::TextOffsetOutOfBounds {
                     node_id: *target_id,

@@ -361,11 +361,17 @@ fn render_glyph_run(html: &mut String, run: &GlyphRun, line_height: f64) {
     // Build inline style
     let mut style = String::new();
     style.push_str(&format!(
-        "font-size:{sz}pt;position:absolute;left:{x}pt;top:{t}pt",
+        "font-size:{sz}pt;position:absolute;left:{x}pt;top:{t}pt;white-space:nowrap",
         sz = fmt_pt(run.font_size),
         x = fmt_pt(run.x_offset),
         t = fmt_pt(baseline_top),
     ));
+
+    // Font family — critical for matching WASM layout metrics in the browser
+    if !run.font_family.is_empty() {
+        let escaped = run.font_family.replace('\"', "&quot;");
+        style.push_str(&format!(";font-family:\"{}\"", escaped));
+    }
 
     // Build CSS class list for semantic styling hooks
     let mut classes: Vec<&str> = Vec::new();
@@ -665,6 +671,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -807,6 +814,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 14.0,
             color: Color::new(255, 0, 0),
             x_offset: 0.0,
@@ -903,6 +911,7 @@ mod tests {
                     runs: vec![GlyphRun {
                         source_id: dummy_node_id(),
                         font_id: dummy_font_id(),
+                        font_family: String::new(),
                         font_size: 12.0,
                         color: Color::new(0, 0, 0),
                         x_offset: 0.0,
@@ -940,6 +949,7 @@ mod tests {
             bounds: Rect::new(0.0, 0.0, 400.0, 20.0),
             cells: vec![cell],
             is_header_row: false,
+            source_id: dummy_node_id(),
         };
 
         let block = LayoutBlock {
@@ -1025,6 +1035,7 @@ mod tests {
         let header_run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 10.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1048,6 +1059,7 @@ mod tests {
         let footer_run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 10.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1149,6 +1161,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 255),
             x_offset: 0.0,
@@ -1276,6 +1289,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1349,6 +1363,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1422,6 +1437,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1495,6 +1511,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1568,6 +1585,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,
@@ -1641,6 +1659,7 @@ mod tests {
         let run = GlyphRun {
             source_id: dummy_node_id(),
             font_id: dummy_font_id(),
+            font_family: String::new(),
             font_size: 12.0,
             color: Color::new(0, 0, 0),
             x_offset: 0.0,

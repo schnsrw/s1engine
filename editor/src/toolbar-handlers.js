@@ -2,7 +2,7 @@
 import { state, $ } from './state.js';
 import { toggleFormat, applyFormat, updateToolbarState, updateUndoRedo } from './toolbar.js';
 import { doUndo, doRedo, closeSlashMenu } from './input.js';
-import { renderDocument, renderNodeById, syncParagraphText, syncAllText, applyPageDimensions, isCanvasMode, setCanvasMode, initCanvasRenderer } from './render.js';
+import { renderDocument, renderNodeById, syncParagraphText, syncAllText, applyPageDimensions, isCanvasMode, setCanvasMode, initCanvasRenderer, markLayoutDirty } from './render.js';
 import { getSelectionInfo, setCursorAtOffset, setSelectionRange, getActiveNodeId, saveSelection } from './selection.js';
 import { insertImage } from './images.js';
 import { updatePageBreaks } from './pagination.js';
@@ -807,6 +807,7 @@ function adjustZoom(delta) {
 // ── E10.2: Unified zoom — set, persist, update UI ──
 export function setZoomLevel(level) {
   level = Math.max(50, Math.min(200, Math.round(level)));
+  const changed = state.zoomLevel !== level;
   state.zoomLevel = level;
   const label = level + '%';
   if ($('zoomValue')) $('zoomValue').textContent = label;
@@ -828,6 +829,8 @@ export function setZoomLevel(level) {
       btn.classList.toggle('active', v === String(level));
     });
   }
+  // Invalidate layout cache when zoom changes so repagination uses fresh dimensions
+  if (changed) markLayoutDirty();
   try { localStorage.setItem('s1-zoom', String(level)); } catch (_) {}
   renderRuler();
 }
@@ -835,7 +838,8 @@ export function setZoomLevel(level) {
 function calcFitWidthZoom() {
   const canvas = $('editorCanvas');
   if (!canvas) return 100;
-  const pageWidth = 816; // default page width in px (8.5in @ 96dpi)
+  const dims = state.pageDims || { widthPt: 612 };
+  const pageWidth = Math.round(dims.widthPt * 96 / 72); // dynamic from doc
   const canvasWidth = canvas.clientWidth - 48; // subtract padding
   return Math.max(50, Math.min(200, Math.round((canvasWidth / pageWidth) * 100)));
 }

@@ -6,6 +6,7 @@ import { updateUndoRedo } from './toolbar.js';
 import { markDirty, updateTrackChanges, updateStatusBar } from './file.js';
 import { broadcastTextSync, broadcastOp } from './collab.js';
 import { getEditableText } from './selection.js';
+import { getFontDb } from './fonts.js';
 import { renderDocumentEquations, refreshPageThumbnails } from './toolbar-handlers.js';
 import {
   isCanvasMode,
@@ -26,7 +27,15 @@ const WASM_MEMORY_WARNING_BYTES = 50 * 1024 * 1024; // 50MB
 // E8.1: Virtual scroll buffer zone constants
 // ═══════════════════════════════════════════════════
 const BUFFER_PAGES = 2;        // Render 2 pages of content above/below viewport
-const PAGE_HEIGHT_PX = 1056;   // Letter page height in px (792pt * 96/72)
+const DEFAULT_PAGE_HEIGHT_PX = 1056;   // Letter page height in px (792pt * 96/72)
+
+/** Get the current page height in px from the document or fall back to Letter. */
+function getPageHeightPx() {
+  if (state.pageDims && state.pageDims.height) {
+    return Math.round(state.pageDims.height * 96 / 72);
+  }
+  return DEFAULT_PAGE_HEIGHT_PX;
+}
 
 // E8.4: Transparent 1x1 pixel placeholder for off-screen images
 const PLACEHOLDER_IMG_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -340,6 +349,12 @@ export function applyPageDimensions() {
   } catch (_) {
     // Defaults apply
   }
+  // Apply page dimensions as CSS custom properties so .doc-page sizes adapt
+  const dims = state.pageDims || { widthPt: 612, heightPt: 792 };
+  const widthPx = Math.round(dims.widthPt * ptToPx);
+  const heightPx = Math.round(dims.heightPt * ptToPx);
+  document.documentElement.style.setProperty('--page-width', widthPx + 'px');
+  document.documentElement.style.setProperty('--page-height', heightPx + 'px');
 }
 
 /**
@@ -497,8 +512,13 @@ export function renderNodesById(nodeIds) {
 }
 
 export function fixEmptyBlocks() {
-  queryAllNodes('p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty')
-    .forEach(el => { el.innerHTML = '<br>'; });
+  queryAllNodes('p, h1, h2, h3, h4, h5, h6').forEach(el => {
+    // Match truly empty blocks and whitespace-only blocks that need a <br>
+    // for contenteditable to maintain the block height
+    if (!el.textContent.trim() && !el.querySelector('img, br, table')) {
+      el.innerHTML = '<br>';
+    }
+  });
 }
 
 export function cacheAllText() {
@@ -619,7 +639,12 @@ export function renderPages() {
     if (!state._layoutDirty && state._layoutCache) {
       html = state._layoutCache;
     } else {
-      html = doc.to_paginated_html();
+      const fontDb = getFontDb();
+      if (fontDb && fontDb.font_count() > 0) {
+        html = doc.to_paginated_html_with_fonts(fontDb);
+      } else {
+        html = doc.to_paginated_html();
+      }
       state._layoutCache = html;
       state._layoutDirty = false;
     }
@@ -682,7 +707,7 @@ function setupLazyPageRendering(container, pages) {
     }
   }, {
     root: container.closest('.canvas') || null,
-    rootMargin: `${PAGE_HEIGHT_PX * BUFFER_PAGES}px 0px ${PAGE_HEIGHT_PX * BUFFER_PAGES}px 0px`,
+    rootMargin: `${getPageHeightPx() * BUFFER_PAGES}px 0px ${getPageHeightPx() * BUFFER_PAGES}px 0px`,
     threshold: 0,
   });
 
@@ -1095,7 +1120,7 @@ function initVirtualScroll(blocks) {
   }));
 
   // E8.1: Buffer zone — render BUFFER_PAGES pages of content above/below viewport
-  const bufferPx = BUFFER_PAGES * PAGE_HEIGHT_PX;
+  const bufferPx = BUFFER_PAGES * getPageHeightPx();
   const observer = new IntersectionObserver((ioEntries) => {
     if (!state.virtualScroll) return;
     if (isVirtualScrollSuppressed()) return;
@@ -1182,7 +1207,7 @@ function _releaseOffscreenImages() {
 
   const viewTop = canvas.scrollTop;
   const viewBottom = viewTop + canvas.clientHeight;
-  const bufferPx = BUFFER_PAGES * PAGE_HEIGHT_PX;
+  const bufferPx = BUFFER_PAGES * getPageHeightPx();
 
   for (const entry of vs.entries) {
     if (!entry.visible || !entry.el || !entry.el.parentNode) continue;

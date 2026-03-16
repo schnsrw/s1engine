@@ -15,6 +15,9 @@ pub fn parse_styles_xml(xml: &str, doc: &mut DocumentModel) -> Result<(), DocxEr
 
     loop {
         match reader.read_event() {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"docDefaults" => {
+                parse_doc_defaults(&mut reader, doc)?;
+            }
             Ok(Event::Start(e)) if e.local_name().as_ref() == b"style" => {
                 let style_id = get_attr(&e, b"styleId").unwrap_or_default();
                 let style_type_str = get_attr(&e, b"type").unwrap_or_default();
@@ -118,6 +121,67 @@ fn parse_style_element(
     style.attributes = attrs;
 
     doc.set_style(style);
+
+    Ok(())
+}
+
+/// Parse `<w:docDefaults>` — document-level formatting defaults.
+///
+/// Extracts default run properties (`rPrDefault`) and paragraph
+/// properties (`pPrDefault`) and stores them in the document model.
+fn parse_doc_defaults(reader: &mut Reader<&[u8]>, doc: &mut DocumentModel) -> Result<(), DocxError> {
+    let defaults = doc.doc_defaults_mut();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name().as_ref().to_vec();
+                match local.as_slice() {
+                    b"rPr" => {
+                        // Parse run properties inside rPrDefault
+                        let attrs = parse_run_properties(reader)?;
+                        if let Some(s1_model::AttributeValue::Float(fs)) =
+                            attrs.get(&s1_model::AttributeKey::FontSize)
+                        {
+                            defaults.font_size = Some(*fs);
+                        }
+                        if let Some(s1_model::AttributeValue::String(f)) =
+                            attrs.get(&s1_model::AttributeKey::FontFamily)
+                        {
+                            defaults.font_family = Some(f.clone());
+                        }
+                    }
+                    b"pPr" => {
+                        // Parse paragraph properties inside pPrDefault
+                        let attrs = parse_paragraph_properties(reader)?;
+                        if let Some(s1_model::AttributeValue::Float(v)) =
+                            attrs.get(&s1_model::AttributeKey::SpacingAfter)
+                        {
+                            defaults.space_after = Some(*v);
+                        }
+                        if let Some(s1_model::AttributeValue::Float(v)) =
+                            attrs.get(&s1_model::AttributeKey::SpacingBefore)
+                        {
+                            defaults.space_before = Some(*v);
+                        }
+                        if let Some(s1_model::AttributeValue::LineSpacing(
+                            s1_model::LineSpacing::Multiple(m),
+                        )) = attrs.get(&s1_model::AttributeKey::LineSpacing)
+                        {
+                            defaults.line_spacing_multiple = Some(*m);
+                        }
+                    }
+                    _ => {
+                        // skip unknown children (rPrDefault, pPrDefault wrappers, etc.)
+                    }
+                }
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == b"docDefaults" => break,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
 
     Ok(())
 }

@@ -186,6 +186,8 @@ pub struct GlyphRun {
     pub source_id: NodeId,
     /// Font used for this run.
     pub font_id: FontId,
+    /// Font family name (for CSS output).
+    pub font_family: String,
     /// Font size in points.
     pub font_size: f64,
     /// Text color.
@@ -233,6 +235,8 @@ pub struct LayoutTableRow {
     pub cells: Vec<LayoutTableCell>,
     /// Whether this row is a header row that repeats on continuation pages.
     pub is_header_row: bool,
+    /// Source row node ID from the document model.
+    pub source_id: NodeId,
 }
 
 /// A table cell in the layout.

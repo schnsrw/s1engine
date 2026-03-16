@@ -6,6 +6,7 @@ import { renderRuler } from './ruler.js';
 import { broadcastOp } from './collab.js';
 import { showToast } from './toolbar-handlers.js';
 import { trackEvent } from './analytics.js';
+import { ensureDocumentFonts, getFontDb } from './fonts.js';
 
 let detect_format_fn = null;
 
@@ -482,6 +483,15 @@ export async function openFile(bytes, name) {
     state.doc = state.engine.open(bytes);
     state.currentFormat = fmt.toUpperCase();
     activateEditor();
+
+    // Load fonts used in the document, then re-render with proper fonts
+    ensureDocumentFonts(state.doc).then(loaded => {
+      if (loaded > 0) {
+        state._layoutDirty = true;
+        renderDocument();
+      }
+    }).catch(() => {});
+
     renderDocument();
     renderRuler(); // Update ruler with actual document page dimensions
     if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
@@ -512,7 +522,10 @@ export function exportDoc(format) {
     syncAllText();
     trackEvent('export', format);
     if (format === 'pdf') {
-      const url = doc.to_pdf_data_url();
+      const fontDb = getFontDb();
+      const url = (fontDb && fontDb.font_count() > 0)
+        ? doc.to_pdf_data_url_with_fonts(fontDb)
+        : doc.to_pdf_data_url();
       const a = document.createElement('a');
       a.href = url; a.download = ($('docName').value || 'document') + '.pdf'; a.click();
       return;

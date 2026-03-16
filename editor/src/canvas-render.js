@@ -295,8 +295,15 @@ function renderRun(ctx, run, blockBounds, line) {
     const x = blockBounds.x + run.x;
     const y = blockBounds.y + line.baselineY - imgData.height;
     img.onload = function () {
-      // Re-acquire context — it may have been reset
       ctx.drawImage(img, x, y, imgData.width, imgData.height);
+    };
+    img.onerror = function () {
+      // Draw a placeholder rect for broken images
+      ctx.save();
+      ctx.strokeStyle = '#ccc';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x, y, imgData.width, imgData.height);
+      ctx.restore();
     };
     img.src = imgData.src;
     return;

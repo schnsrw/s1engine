@@ -375,10 +375,28 @@ impl WasmDocument {
         let mut pages_json = Vec::new();
         for (i, page) in layout.pages.iter().enumerate() {
             let mut node_ids = Vec::new();
+            let mut table_chunks_json = Vec::new();
             for block in &page.blocks {
                 let id_str = format!("{}:{}", block.source_id.replica, block.source_id.counter);
-                if !node_ids.contains(&id_str) {
+
+                // For table blocks, emit chunk info with row source IDs
+                if let s1_layout::LayoutBlockKind::Table { rows, is_continuation } = &block.kind {
+                    let row_ids: Vec<String> = rows
+                        .iter()
+                        .map(|r| format!("\"{}:{}\"", r.source_id.replica, r.source_id.counter))
+                        .collect();
+                    table_chunks_json.push(format!(
+                        "{{\"tableId\":\"{}\",\"isContinuation\":{},\"rowIds\":[{}]}}",
+                        id_str,
+                        is_continuation,
+                        row_ids.join(","),
+                    ));
+                    // Always include table ID (even duplicates across pages)
                     node_ids.push(id_str);
+                } else {
+                    if !node_ids.contains(&id_str) {
+                        node_ids.push(id_str);
+                    }
                 }
             }
 
@@ -413,8 +431,13 @@ impl WasmDocument {
             let margin_bottom = page.height - page.content_area.y - page.content_area.height;
 
             let ids_arr: Vec<String> = node_ids.iter().map(|id| format!("\"{}\"", id)).collect();
+            let table_chunks_str = if table_chunks_json.is_empty() {
+                String::from("[]")
+            } else {
+                format!("[{}]", table_chunks_json.join(","))
+            };
             pages_json.push(format!(
-                "{{\"pageNum\":{},\"width\":{:.1},\"height\":{:.1},\"marginTop\":{:.1},\"marginBottom\":{:.1},\"marginLeft\":{:.1},\"marginRight\":{:.1},\"sectionIndex\":{},\"nodeIds\":[{}],\"footer\":\"{}\",\"header\":\"{}\"}}",
+                "{{\"pageNum\":{},\"width\":{:.1},\"height\":{:.1},\"marginTop\":{:.1},\"marginBottom\":{:.1},\"marginLeft\":{:.1},\"marginRight\":{:.1},\"sectionIndex\":{},\"nodeIds\":[{}],\"tableChunks\":{},\"footer\":\"{}\",\"header\":\"{}\"}}",
                 i + 1,
                 page.width,
                 page.height,
@@ -424,6 +447,7 @@ impl WasmDocument {
                 margin_right,
                 page.section_index,
                 ids_arr.join(","),
+                table_chunks_str,
                 footer_text.replace('"', "\\\""),
                 header_text.replace('"', "\\\""),
             ));
@@ -473,6 +497,54 @@ impl WasmDocument {
         let bytes = self.to_pdf_with_fonts(font_db)?;
         let b64 = base64_encode(&bytes);
         Ok(format!("data:application/pdf;base64,{}", b64))
+    }
+
+    /// Get all unique font families used in the document.
+    ///
+    /// Returns a JSON array of font family names, e.g. `["Arial","Calibri","Georgia"]`.
+    /// Useful for determining which fonts need to be loaded before layout.
+    pub fn get_used_fonts(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let mut fonts = std::collections::BTreeSet::new();
+
+        // Collect from docDefaults
+        if let Some(ref ff) = model.doc_defaults().font_family {
+            fonts.insert(ff.clone());
+        }
+
+        // Collect from styles
+        for style in model.styles() {
+            if let Some(AttributeValue::String(f)) =
+                style.attributes.get(&AttributeKey::FontFamily)
+            {
+                fonts.insert(f.clone());
+            }
+        }
+
+        // Walk all nodes for direct font attributes
+        fn collect_fonts(
+            model: &DocumentModel,
+            node_id: NodeId,
+            fonts: &mut std::collections::BTreeSet<String>,
+        ) {
+            if let Some(node) = model.node(node_id) {
+                if let Some(AttributeValue::String(f)) =
+                    node.attributes.get(&AttributeKey::FontFamily)
+                {
+                    fonts.insert(f.clone());
+                }
+                for &child_id in &node.children {
+                    collect_fonts(model, child_id, fonts);
+                }
+            }
+        }
+
+        collect_fonts(model, model.root_id(), &mut fonts);
+
+        // Build JSON array
+        let json_arr: Vec<String> = fonts.iter().map(|f| format!("\"{}\"", f.replace('"', "\\\""))).collect();
+        Ok(format!("[{}]", json_arr.join(",")))
     }
 
     /// Render the document as HTML with formatting, images, and hyperlinks.
@@ -1507,6 +1579,58 @@ impl WasmDocument {
         } else {
             render_node(model, nid, &mut html);
         }
+        Ok(html)
+    }
+
+    /// Render a table with only specific rows (for split-table pagination).
+    ///
+    /// `table_id_str` is the table node ID (e.g., "1:5").
+    /// `row_ids_json` is a JSON array of row node IDs to include (e.g., '["1:6","1:7"]').
+    /// `chunk_id` is a unique identifier for this chunk (used as data-node-id).
+    /// `is_continuation` indicates if this is a continuation chunk (for styling).
+    pub fn render_table_chunk(
+        &self,
+        table_id_str: &str,
+        row_ids_json: &str,
+        chunk_id: &str,
+        is_continuation: bool,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let table_nid = parse_node_id(table_id_str)?;
+        let model = doc.model();
+        let table_node = model
+            .node(table_nid)
+            .ok_or_else(|| JsError::new(&format!("Table node {} not found", table_id_str)))?;
+
+        // Parse row IDs from JSON array
+        let row_ids_str = row_ids_json.trim();
+        let mut row_nids: Vec<NodeId> = Vec::new();
+        if row_ids_str.len() > 2 {
+            // Strip [ and ]
+            let inner = &row_ids_str[1..row_ids_str.len() - 1];
+            for part in inner.split(',') {
+                let id = part.trim().trim_matches('"');
+                if !id.is_empty() {
+                    row_nids.push(parse_node_id(id)?);
+                }
+            }
+        }
+
+        let mut html = String::new();
+        html.push_str(&format!(
+            "<table data-node-id=\"{}\" data-table-source=\"{}\" data-is-continuation=\"{}\" style=\"border-collapse:collapse;margin:0;width:100%\">",
+            chunk_id, table_id_str, is_continuation
+        ));
+
+        // Render only the specified rows
+        let row_set: std::collections::HashSet<NodeId> = row_nids.into_iter().collect();
+        for &row_id in &table_node.children {
+            if row_set.contains(&row_id) {
+                render_node(model, row_id, &mut html);
+            }
+        }
+
+        html.push_str("</table>");
         Ok(html)
     }
 
@@ -4160,6 +4284,11 @@ impl WasmFontDatabase {
     pub fn font_count(&self) -> usize {
         self.inner.len()
     }
+
+    /// Check if a font family is available (exact or via substitution).
+    pub fn has_font(&self, family: &str) -> bool {
+        self.inner.find_with_substitution(family, false, false).is_some()
+    }
 }
 
 impl Default for WasmFontDatabase {
@@ -6428,12 +6557,27 @@ fn render_paragraph_clean_partial(
         format!(" style=\"{style}\"")
     };
 
+    // Emit list info as data attributes so paste can restore list formatting
+    let mut list_attrs = String::new();
+    if let Some(AttributeValue::ListInfo(ref li)) = para.attributes.get(&AttributeKey::ListInfo) {
+        let list_type = match li.num_format {
+            ListFormat::Bullet => "bullet",
+            ListFormat::Decimal => "decimal",
+            ListFormat::LowerAlpha => "lowerAlpha",
+            ListFormat::UpperAlpha => "upperAlpha",
+            ListFormat::LowerRoman => "lowerRoman",
+            ListFormat::UpperRoman => "upperRoman",
+            _ => "bullet",
+        };
+        list_attrs = format!(" data-list-type=\"{list_type}\" data-list-level=\"{}\"", li.level);
+    }
+
     let tag = match effective_level {
         Some(l @ 1..=6) => format!("h{l}"),
         _ => "p".to_string(),
     };
 
-    html.push_str(&format!("<{tag}{style_attr}>"));
+    html.push_str(&format!("<{tag}{style_attr}{list_attrs}>"));
 
     // Walk children (runs, images, etc.) with character offset tracking
     let sel_start = start_char.unwrap_or(0);

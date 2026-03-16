@@ -2,7 +2,7 @@
 
 use s1_model::{
     AttributeKey, AttributeValue, DocumentModel, FieldType, HeaderFooterType, LineSpacing, NodeId,
-    NodeType, SectionBreakType,
+    NodeType, SectionBreakType, TableWidth,
 };
 use s1_text::{FontDatabase, FontId, FontMetrics, ShapedGlyph};
 
@@ -130,8 +130,21 @@ impl<'a> LayoutEngine<'a> {
 
             // Handle section change
             if block_section_idx != current_section_idx {
-                // Flush current page before switching sections
-                if !page_blocks.is_empty() {
+                // Determine break type from the NEW section's properties
+                let break_type = sections
+                    .get(block_section_idx)
+                    .and_then(|s| s.break_type)
+                    .unwrap_or(SectionBreakType::NextPage);
+
+                // A continuous break can stay on the same page only when
+                // the column count doesn't change. Column layout changes
+                // require a page break to avoid overlap.
+                let new_cols = self.resolve_section_columns(block_section_idx).0;
+                let is_continuous =
+                    matches!(break_type, SectionBreakType::Continuous) && new_cols == column_count;
+
+                // For non-continuous breaks, flush the current page
+                if !is_continuous && !page_blocks.is_empty() {
                     pages.push(self.make_page(
                         page_index,
                         &page_layout,
@@ -143,19 +156,15 @@ impl<'a> LayoutEngine<'a> {
                     page_floats.clear();
                 }
 
-                // Determine break type from the NEW section's properties
-                let break_type = sections
-                    .get(block_section_idx)
-                    .and_then(|s| s.break_type)
-                    .unwrap_or(SectionBreakType::NextPage);
-
                 match break_type {
                     SectionBreakType::NextPage => {
                         // Already flushed — just switch layout
                     }
                     SectionBreakType::Continuous => {
-                        // Don't force a new page; the new layout takes effect
-                        // on the NEXT page.
+                        // Continue on the same page. Don't flush, don't
+                        // reset current_y. The new section's columns and
+                        // layout take effect immediately below the
+                        // existing content.
                     }
                     SectionBreakType::EvenPage => {
                         // Ensure the next content starts on an even page
@@ -205,15 +214,22 @@ impl<'a> LayoutEngine<'a> {
                 current_column = 0;
                 content_rect =
                     Self::column_content_rect(full_rect, column_count, column_spacing, 0);
-                current_y = content_rect.y;
+                // For continuous breaks, keep current_y so content flows
+                // below the previous section's blocks on the same page.
+                if !is_continuous {
+                    current_y = content_rect.y;
+                }
             }
 
             match node_type {
                 NodeType::Paragraph => {
                     let para_style = resolve_paragraph_style(self.doc, *node_id);
 
-                    // Handle page break before
-                    if para_style.page_break_before && !page_blocks.is_empty() {
+                    // Handle page break before (explicit property or inline
+                    // w:br type="page" inside the paragraph's runs)
+                    let has_page_break = para_style.page_break_before
+                        || self.paragraph_has_inline_page_break(*node_id);
+                    if has_page_break && !page_blocks.is_empty() {
                         pages.push(self.make_page(
                             page_index,
                             &page_layout,
@@ -267,6 +283,7 @@ impl<'a> LayoutEngine<'a> {
                     let space_after = sanitize_pt(para_style.space_after);
 
                     // Check if this block fits in the current column/page
+                    // NDA debug: content_rect.width ~ 432 (612-90-90)
                     if current_y + block_height > content_rect.bottom() && !page_blocks.is_empty() {
                         // Try next column before going to a new page
                         if current_column + 1 < column_count {
@@ -278,7 +295,7 @@ impl<'a> LayoutEngine<'a> {
                                 column_spacing,
                                 current_column,
                             );
-                            current_y = content_rect.y + space_before;
+                            current_y = content_rect.y;
                         } else {
                             // All columns full — new page
                             pages.push(self.make_page(
@@ -298,7 +315,7 @@ impl<'a> LayoutEngine<'a> {
                                 column_spacing,
                                 current_column,
                             );
-                            current_y = content_rect.y + space_before;
+                            current_y = content_rect.y;
                         }
 
                         // Re-layout in the new column/page
@@ -312,10 +329,83 @@ impl<'a> LayoutEngine<'a> {
                         page_blocks.push(block);
                         current_y += block_height + space_after;
                         prev_space_after = space_after;
+                        // If the re-laid-out block still overflows (block
+                        // taller than page/column), advance to next
+                        // column or force a page break so the next block
+                        // starts fresh.
+                        if current_y > content_rect.bottom() {
+                            if current_column + 1 < column_count {
+                                current_column += 1;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            } else {
+                                pages.push(self.make_page(
+                                    page_index,
+                                    &page_layout,
+                                    std::mem::take(&mut page_blocks),
+                                    current_section_idx,
+                                ));
+                                page_section_indices.push(current_section_idx);
+                                page_index += 1;
+                                page_floats.clear();
+                                current_column = 0;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            }
+                            prev_space_after = 0.0;
+                        }
                     } else {
                         page_blocks.push(block);
                         current_y += block_height + space_after;
                         prev_space_after = space_after;
+                        // If the block overflows (e.g. single oversized
+                        // block on an empty page), advance to next column
+                        // or force a page break.
+                        if current_y > content_rect.bottom() {
+                            if current_column + 1 < column_count {
+                                current_column += 1;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            } else {
+                                pages.push(self.make_page(
+                                    page_index,
+                                    &page_layout,
+                                    std::mem::take(&mut page_blocks),
+                                    current_section_idx,
+                                ));
+                                page_section_indices.push(current_section_idx);
+                                page_index += 1;
+                                page_floats.clear();
+                                current_column = 0;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            }
+                            prev_space_after = 0.0;
+                        }
                     }
                 }
                 NodeType::Table => {
@@ -378,11 +468,17 @@ impl<'a> LayoutEngine<'a> {
                                 }
 
                                 // Place the row (even if it overflows — prevents infinite loop
-                                // for a single very tall row)
+                                // for a single very tall row). Clamp height to available space
+                                // so the page bounds stay consistent.
                                 let mut placed_row = row.clone();
                                 placed_row.bounds.y = chunk_height;
                                 chunk_rows.push(placed_row);
-                                chunk_height += row_h;
+                                let effective_h = if !added_any_data_row && row_h > available {
+                                    available.max(0.0) // clamp oversized single row
+                                } else {
+                                    row_h
+                                };
+                                chunk_height += effective_h;
                                 row_idx += 1;
                                 // Skip header rows in data iteration if this is first chunk
                                 // (they are already included naturally)
@@ -440,6 +536,41 @@ impl<'a> LayoutEngine<'a> {
                                     current_y = content_rect.y;
                                 }
                                 is_first_chunk = false;
+                            }
+                        }
+                        // After the table is fully placed, if current_y
+                        // exceeds the page, advance to next column or force
+                        // a page break so following blocks don't overlap.
+                        if current_y > content_rect.bottom() && !page_blocks.is_empty() {
+                            if current_column + 1 < column_count {
+                                current_column += 1;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            } else {
+                                pages.push(self.make_page(
+                                    page_index,
+                                    &page_layout,
+                                    std::mem::take(&mut page_blocks),
+                                    current_section_idx,
+                                ));
+                                page_section_indices.push(current_section_idx);
+                                page_index += 1;
+                                page_floats.clear();
+                                current_column = 0;
+                                let full_rect = page_layout.content_rect();
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
                             }
                         }
                     }
@@ -693,7 +824,18 @@ impl<'a> LayoutEngine<'a> {
         let n = column_count as f64;
         let col_width = (full_content_rect.width - (n - 1.0) * column_spacing) / n;
         let x = full_content_rect.x + column_index as f64 * (col_width + column_spacing);
-        Rect::new(x, full_content_rect.y, col_width, full_content_rect.height)
+        // Clamp last column width to avoid floating-point drift
+        let actual_width = if column_index == column_count - 1 {
+            full_content_rect.right() - x
+        } else {
+            col_width
+        };
+        Rect::new(
+            x,
+            full_content_rect.y,
+            actual_width,
+            full_content_rect.height,
+        )
     }
 
     /// Build a mapping from block index to section index.
@@ -981,6 +1123,7 @@ impl<'a> LayoutEngine<'a> {
                         shaped_runs.push(ShapedRunInfo {
                             source_id: child_id,
                             font_id: None,
+                            font_family: String::new(),
                             font_size: DEFAULT_FONT_SIZE,
                             color: s1_model::Color::new(0, 0, 0),
                             glyphs: Vec::new(),
@@ -1056,6 +1199,7 @@ impl<'a> LayoutEngine<'a> {
                         shaped_runs.push(ShapedRunInfo {
                             source_id: child_id,
                             font_id: None,
+                            font_family: String::new(),
                             font_size: DEFAULT_FONT_SIZE,
                             color: s1_model::Color::new(0, 0, 0),
                             glyphs: vec![ShapedGlyph {
@@ -1100,6 +1244,7 @@ impl<'a> LayoutEngine<'a> {
                             shaped_runs.push(ShapedRunInfo {
                                 source_id: child_id,
                                 font_id: None,
+                                font_family: String::new(),
                                 font_size: DEFAULT_FONT_SIZE,
                                 color: s1_model::Color::new(0, 0, 0),
                                 glyphs,
@@ -1173,12 +1318,18 @@ impl<'a> LayoutEngine<'a> {
                             })
                             .unwrap_or(100.0);
 
-                        // Constrain to available width
-                        let scale = if img_w > available_width {
+                        // Constrain to available area (width and height)
+                        let scale_w = if img_w > available_width {
                             available_width / img_w
                         } else {
                             1.0
                         };
+                        let scale_h = if img_h > content_rect.height && content_rect.height > 0.0 {
+                            content_rect.height / img_h
+                        } else {
+                            1.0
+                        };
+                        let scale = scale_w.min(scale_h);
                         let final_w = img_w * scale;
                         let final_h = img_h * scale;
 
@@ -1217,6 +1368,7 @@ impl<'a> LayoutEngine<'a> {
                         shaped_runs.push(ShapedRunInfo {
                             source_id: child_id,
                             font_id: None,
+                            font_family: String::new(),
                             font_size: final_h, // use image height as "font size" for line height
                             color: s1_model::Color::new(0, 0, 0),
                             glyphs: vec![ShapedGlyph {
@@ -1463,6 +1615,7 @@ impl<'a> LayoutEngine<'a> {
         Ok(ShapedRunInfo {
             source_id: run_id,
             font_id,
+            font_family: run_style.font_family.clone(),
             font_size: run_style.font_size,
             color: run_style.color,
             glyphs,
@@ -1556,6 +1709,7 @@ impl<'a> LayoutEngine<'a> {
                         shaped_runs.push(ShapedRunInfo {
                             source_id: child_id,
                             font_id: None,
+                            font_family: run_style.font_family.clone(),
                             font_size: run_style.font_size,
                             color: run_style.color,
                             glyphs: Vec::new(),
@@ -1702,6 +1856,7 @@ impl<'a> LayoutEngine<'a> {
         Ok(ShapedRunInfo {
             source_id,
             font_id: actual_font_id.or(font_id),
+            font_family: run_style.font_family.clone(),
             font_size: run_style.font_size,
             color: run_style.color,
             glyphs,
@@ -1732,12 +1887,14 @@ impl<'a> LayoutEngine<'a> {
         para_style: &ResolvedParagraphStyle,
     ) -> Vec<LayoutLine> {
         if runs.is_empty() {
-            // For empty paragraphs, use Exact/AtLeast line spacing directly if set,
-            // otherwise use DEFAULT_FONT_SIZE. This prevents empty paragraphs from
-            // being forced to 13.8pt when a smaller height is styled.
+            // For empty paragraphs, resolve the font size from the paragraph's style
+            // rather than hardcoding DEFAULT_FONT_SIZE. This ensures an empty 24pt
+            // paragraph is taller than an empty 10pt paragraph.
+            let styled_font_size = para_style.default_font_size.unwrap_or(DEFAULT_FONT_SIZE);
             let base_size = match &para_style.line_spacing {
                 LineSpacing::Exact(h) => *h,
-                _ => DEFAULT_FONT_SIZE,
+                LineSpacing::AtLeast(h) => styled_font_size.max(*h),
+                _ => styled_font_size,
             };
             let line_height = compute_line_height(base_size, &para_style.line_spacing);
             return vec![LayoutLine {
@@ -1768,6 +1925,7 @@ impl<'a> LayoutEngine<'a> {
                 0.0
             };
             let mut max_height: f64 = 0.0;
+            let mut max_image_height: f64 = 0.0;
 
             // Check if the line ends at a hyphenation Penalty (flagged = true)
             let ends_with_hyphen = end > 0
@@ -1797,6 +1955,7 @@ impl<'a> LayoutEngine<'a> {
                         line_runs.push(GlyphRun {
                             source_id: run_info.source_id,
                             font_id,
+                            font_family: run_info.font_family.clone(),
                             font_size: run_info.font_size,
                             color: run_info.color,
                             x_offset: current_x,
@@ -1817,7 +1976,13 @@ impl<'a> LayoutEngine<'a> {
                             inline_image: run_info.inline_image.clone(),
                         });
                         current_x += width;
-                        if *height > max_height {
+                        // Track image heights separately so line spacing
+                        // is NOT applied to inline images (only to text).
+                        if runs[*run_idx].inline_image.is_some() {
+                            if *height > max_image_height {
+                                max_image_height = *height;
+                            }
+                        } else if *height > max_height {
                             max_height = *height;
                         }
                     }
@@ -1861,14 +2026,20 @@ impl<'a> LayoutEngine<'a> {
                 }
             }
 
-            let line_height = compute_line_height(
-                if max_height > 0.0 {
-                    max_height
-                } else {
-                    DEFAULT_FONT_SIZE
-                },
-                &para_style.line_spacing,
-            );
+            // Apply line spacing only to text height, not to inline image
+            // height. An inline image's height is used directly. The final
+            // line height is the larger of the two.
+            let text_h = if max_height > 0.0 {
+                max_height
+            } else if max_image_height <= 0.0 {
+                // Empty lines (e.g. consecutive line breaks) should use the
+                // paragraph's styled font size, not the hardcoded default.
+                para_style.default_font_size.unwrap_or(DEFAULT_FONT_SIZE)
+            } else {
+                0.0
+            };
+            let text_line_height = compute_line_height(text_h, &para_style.line_spacing);
+            let line_height = text_line_height.max(max_image_height);
             lines.push(LayoutLine {
                 baseline_y: 0.0,
                 height: line_height,
@@ -1877,7 +2048,8 @@ impl<'a> LayoutEngine<'a> {
         }
 
         if lines.is_empty() {
-            let line_height = compute_line_height(DEFAULT_FONT_SIZE, &para_style.line_spacing);
+            let fallback_size = para_style.default_font_size.unwrap_or(DEFAULT_FONT_SIZE);
+            let line_height = compute_line_height(fallback_size, &para_style.line_spacing);
             lines.push(LayoutLine {
                 baseline_y: 0.0,
                 height: line_height,
@@ -2157,7 +2329,81 @@ impl<'a> LayoutEngine<'a> {
             .unwrap_or(1)
             .max(1);
 
-        let col_width = content_rect.width / num_cols as f64;
+        // Build column widths from cell width attributes in the first row.
+        // Falls back to equal distribution if no widths are specified.
+        let col_widths: Vec<f64> = {
+            let mut widths = Vec::with_capacity(num_cols);
+            let mut has_explicit = false;
+
+            if let Some(&first_row_id) = table.children.first() {
+                if let Some(first_row) = self.doc.node(first_row_id) {
+                    for &cell_id in first_row.children.iter().take(num_cols) {
+                        if let Some(cell) = self.doc.node(cell_id) {
+                            match cell.attributes.get(&AttributeKey::CellWidth) {
+                                Some(AttributeValue::TableWidth(TableWidth::Fixed(pts))) => {
+                                    widths.push(*pts);
+                                    has_explicit = true;
+                                }
+                                Some(AttributeValue::TableWidth(TableWidth::Percent(pct))) => {
+                                    widths.push(content_rect.width * pct / 100.0);
+                                    has_explicit = true;
+                                }
+                                _ => {
+                                    widths.push(0.0); // placeholder
+                                }
+                            }
+                        } else {
+                            widths.push(0.0);
+                        }
+                    }
+                }
+            }
+
+            if !has_explicit || widths.is_empty() {
+                // Fall back to equal distribution
+                vec![content_rect.width / num_cols as f64; num_cols]
+            } else {
+                // Distribute remaining width among auto-sized columns
+                let total_explicit: f64 = widths.iter().filter(|&&w| w > 0.0).sum();
+                let auto_count = widths.iter().filter(|&&w| w <= 0.0).count();
+                let remaining = (content_rect.width - total_explicit).max(0.0);
+                let auto_width = if auto_count > 0 {
+                    remaining / auto_count as f64
+                } else {
+                    0.0
+                };
+
+                // Scale proportionally if total exceeds content width
+                let total_with_auto: f64 = total_explicit + auto_width * auto_count as f64;
+                let scale = if total_with_auto > content_rect.width && total_with_auto > 0.0 {
+                    content_rect.width / total_with_auto
+                } else {
+                    1.0
+                };
+
+                widths
+                    .iter()
+                    .map(|&w| {
+                        if w > 0.0 {
+                            w * scale
+                        } else {
+                            auto_width * scale
+                        }
+                    })
+                    .collect()
+            }
+        };
+
+        // Precompute cumulative x positions for columns
+        let col_x_positions: Vec<f64> = {
+            let mut positions = Vec::with_capacity(num_cols);
+            let mut x = 0.0;
+            for &w in &col_widths {
+                positions.push(x);
+                x += w;
+            }
+            positions
+        };
 
         // Extract table-level borders for inheritance to cells without explicit borders
         let table_borders = table
@@ -2189,8 +2435,10 @@ impl<'a> LayoutEngine<'a> {
                             continue;
                         }
 
-                        let cell_x = col_idx as f64 * col_width;
-                        let cell_rect = Rect::new(cell_x, 0.0, col_width, 0.0);
+                        let this_col_width = col_widths.get(col_idx).copied()
+                            .unwrap_or(content_rect.width / num_cols as f64);
+                        let cell_x = col_x_positions.get(col_idx).copied().unwrap_or(0.0);
+                        let cell_rect = Rect::new(cell_x, 0.0, this_col_width, 0.0);
 
                         // Layout cell content
                         let mut cell_blocks = Vec::new();
@@ -2201,7 +2449,7 @@ impl<'a> LayoutEngine<'a> {
                                 if content.node_type == NodeType::Paragraph {
                                     let ps = resolve_paragraph_style(self.doc, content_id);
                                     let cell_content_rect =
-                                        Rect::new(cell_x + 2.0, cell_y, col_width - 4.0, 1000.0);
+                                        Rect::new(cell_x + 2.0, cell_y, this_col_width - 4.0, 1000.0);
                                     let block = self.layout_paragraph(
                                         content_id,
                                         &ps,
@@ -2212,7 +2460,7 @@ impl<'a> LayoutEngine<'a> {
                                     cell_blocks.push(block);
                                 } else if content.node_type == NodeType::Table {
                                     let nested_rect =
-                                        Rect::new(cell_x + 2.0, cell_y, col_width - 4.0, 1000.0);
+                                        Rect::new(cell_x + 2.0, cell_y, this_col_width - 4.0, 1000.0);
                                     let nested_rows = self.layout_table_rows_with_depth(
                                         content_id,
                                         nested_rect,
@@ -2225,7 +2473,7 @@ impl<'a> LayoutEngine<'a> {
                                         bounds: Rect::new(
                                             cell_x + 2.0,
                                             cell_y,
-                                            col_width - 4.0,
+                                            this_col_width - 4.0,
                                             nested_height,
                                         ),
                                         kind: LayoutBlockKind::Table {
@@ -2310,6 +2558,7 @@ impl<'a> LayoutEngine<'a> {
                     bounds: Rect::new(0.0, cumulative_y, content_rect.width, max_cell_height),
                     cells,
                     is_header_row: is_header,
+                    source_id: row_id,
                 });
                 cumulative_y += max_cell_height;
             }
@@ -2377,12 +2626,18 @@ impl<'a> LayoutEngine<'a> {
             })
             .unwrap_or((100.0, 100.0));
 
-        // Constrain to content width
-        let scale = if width > content_rect.width {
+        // Constrain to content area (width and height), preserving aspect ratio
+        let scale_w = if width > content_rect.width {
             content_rect.width / width
         } else {
             1.0
         };
+        let scale_h = if height > content_rect.height && content_rect.height > 0.0 {
+            content_rect.height / height
+        } else {
+            1.0
+        };
+        let scale = scale_w.min(scale_h);
 
         let final_w = width * scale;
         let final_h = height * scale;
@@ -2605,17 +2860,15 @@ impl<'a> LayoutEngine<'a> {
                     .get_string(&AttributeKey::ImageDistanceFromText)
             })
             .map(|s| {
-                let parts: Vec<f64> = s
-                    .split(',')
-                    .filter_map(|p| p.trim().parse::<f64>().ok())
-                    .map(|emu| emu / EMU_PER_PT)
-                    .collect();
-                (
-                    parts.first().copied().unwrap_or(0.0),
-                    parts.get(1).copied().unwrap_or(0.0),
-                    parts.get(2).copied().unwrap_or(0.0),
-                    parts.get(3).copied().unwrap_or(0.0),
-                )
+                let parts: Vec<&str> = s.split(',').collect();
+                let parse_emu = |idx: usize| -> f64 {
+                    parts
+                        .get(idx)
+                        .and_then(|p| p.trim().parse::<f64>().ok())
+                        .map(|emu| emu / EMU_PER_PT)
+                        .unwrap_or(0.0)
+                };
+                (parse_emu(0), parse_emu(1), parse_emu(2), parse_emu(3))
             })
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
@@ -2766,15 +3019,15 @@ impl<'a> LayoutEngine<'a> {
 
         let hf_width = page.content_area.width;
         let hf_x = page.content_area.x;
-        let hf_y = if is_header {
-            hf_distance
-        } else {
-            page.height - hf_distance - DEFAULT_FONT_SIZE
-        };
 
         let node = match self.doc.node(node_id) {
             Some(n) => n,
             None => {
+                let hf_y = if is_header {
+                    hf_distance
+                } else {
+                    page.height - hf_distance
+                };
                 return Ok(LayoutBlock {
                     source_id: node_id,
                     bounds: Rect::new(hf_x, hf_y, hf_width, 0.0),
@@ -2797,7 +3050,7 @@ impl<'a> LayoutEngine<'a> {
             }
         };
 
-        // Layout child paragraphs
+        // Layout child paragraphs at a preliminary Y of 0 to measure total height
         let mut blocks = Vec::new();
         let mut current_y = 0.0;
 
@@ -2805,7 +3058,8 @@ impl<'a> LayoutEngine<'a> {
             if let Some(child) = self.doc.node(child_id) {
                 if child.node_type == NodeType::Paragraph {
                     let para_style = resolve_paragraph_style(self.doc, child_id);
-                    let content_rect = Rect::new(hf_x, hf_y, hf_width, 100.0);
+                    // Use preliminary rect at y=0 for measurement
+                    let content_rect = Rect::new(hf_x, 0.0, hf_width, 100.0);
                     let mut block =
                         self.layout_paragraph(child_id, &para_style, content_rect, current_y)?;
 
@@ -2818,13 +3072,24 @@ impl<'a> LayoutEngine<'a> {
             }
         }
 
-        // Merge blocks into a single block (typical: one paragraph)
+        // Compute actual hf_y using measured total height
         let total_height = current_y;
+        let hf_y = if is_header {
+            hf_distance
+        } else {
+            page.height - hf_distance - total_height
+        };
+
+        // Offset all blocks to the final hf_y position
+        for block in &mut blocks {
+            block.bounds.y += hf_y;
+        }
+
+        // Merge blocks into a single block (typical: one paragraph)
         if blocks.len() == 1 {
             let mut block = blocks.remove(0);
             block.source_id = node_id; // Use header/footer node ID
             block.bounds.x = hf_x;
-            block.bounds.y = hf_y;
             Ok(block)
         } else {
             // Multiple paragraphs — wrap as first paragraph
@@ -2928,6 +3193,7 @@ impl<'a> LayoutEngine<'a> {
                                     last_line.runs.push(GlyphRun {
                                         source_id: child_id,
                                         font_id: FontId(fontdb::ID::dummy()),
+                                        font_family: String::new(),
                                         font_size,
                                         color: s1_model::Color::new(0, 0, 0),
                                         x_offset,
@@ -3019,9 +3285,34 @@ impl<'a> LayoutEngine<'a> {
             if needs_fix && same_section {
                 // Move the last block from current page to the start of next page.
                 // Use the next page's content area for positioning.
-                let current_page = &mut pages[i];
-                if current_page.blocks.len() > 1 {
+                // First check if the move would cause overflow on the next page.
+                let can_move = {
+                    let current_page = &pages[i];
+                    let next_page = &pages[i + 1];
+                    if current_page.blocks.len() > 1 {
+                        if let Some(last_block) = current_page.blocks.last() {
+                            let shift = last_block.bounds.height;
+                            // Check if shifting blocks down would push the
+                            // last block on the next page past the page height
+                            if let Some(last_next) = next_page.blocks.last() {
+                                let new_bottom =
+                                    last_next.bounds.y + shift + last_next.bounds.height;
+                                new_bottom <= next_page.height
+                            } else {
+                                true // next page is empty, always ok
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+
+                if can_move {
+                    let current_page = &mut pages[i];
                     let Some(block) = current_page.blocks.pop() else {
+                        i += 1;
                         continue;
                     };
                     let next_page = &mut pages[i + 1];
@@ -3436,6 +3727,29 @@ impl<'a> LayoutEngine<'a> {
         }
     }
 
+    /// Check if a paragraph contains an inline page break (`w:br type="page"`)
+    /// as a descendant node. Returns `true` if any `NodeType::PageBreak` is
+    /// found among the paragraph's children (typically inside a Run).
+    fn paragraph_has_inline_page_break(&self, para_id: NodeId) -> bool {
+        if let Some(para) = self.doc.node(para_id) {
+            for &run_id in &para.children {
+                if let Some(run) = self.doc.node(run_id) {
+                    if run.node_type == NodeType::PageBreak {
+                        return true;
+                    }
+                    for &child_id in &run.children {
+                        if let Some(child) = self.doc.node(child_id) {
+                            if child.node_type == NodeType::PageBreak {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn make_page(
         &self,
         index: usize,
@@ -3462,6 +3776,7 @@ impl<'a> LayoutEngine<'a> {
 struct ShapedRunInfo {
     source_id: NodeId,
     font_id: Option<FontId>,
+    font_family: String,
     font_size: f64,
     color: s1_model::Color,
     glyphs: Vec<ShapedGlyph>,
@@ -3926,7 +4241,13 @@ fn greedy_breaks(items: &[BreakItem], available_width: f64, first_line_indent: f
                     if let Some(bp) = last_break_opportunity {
                         if bp > *breaks.last().unwrap_or(&0) {
                             breaks.push(bp + 1);
-                            current_width = current_width - width_at_last_break + width;
+                            // Subtract the glue width at bp so the new line doesn't
+                            // inherit the trailing space from the previous line.
+                            let glue_w = match &items[bp] {
+                                BreakItem::Glue { width, .. } => *width,
+                                _ => 0.0,
+                            };
+                            current_width = current_width - width_at_last_break - glue_w + width;
                             is_first_line = false;
                             last_break_opportunity = None;
                             continue;

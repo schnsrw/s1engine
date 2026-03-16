@@ -2,7 +2,7 @@
 // WASM get_page_map_json() is the single source of truth for pagination.
 import { state, $ } from './state.js';
 import { updateStatusBar as _updateStatus } from './file.js';
-import { getEditableText } from './selection.js';
+import { getEditableText, isInsideNonEditable } from './selection.js';
 
 const PT_TO_PX = 96 / 72;
 
@@ -38,6 +38,8 @@ export function repaginate() {
         const walker = document.createTreeWalker(n, NodeFilter.SHOW_TEXT, null);
         let count = 0, tw;
         while ((tw = walker.nextNode())) {
+          // Skip text inside non-editable elements (list markers)
+          if (isInsideNonEditable(tw, n)) continue;
           if (tw === range.startContainer) { savedOffset = count + range.startOffset; break; }
           count += tw.textContent.length;
         }
@@ -87,11 +89,40 @@ export function repaginate() {
   // Get page dimensions
   const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
 
-  // Build nodeToPage map
+  // Build nodeToPage map and table chunk map
   const newNodeToPage = new Map();
+  // tableChunkMap: Map<pageNum, Map<tableId, {rowIds, isContinuation, chunkId}>>
+  const tableChunkMap = new Map();
   for (const pg of pages) {
+    // Process table chunks for this page
+    if (pg.tableChunks && pg.tableChunks.length > 0) {
+      const pageChunks = new Map();
+      for (const chunk of pg.tableChunks) {
+        const chunkId = chunk.isContinuation
+          ? `${chunk.tableId}-p${pg.pageNum}`
+          : chunk.tableId;
+        pageChunks.set(chunk.tableId, {
+          rowIds: chunk.rowIds,
+          isContinuation: chunk.isContinuation,
+          chunkId,
+        });
+      }
+      tableChunkMap.set(pg.pageNum, pageChunks);
+    }
+
     for (const nid of pg.nodeIds) {
-      newNodeToPage.set(nid, pg.pageNum);
+      // For tables with chunks, map the chunk ID (not the raw table ID)
+      const pageChunks = tableChunkMap.get(pg.pageNum);
+      const chunk = pageChunks?.get(nid);
+      if (chunk) {
+        newNodeToPage.set(chunk.chunkId, pg.pageNum);
+        // Don't overwrite the first page's mapping for the base table ID
+        if (!chunk.isContinuation) {
+          newNodeToPage.set(nid, pg.pageNum);
+        }
+      } else {
+        newNodeToPage.set(nid, pg.pageNum);
+      }
     }
   }
 
@@ -134,8 +165,15 @@ export function repaginate() {
     const ftr = (isFirstPage && hasDifferentFirst) ? firstPageFooterHtml : defaultFooterHtml;
     updatePageHeaderFooter(pageEl, pageNum, numPages, hdr, ftr);
 
+    // Build the effective node ID list for this page (replacing table IDs with chunk IDs)
+    const pageChunks = tableChunkMap.get(pg.pageNum);
+    const effectiveNodeIds = pg.nodeIds.map(nid => {
+      const chunk = pageChunks?.get(nid);
+      return chunk ? chunk.chunkId : nid;
+    });
+
     // Set of nodeIds that belong on this page
-    const pageNodeIds = new Set(pg.nodeIds);
+    const pageNodeIds = new Set(effectiveNodeIds);
 
     // Track which nodes are already correctly placed
     const existingNodeIds = new Set();
@@ -148,20 +186,54 @@ export function repaginate() {
 
     // Add missing nodes in order
     let lastInserted = null;
-    for (const nid of pg.nodeIds) {
-      if (existingNodeIds.has(nid)) {
+    for (let idx = 0; idx < effectiveNodeIds.length; idx++) {
+      const effectiveId = effectiveNodeIds[idx];
+      const originalId = pg.nodeIds[idx];
+      const chunk = pageChunks?.get(originalId);
+
+      if (existingNodeIds.has(effectiveId)) {
         // Already on this page — find it for ordering reference
-        lastInserted = contentEl.querySelector(`[data-node-id="${nid}"]`);
+        lastInserted = contentEl.querySelector(`[data-node-id="${CSS.escape(effectiveId)}"]`);
         continue;
       }
 
-      // Check if node exists on another page (move it)
+      if (chunk) {
+        // This is a table chunk — render using render_table_chunk
+        try {
+          const rowIdsJson = JSON.stringify(chunk.rowIds);
+          const html = doc.render_table_chunk(
+            originalId,
+            rowIdsJson,
+            chunk.chunkId,
+            chunk.isContinuation
+          );
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          const newEl = temp.firstElementChild;
+          if (newEl) {
+            if (lastInserted && lastInserted.nextSibling) {
+              contentEl.insertBefore(newEl, lastInserted.nextSibling);
+            } else if (!lastInserted) {
+              contentEl.prepend(newEl);
+            } else {
+              contentEl.appendChild(newEl);
+            }
+            lastInserted = newEl;
+            state.nodeIdToElement.set(effectiveId, newEl);
+          }
+        } catch (e) {
+          console.warn('render_table_chunk failed:', e);
+        }
+        continue;
+      }
+
+      // Non-table node: check if it exists on another page (move it)
       let existingEl = null;
       for (const otherPage of state.pageElements) {
         if (otherPage === pageEl) continue;
         const otherContent = otherPage.querySelector('.page-content');
         if (!otherContent) continue;
-        existingEl = otherContent.querySelector(`[data-node-id="${nid}"]`);
+        existingEl = otherContent.querySelector(`[data-node-id="${CSS.escape(effectiveId)}"]`);
         if (existingEl) break;
       }
 
@@ -178,7 +250,7 @@ export function repaginate() {
       } else {
         // Render from WASM
         try {
-          const html = doc.render_node_html(nid);
+          const html = doc.render_node_html(effectiveId);
           const temp = document.createElement('div');
           temp.innerHTML = html;
           const newEl = temp.firstElementChild;
@@ -193,8 +265,8 @@ export function repaginate() {
             }
             lastInserted = newEl;
             // Update cache
-            state.nodeIdToElement.set(nid, newEl);
-            state.syncedTextCache.set(nid, getEditableText(newEl));
+            state.nodeIdToElement.set(effectiveId, newEl);
+            state.syncedTextCache.set(effectiveId, getEditableText(newEl));
           }
         } catch (_) {}
       }
@@ -202,19 +274,28 @@ export function repaginate() {
 
     // Remove nodes that don't belong on this page anymore
     contentEl.querySelectorAll(':scope > [data-node-id]').forEach(el => {
-      if (!pageNodeIds.has(el.dataset.nodeId)) {
-        // Will be picked up by the correct page's loop
-        // Only remove if it's already been placed elsewhere, or store temporarily
-        const correctPage = newNodeToPage.get(el.dataset.nodeId);
-        if (correctPage && correctPage !== pg.pageNum) {
-          // Will be moved by the correct page's iteration — leave it for now
-          // But if we've already processed that page, we need to move it
+      const nid = el.dataset.nodeId;
+      if (!pageNodeIds.has(nid)) {
+        // Check if it's a table chunk that belongs elsewhere
+        const correctPage = newNodeToPage.get(nid);
+        if (correctPage !== undefined && correctPage !== pg.pageNum) {
+          // Move node to the correct page immediately
+          const targetIdx = correctPage - 1;
+          if (targetIdx >= 0 && targetIdx < state.pageElements.length) {
+            const targetContent = state.pageElements[targetIdx].querySelector('.page-content');
+            if (targetContent) {
+              targetContent.appendChild(el);
+            }
+          }
+        } else if (el.dataset.tableSource) {
+          // Stale table chunk — remove it
+          el.remove();
         }
       }
     });
 
     // Ensure correct ordering within the page
-    reorderChildren(contentEl, pg.nodeIds);
+    reorderChildren(contentEl, effectiveNodeIds);
   }
 
   // Second pass: remove any orphaned nodes (nodes in DOM not in any page)
@@ -278,6 +359,8 @@ export function repaginate() {
         const walker = document.createTreeWalker(restoredEl, NodeFilter.SHOW_TEXT, null);
         let counted = 0, tw;
         while ((tw = walker.nextNode())) {
+          // Skip text inside non-editable elements (list markers)
+          if (isInsideNonEditable(tw, restoredEl)) continue;
           if (counted + tw.textContent.length >= savedOffset) {
             const range = document.createRange();
             range.setStart(tw, savedOffset - counted);
@@ -450,7 +533,7 @@ function syncAllTextInline() {
       const tag = el.tagName.toLowerCase();
       if ((tag === 'p' || /^h[1-6]$/.test(tag)) && el.dataset.nodeId) {
         const nodeId = el.dataset.nodeId;
-        const newText = el.textContent || '';
+        const newText = getEditableText(el);
         if (state.syncedTextCache.get(nodeId) !== newText) {
           try {
             doc.set_paragraph_text(nodeId, newText);
@@ -467,10 +550,10 @@ function syncAllTextInline() {
  */
 function substitutePageNumbers(container, pageNum, totalPages) {
   container.querySelectorAll('[data-field]').forEach(el => {
-    const field = el.dataset.field;
-    if (field === 'PageNumber' || field === 'PAGE') {
+    const field = (el.dataset.field || '').toUpperCase();
+    if (field === 'PAGENUMBER' || field === 'PAGE') {
       el.textContent = String(pageNum);
-    } else if (field === 'PageCount' || field === 'NUMPAGES') {
+    } else if (field === 'PAGECOUNT' || field === 'NUMPAGES') {
       el.textContent = String(totalPages);
     }
   });
@@ -478,10 +561,11 @@ function substitutePageNumbers(container, pageNum, totalPages) {
   let node;
   while ((node = walker.nextNode())) {
     const t = node.textContent;
-    if (t.includes('PAGE') || t.includes('NUMPAGES')) {
+    const upper = t.toUpperCase();
+    if (upper.includes('PAGE') || upper.includes('NUMPAGES')) {
       node.textContent = t
-        .replace(/\bNUMPAGES\b/g, String(totalPages))
-        .replace(/\bPAGE\b/g, String(pageNum));
+        .replace(/\bNUMPAGES\b/gi, String(totalPages))
+        .replace(/\bPAGE\b/gi, String(pageNum));
     }
   }
 }

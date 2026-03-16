@@ -507,8 +507,8 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 /* ─── Individual Page (white box with shadow) ─── */
 .doc-page{
   background:#fff;
-  width:816px;
-  min-height:1056px;
+  width:var(--page-width, 816px);
+  min-height:var(--page-height, 1056px);
   box-shadow:0 0 0 0.5px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
   border-radius:0;
   position:relative;
@@ -525,7 +525,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   font-family:Arial,sans-serif;
   min-height:24px;
   pointer-events:none;user-select:none;
-  border-bottom:1px dashed #e8eaed;
+  border-bottom:1px dashed var(--hf-border, #e8eaed);
   flex-shrink:0;
 }
 .page-header:empty{
@@ -563,7 +563,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   font-family:Arial,sans-serif;
   min-height:24px;
   pointer-events:none;user-select:none;
-  border-top:1px dashed #e8eaed;
+  border-top:1px dashed var(--hf-border, #e8eaed);
   flex-shrink:0;
 }
 
@@ -1218,7 +1218,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
    ═══════════════════════════════════════════════════ */
 .modal-overlay{
   display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,.4);z-index:300;
+  background:rgba(0,0,0,.4);z-index:10001;
   align-items:center;justify-content:center;
 }
 .modal-overlay.show{display:flex}
@@ -1753,10 +1753,12 @@ mark.find-highlight.active{background:#f9a825;color:#fff}
   .doc-page{
     box-shadow:none !important;margin:0 !important;
     width:100% !important;min-height:auto !important;
-    transform:none !important;page-break-after:always;
+    transform:none !important;
+    break-after:page;page-break-after:always;
     border:none !important;
   }
-  .doc-page:last-child{page-break-after:auto}
+  .doc-page:last-child{break-after:auto;page-break-after:auto}
+  .page-content img,.page-content table{break-inside:avoid;page-break-inside:avoid}
   /* Show headers/footers in print */
   .page-header,.page-footer{
     display:block !important;
@@ -1920,6 +1922,7 @@ mark.find-highlight.active{background:#f9a825;color:#fff}
   --shadow-sm: 0 1px 2px rgba(0,0,0,.5);
   --shadow-md: 0 2px 6px rgba(0,0,0,.6);
   --shadow-lg: 0 4px 16px rgba(0,0,0,.7);
+  --hf-border: #5f6368;
 }
 [data-theme="dark"] .logo img { filter: brightness(0) invert(1); }
 [data-theme="dark"] .welcome-logo { filter: brightness(0) invert(1); }
@@ -2168,7 +2171,9 @@ mark.find-highlight.active{background:#f9a825;color:#fff}
     box-shadow:none !important;
     border-radius:0 !important;
   }
-  .page-content{padding:16px !important}
+  .page-content{padding:16px !important;box-sizing:border-box;overflow-x:auto}
+  .page-content img{max-width:100%;height:auto}
+  .page-content table{max-width:100%}
   .page-header,.page-footer{
     padding-left:16px !important;
     padding-right:16px !important;

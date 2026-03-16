@@ -1096,12 +1096,13 @@ fn render_table(
     hyperlinks: &mut Vec<HyperlinkAnnotation>,
 ) {
     for row in rows {
-        let row_pdf_y = page_height - table_bounds.y - row.bounds.y - row.bounds.height;
+        let _row_pdf_y = page_height - table_bounds.y - row.bounds.y - row.bounds.height;
 
         // Draw cell borders, backgrounds, and content
         for cell in &row.cells {
             let cell_x = table_bounds.x + cell.bounds.x;
-            let cell_pdf_y = row_pdf_y;
+            let cell_pdf_y =
+                page_height - table_bounds.y - row.bounds.y - cell.bounds.y - cell.bounds.height;
 
             // Fill cell background if present
             if let Some(ref bg) = cell.background_color {

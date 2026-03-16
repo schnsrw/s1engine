@@ -52,4 +52,4 @@ pub use numbering::{
 };
 pub use section::{HeaderFooterRef, HeaderFooterType, SectionBreakType, SectionProperties};
 pub use styles::{Style, StyleType};
-pub use tree::{DocumentModel, ModelError};
+pub use tree::{DocumentDefaults, DocumentModel, ModelError};

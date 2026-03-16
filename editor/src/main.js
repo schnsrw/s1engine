@@ -14,6 +14,7 @@ import { initTouch } from './touch.js';
 import { trackEvent } from './analytics.js';
 import { recordError } from './error-tracking.js';
 import { initShapes } from './shapes.js';
+import { initFonts, ensureDocumentFonts } from './fonts.js';
 
 // ── Service Worker Registration ──────────────────────
 if ('serviceWorker' in navigator) {
@@ -56,6 +57,9 @@ async function boot() {
 
     state.engine = new wasm.WasmEngine();
     setDetectFormat(wasm.detect_format);
+
+    // Initialize font database and preload common fonts
+    initFonts(wasm).catch(e => console.warn('[fonts] Preload failed:', e));
 
     dot.classList.add('ok');
     label.textContent = 's1engine ready';
