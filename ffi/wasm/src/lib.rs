@@ -1421,6 +1421,72 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Set paragraph spacing (before and/or after) in points.
+    ///
+    /// `spacing_type` is one of: "before", "after".
+    /// `value_pt` is the spacing value in points.
+    pub fn set_paragraph_spacing(
+        &mut self,
+        node_id_str: &str,
+        spacing_type: &str,
+        value_pt: f64,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+        let mut attrs = s1_model::AttributeMap::new();
+        let clamped = value_pt.max(0.0);
+        match spacing_type {
+            "before" => {
+                attrs.set(AttributeKey::SpacingBefore, AttributeValue::Float(clamped));
+            }
+            "after" => {
+                attrs.set(AttributeKey::SpacingAfter, AttributeValue::Float(clamped));
+            }
+            _ => {
+                return Err(JsError::new(&format!(
+                    "Unknown spacing type: {} (use 'before' or 'after')",
+                    spacing_type
+                )))
+            }
+        }
+        doc.apply(Operation::set_attributes(para_id, attrs))
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Set paragraph keep options (keep with next, keep lines together).
+    ///
+    /// `keep_type` is one of: "keepWithNext", "keepLinesTogether".
+    /// `enabled` controls whether the option is on or off.
+    pub fn set_paragraph_keep(
+        &mut self,
+        node_id_str: &str,
+        keep_type: &str,
+        enabled: bool,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+        let mut attrs = s1_model::AttributeMap::new();
+        match keep_type {
+            "keepWithNext" => {
+                attrs.set(AttributeKey::KeepWithNext, AttributeValue::Bool(enabled));
+            }
+            "keepLinesTogether" => {
+                attrs.set(
+                    AttributeKey::KeepLinesTogether,
+                    AttributeValue::Bool(enabled),
+                );
+            }
+            _ => {
+                return Err(JsError::new(&format!(
+                    "Unknown keep type: {} (use 'keepWithNext' or 'keepLinesTogether')",
+                    keep_type
+                )))
+            }
+        }
+        doc.apply(Operation::set_attributes(para_id, attrs))
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Insert a line break (soft return) within a paragraph at a character offset.
     ///
     /// Creates a `LineBreak` node within the run at the specified offset,
@@ -1573,6 +1639,154 @@ impl WasmDocument {
                 target_run_id,
                 target_text_idx,
                 Node::new(lb_id, NodeType::LineBreak),
+            ));
+        }
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Insert a tab node at the given character offset within a paragraph.
+    ///
+    /// Like `insert_line_break`, this inserts a `Tab` node inside the
+    /// appropriate run, splitting text nodes as needed. Tab nodes render
+    /// as `&emsp;` in HTML and as proper tab stops in layout.
+    pub fn insert_tab(
+        &mut self,
+        node_id_str: &str,
+        char_offset: usize,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(node_id_str)?;
+
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+        let run_children: Vec<NodeId> = para
+            .children
+            .iter()
+            .filter(|&&c| {
+                doc.node(c)
+                    .map(|n| n.node_type == NodeType::Run)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
+
+        if run_children.is_empty() {
+            let run_id = doc.next_id();
+            let tab_id = doc.next_id();
+            let mut txn = Transaction::with_label("Insert tab");
+            txn.push(Operation::insert_node(
+                para_id,
+                0,
+                Node::new(run_id, NodeType::Run),
+            ));
+            txn.push(Operation::insert_node(
+                run_id,
+                0,
+                Node::new(tab_id, NodeType::Tab),
+            ));
+            return doc
+                .apply_transaction(&txn)
+                .map_err(|e| JsError::new(&e.to_string()));
+        }
+
+        // Walk runs to find target
+        let mut accumulated = 0usize;
+        let mut target_run_id = *run_children.last().unwrap();
+        let mut local_offset = 0usize;
+        for &run_id in &run_children {
+            let rlen = run_char_len(doc.model(), run_id);
+            if char_offset <= accumulated + rlen {
+                target_run_id = run_id;
+                local_offset = char_offset - accumulated;
+                break;
+            }
+            accumulated += rlen;
+        }
+
+        let run = doc
+            .node(target_run_id)
+            .ok_or_else(|| JsError::new("Run not found"))?;
+        let run_children_ids: Vec<NodeId> = run.children.clone();
+        let mut text_accumulated = 0usize;
+        let mut target_text_idx = 0usize;
+        let mut text_local_offset = local_offset;
+        let mut found_text = false;
+
+        for (idx, &child_id) in run_children_ids.iter().enumerate() {
+            if let Some(child) = doc.node(child_id) {
+                if child.node_type == NodeType::Text {
+                    let len = child
+                        .text_content
+                        .as_ref()
+                        .map(|t| t.chars().count())
+                        .unwrap_or(0);
+                    if local_offset <= text_accumulated + len {
+                        target_text_idx = idx;
+                        text_local_offset = local_offset - text_accumulated;
+                        found_text = true;
+                        break;
+                    }
+                    text_accumulated += len;
+                } else if matches!(child.node_type, NodeType::LineBreak | NodeType::Tab) {
+                    if local_offset <= text_accumulated + 1 {
+                        target_text_idx = idx;
+                        text_local_offset = 0;
+                        found_text = true;
+                        break;
+                    }
+                    text_accumulated += 1;
+                }
+            }
+        }
+
+        let tab_id = doc.next_id();
+        let mut txn = Transaction::with_label("Insert tab");
+
+        if found_text && text_local_offset > 0 {
+            let text_node_id = run_children_ids[target_text_idx];
+            if let Some(text_node) = doc.node(text_node_id) {
+                if text_node.node_type == NodeType::Text {
+                    let content = text_node.text_content.clone().unwrap_or_default();
+                    let char_len = content.chars().count();
+                    let tail: String = content.chars().skip(text_local_offset).collect();
+                    let tail_len = char_len - text_local_offset;
+
+                    if tail_len > 0 {
+                        txn.push(Operation::delete_text(
+                            text_node_id,
+                            text_local_offset,
+                            tail_len,
+                        ));
+                    }
+                    txn.push(Operation::insert_node(
+                        target_run_id,
+                        target_text_idx + 1,
+                        Node::new(tab_id, NodeType::Tab),
+                    ));
+                    if !tail.is_empty() {
+                        let new_text_id = doc.next_id();
+                        txn.push(Operation::insert_node(
+                            target_run_id,
+                            target_text_idx + 2,
+                            Node::text(new_text_id, &tail),
+                        ));
+                    }
+                } else {
+                    txn.push(Operation::insert_node(
+                        target_run_id,
+                        target_text_idx + 1,
+                        Node::new(tab_id, NodeType::Tab),
+                    ));
+                }
+            }
+        } else {
+            txn.push(Operation::insert_node(
+                target_run_id,
+                target_text_idx,
+                Node::new(tab_id, NodeType::Tab),
             ));
         }
 
@@ -2128,6 +2342,37 @@ impl WasmDocument {
             };
             json.push_str(&format!(",\"listFormat\":\"{}\"", fmt_name));
             json.push_str(&format!(",\"listLevel\":{}", li.level));
+        }
+        // Paragraph indentation (in points)
+        if let Some(v) = para.attributes.get_f64(&AttributeKey::IndentLeft) {
+            json.push_str(&format!(",\"indentLeft\":{:.2}", v));
+        }
+        if let Some(v) = para.attributes.get_f64(&AttributeKey::IndentRight) {
+            json.push_str(&format!(",\"indentRight\":{:.2}", v));
+        }
+        if let Some(v) = para.attributes.get_f64(&AttributeKey::IndentFirstLine) {
+            json.push_str(&format!(",\"indentFirstLine\":{:.2}", v));
+        }
+        // Paragraph spacing (in points)
+        if let Some(v) = para.attributes.get_f64(&AttributeKey::SpacingBefore) {
+            json.push_str(&format!(",\"spacingBefore\":{:.2}", v));
+        }
+        if let Some(v) = para.attributes.get_f64(&AttributeKey::SpacingAfter) {
+            json.push_str(&format!(",\"spacingAfter\":{:.2}", v));
+        }
+        // Line spacing
+        if let Some(AttributeValue::LineSpacing(ls)) = para.attributes.get(&AttributeKey::LineSpacing) {
+            use s1_model::LineSpacing;
+            let ls_str = match ls {
+                LineSpacing::Single => "1.0".to_string(),
+                LineSpacing::OnePointFive => "1.5".to_string(),
+                LineSpacing::Double => "2.0".to_string(),
+                LineSpacing::Multiple(f) => format!("{:.2}", f),
+                LineSpacing::Exact(v) => format!("exact:{:.2}", v),
+                LineSpacing::AtLeast(v) => format!("atLeast:{:.2}", v),
+                _ => "1.15".to_string(),
+            };
+            json.push_str(&format!(",\"lineSpacing\":\"{}\"", ls_str));
         }
         json.push('}');
         Ok(json)
@@ -3155,6 +3400,109 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Set image wrap mode.
+    ///
+    /// `mode` is one of: "inline", "wrapLeft", "wrapRight", "wrapBoth",
+    /// "topAndBottom", "behind", "inFront".
+    /// Defaults to "inline" if not set.
+    pub fn set_image_wrap_mode(&mut self, image_id_str: &str, mode: &str) -> Result<(), JsError> {
+        let valid = [
+            "inline",
+            "wrapLeft",
+            "wrapRight",
+            "wrapBoth",
+            "topAndBottom",
+            "behind",
+            "inFront",
+        ];
+        if !valid.contains(&mode) {
+            return Err(JsError::new(&format!(
+                "Invalid wrap mode '{}'. Expected one of: {}",
+                mode,
+                valid.join(", ")
+            )));
+        }
+        let doc = self.doc_mut()?;
+        let img_id = parse_node_id(image_id_str)?;
+        let mut attrs = s1_model::AttributeMap::new();
+        attrs.set(
+            AttributeKey::ImageWrapType,
+            AttributeValue::String(mode.to_string()),
+        );
+        doc.apply(Operation::set_attributes(img_id, attrs))
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Get the wrap mode for an image node.
+    ///
+    /// Returns one of: "inline", "wrapLeft", "wrapRight", "wrapBoth",
+    /// "topAndBottom", "behind", "inFront". Defaults to "inline".
+    pub fn get_image_wrap_mode(&self, image_id_str: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let img_id = parse_node_id(image_id_str)?;
+        let img = doc
+            .node(img_id)
+            .ok_or_else(|| JsError::new("Image not found"))?;
+        let mode = img
+            .attributes
+            .get_string(&AttributeKey::ImageWrapType)
+            .unwrap_or("inline");
+        Ok(mode.to_string())
+    }
+
+    // ─── UXP-22: Multi-Column Layout API ────────────────────────
+
+    /// Set the number of columns for a section.
+    ///
+    /// `section_index`: 0-based section index (0 for the default/first section).
+    /// `columns`: number of columns (1-6). Pass 1 for single-column layout.
+    /// `spacing_pt`: spacing between columns in points (default: 36.0 = 0.5in).
+    pub fn set_section_columns(
+        &mut self,
+        section_index: usize,
+        columns: u32,
+        spacing_pt: f64,
+    ) -> Result<(), JsError> {
+        if columns == 0 || columns > 6 {
+            return Err(JsError::new("Column count must be between 1 and 6"));
+        }
+        if spacing_pt < 0.0 {
+            return Err(JsError::new("Column spacing cannot be negative"));
+        }
+        let doc = self.doc_mut()?;
+        let sections = doc.model_mut().sections_mut();
+        if sections.is_empty() {
+            sections.push(s1_model::SectionProperties::default());
+        }
+        if section_index >= sections.len() {
+            return Err(JsError::new(&format!(
+                "Section index {} out of range (0..{})",
+                section_index,
+                sections.len()
+            )));
+        }
+        sections[section_index].columns = columns;
+        sections[section_index].column_spacing = spacing_pt;
+        Ok(())
+    }
+
+    /// Get the column configuration for a section as JSON.
+    ///
+    /// Returns JSON: `{"columns":2,"spacing":36.0}`
+    pub fn get_section_columns(&self, section_index: usize) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let sections = doc.sections();
+        if section_index >= sections.len() {
+            // Default section
+            return Ok("{\"columns\":1,\"spacing\":36}".to_string());
+        }
+        let sec = &sections[section_index];
+        Ok(format!(
+            "{{\"columns\":{},\"spacing\":{:.1}}}",
+            sec.columns, sec.column_spacing
+        ))
+    }
+
     // ─── P.4: Structural Elements API ───────────────────────────
 
     /// Set a hyperlink URL on a run.
@@ -3312,6 +3660,30 @@ impl WasmDocument {
         doc.apply_transaction(&txn)
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(format!("{}:{}", para_id.replica, para_id.counter))
+    }
+
+    /// Insert a column break inside the specified paragraph.
+    ///
+    /// Inserts a ColumnBreak node at the end of the paragraph's children.
+    /// Returns the column break node ID.
+    pub fn insert_column_break(&mut self, para_id_str: &str) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let para_id = parse_node_id(para_id_str)?;
+        let para = doc
+            .node(para_id)
+            .ok_or_else(|| JsError::new("Paragraph not found"))?;
+        let index = para.children.len();
+
+        let cb_id = doc.next_id();
+        let mut txn = Transaction::with_label("Insert column break");
+        txn.push(Operation::insert_node(
+            para_id,
+            index,
+            Node::new(cb_id, NodeType::ColumnBreak),
+        ));
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(format!("{}:{}", cb_id.replica, cb_id.counter))
     }
 
     /// Insert a section break after the given node.
@@ -3641,13 +4013,15 @@ impl WasmDocument {
         let mut entries = Vec::new();
         for sec in sections {
             entries.push(format!(
-                "{{\"pageWidth\":{},\"pageHeight\":{},\"marginTop\":{},\"marginBottom\":{},\"marginLeft\":{},\"marginRight\":{}}}",
+                "{{\"pageWidth\":{},\"pageHeight\":{},\"marginTop\":{},\"marginBottom\":{},\"marginLeft\":{},\"marginRight\":{},\"columns\":{},\"columnSpacing\":{:.1}}}",
                 sec.page_width,
                 sec.page_height,
                 sec.margin_top,
                 sec.margin_bottom,
                 sec.margin_left,
                 sec.margin_right,
+                sec.columns,
+                sec.column_spacing,
             ));
         }
         Ok(format!("[{}]", entries.join(",")))
@@ -4879,6 +5253,149 @@ impl WasmDocument {
         }
         Ok(format!("[{}]", notes.join(",")))
     }
+
+    // ─── FS-15: Document Statistics API ────────────────────
+
+    /// Get document statistics as JSON.
+    ///
+    /// Returns `{"words":N,"characters":N,"charactersNoSpaces":N,"paragraphs":N,"pages":N}`.
+    pub fn get_document_stats_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let text = doc.to_plain_text();
+        let paragraphs = doc.paragraph_count();
+
+        let characters: usize = text.chars().count();
+        let characters_no_spaces: usize = text.chars().filter(|c| !c.is_whitespace()).count();
+        let words = count_words_in_str(&text);
+
+        // Page count from layout engine (best-effort; falls back to 1 on error)
+        let pages = {
+            let font_db = s1_text::FontDatabase::empty();
+            match doc.layout(&font_db) {
+                Ok(layout) => layout.pages.len().max(1),
+                Err(_) => 1usize,
+            }
+        };
+
+        Ok(format!(
+            "{{\"words\":{},\"characters\":{},\"charactersNoSpaces\":{},\"paragraphs\":{},\"pages\":{}}}",
+            words, characters, characters_no_spaces, paragraphs, pages
+        ))
+    }
+
+    /// Count words in a selection range.
+    ///
+    /// Takes start/end node IDs and character offsets. Returns the word count
+    /// for text within that range.
+    pub fn get_selection_word_count(
+        &self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+    ) -> Result<usize, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let start_id = parse_node_id(start_node_str)?;
+        let end_id = parse_node_id(end_node_str)?;
+
+        let body_id = model
+            .body_id()
+            .ok_or_else(|| JsError::new("No body"))?;
+        let body = model
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+
+        // Collect text from the selected range
+        let mut text = String::new();
+        let mut inside = false;
+        let same_node = start_id == end_id;
+
+        for &child_id in &body.children {
+            if model.node(child_id).is_none() {
+                continue;
+            }
+            // Recurse into tables and other containers
+            let para_ids = collect_paragraph_ids_recursive(model, child_id);
+            for para_id in para_ids {
+                if para_id == start_id && same_node {
+                    // Single-node selection
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let s = start_offset.min(chars.len());
+                    let e = end_offset.min(chars.len());
+                    let slice: String = chars[s..e].iter().collect();
+                    text.push_str(&slice);
+                    break;
+                } else if para_id == start_id {
+                    inside = true;
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let s = start_offset.min(chars.len());
+                    let slice: String = chars[s..].iter().collect();
+                    text.push_str(&slice);
+                    text.push(' ');
+                } else if para_id == end_id {
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let e = end_offset.min(chars.len());
+                    let slice: String = chars[..e].iter().collect();
+                    text.push_str(&slice);
+                    inside = false;
+                    break;
+                } else if inside {
+                    let para_text = extract_paragraph_text(model, para_id);
+                    text.push_str(&para_text);
+                    text.push(' ');
+                }
+            }
+            if !inside && (same_node || para_ids_contain(model, child_id, end_id)) {
+                break;
+            }
+        }
+
+        Ok(count_words_in_str(&text))
+    }
+}
+
+/// Count words in a string (split on whitespace, filter empty).
+fn count_words_in_str(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+/// Recursively collect paragraph NodeIds from a node (handles tables, sections, etc.).
+fn collect_paragraph_ids_recursive(model: &DocumentModel, node_id: NodeId) -> Vec<NodeId> {
+    let node = match model.node(node_id) {
+        Some(n) => n,
+        None => return vec![],
+    };
+    match node.node_type {
+        NodeType::Paragraph => vec![node_id],
+        _ => {
+            let mut result = Vec::new();
+            for &child_id in &node.children {
+                result.extend(collect_paragraph_ids_recursive(model, child_id));
+            }
+            result
+        }
+    }
+}
+
+/// Check if a subtree contains a specific node ID.
+fn para_ids_contain(model: &DocumentModel, root_id: NodeId, target: NodeId) -> bool {
+    if root_id == target {
+        return true;
+    }
+    let node = match model.node(root_id) {
+        Some(n) => n,
+        None => return false,
+    };
+    for &child_id in &node.children {
+        if para_ids_contain(model, child_id, target) {
+            return true;
+        }
+    }
+    false
 }
 
 // --- WasmDocumentBuilder ---
@@ -6687,8 +7204,31 @@ fn render_node(model: &DocumentModel, node_id: NodeId, html: &mut String) {
         }
         NodeType::BookmarkStart => {
             if let Some(name) = node.attributes.get_string(&AttributeKey::BookmarkName) {
-                html.push_str(&format!("<a id=\"{}\"></a>", escape_html(name)));
+                html.push_str(&format!(
+                    "<span class=\"bookmark-marker\" data-bookmark=\"{}\" data-node-id=\"{}:{}\" \
+                     contenteditable=\"false\" title=\"Bookmark: {}\">\
+                     <a id=\"{}\"></a></span>",
+                    escape_html(name),
+                    node_id.replica,
+                    node_id.counter,
+                    escape_html(name),
+                    escape_html(name)
+                ));
             }
+        }
+        NodeType::Equation => {
+            let latex = node
+                .attributes
+                .get_string(&AttributeKey::EquationSource)
+                .unwrap_or("");
+            html.push_str(&format!(
+                "<span class=\"equation-inline\" data-equation=\"{}\" data-node-id=\"{}:{}\" \
+                 contenteditable=\"false\" title=\"Equation (double-click to edit)\">{}</span>",
+                escape_html(latex),
+                node_id.replica,
+                node_id.counter,
+                escape_html(latex)
+            ));
         }
         NodeType::CommentStart => {
             let author = node
@@ -6984,6 +7524,13 @@ fn render_paragraph(
         para_id.replica, para_id.counter, list_type_attr
     );
 
+    // FS-07: Add dir="rtl" if paragraph text starts with RTL characters
+    let dir_attr = if paragraph_starts_rtl(model, para_id) {
+        " dir=\"rtl\""
+    } else {
+        ""
+    };
+
     // List marker prefix — use computed ordinal if available, fall back to start
     let list_marker = list_info.as_ref().map(|li| {
         let n = list_ordinal.unwrap_or(li.start.unwrap_or(1));
@@ -7076,7 +7623,7 @@ fn render_paragraph(
             } else {
                 format!(" style=\"{heading_style}\"")
             };
-            html.push_str(&format!("<h{l}{nid_attr}{h_style_attr}>"));
+            html.push_str(&format!("<h{l}{nid_attr}{h_style_attr}{dir_attr}>"));
             render_inline_children(model, para_id, html);
             // Ensure empty headings are editable (non-collapsing)
             if is_empty_paragraph(model, para_id) {
@@ -7152,7 +7699,7 @@ fn render_paragraph(
             } else {
                 format!(" style=\"{para_style}\"")
             };
-            html.push_str(&format!("<p{nid_attr}{p_style_attr}{data_style_attr}>"));
+            html.push_str(&format!("<p{nid_attr}{p_style_attr}{data_style_attr}{dir_attr}>"));
             if let Some(marker) = list_marker {
                 html.push_str(&format!(
                     "<span class=\"list-marker\" style=\"user-select:none\" contenteditable=\"false\">{marker}</span>"
@@ -7591,7 +8138,14 @@ fn render_paragraph_clean_partial(
         _ => "p".to_string(),
     };
 
-    html.push_str(&format!("<{tag}{style_attr}{list_attrs}>"));
+    // FS-07: Add dir="rtl" if paragraph text starts with RTL characters
+    let dir_attr = if paragraph_starts_rtl(model, para_id) {
+        " dir=\"rtl\""
+    } else {
+        ""
+    };
+
+    html.push_str(&format!("<{tag}{style_attr}{list_attrs}{dir_attr}>"));
 
     // Walk children (runs, images, etc.) with character offset tracking
     let sel_start = start_char.unwrap_or(0);
@@ -7798,12 +8352,26 @@ fn render_image_clean(model: &DocumentModel, img_id: NodeId, html: &mut String) 
                 .attributes
                 .get_string(&AttributeKey::ImageAltText)
                 .unwrap_or("image");
+            let wrap_mode = img
+                .attributes
+                .get_string(&AttributeKey::ImageWrapType)
+                .unwrap_or("inline");
             let mut img_style = String::from("max-width:100%;height:auto;");
             if let Some(w) = img.attributes.get_f64(&AttributeKey::ImageWidth) {
                 img_style.push_str(&format!("width:{w}pt;"));
             }
             if let Some(h) = img.attributes.get_f64(&AttributeKey::ImageHeight) {
                 img_style.push_str(&format!("height:{h}pt;"));
+            }
+            // UXP-21: Apply CSS for image wrap mode in clean render
+            match wrap_mode {
+                "wrapLeft" => img_style.push_str("float:left;margin:8px 12px 8px 0;"),
+                "wrapRight" => img_style.push_str("float:right;margin:8px 0 8px 12px;"),
+                "wrapBoth" => img_style.push_str("display:block;margin:8px auto;"),
+                "topAndBottom" => img_style.push_str("display:block;clear:both;margin:16px 0;"),
+                "behind" => img_style.push_str("position:relative;z-index:-1;"),
+                "inFront" => img_style.push_str("position:relative;z-index:10;"),
+                _ => {}
             }
             html.push_str(&format!(
                 "<img src=\"data:{mime};base64,{b64}\" style=\"{img_style}\" alt=\"{}\"/>",
@@ -7920,6 +8488,10 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
                 .attributes
                 .get_string(&AttributeKey::ImageAltText)
                 .unwrap_or("image");
+            let wrap_mode = img
+                .attributes
+                .get_string(&AttributeKey::ImageWrapType)
+                .unwrap_or("inline");
             let mut style = String::from("max-width:100%;height:auto;margin:8px 0;");
             if let Some(w) = img.attributes.get_f64(&AttributeKey::ImageWidth) {
                 style.push_str(&format!("width:{w}pt;"));
@@ -7927,8 +8499,29 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
             if let Some(h) = img.attributes.get_f64(&AttributeKey::ImageHeight) {
                 style.push_str(&format!("height:{h}pt;"));
             }
+            // UXP-21: Apply CSS for image wrap mode
+            match wrap_mode {
+                "wrapLeft" => style.push_str("float:left;margin:8px 12px 8px 0;"),
+                "wrapRight" => style.push_str("float:right;margin:8px 0 8px 12px;"),
+                "wrapBoth" => style.push_str("display:block;margin:8px auto;"),
+                "topAndBottom" => {
+                    style.push_str("display:block;clear:both;margin:16px 0;");
+                }
+                "behind" => {
+                    style.push_str("position:relative;z-index:-1;");
+                }
+                "inFront" => {
+                    style.push_str("position:relative;z-index:10;");
+                }
+                _ => {} // "inline" — default, no extra styles
+            }
+            let wrap_attr = if wrap_mode != "inline" {
+                format!(" data-wrap-mode=\"{}\"", wrap_mode)
+            } else {
+                String::new()
+            };
             html.push_str(&format!(
-                "<img data-node-id=\"{}:{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"/>",
+                "<img data-node-id=\"{}:{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"{wrap_attr}/>",
                 img_id.replica, img_id.counter, escape_html(alt)
             ));
             return;
@@ -8003,6 +8596,49 @@ fn is_empty_paragraph(model: &DocumentModel, para_id: NodeId) -> bool {
         }
     }
     true
+}
+
+/// FS-07: Detect if a paragraph's text starts with RTL characters (Arabic/Hebrew).
+/// Returns true if the first alphabetic character is in an RTL script range.
+fn paragraph_starts_rtl(model: &DocumentModel, para_id: NodeId) -> bool {
+    let para = match model.node(para_id) {
+        Some(n) => n,
+        None => return false,
+    };
+    for &child_id in &para.children {
+        if let Some(child) = model.node(child_id) {
+            if child.node_type == NodeType::Run {
+                for &sub_id in &child.children {
+                    if let Some(sub) = model.node(sub_id) {
+                        if sub.node_type == NodeType::Text {
+                            if let Some(content) = sub.text_content.as_deref() {
+                                for ch in content.chars() {
+                                    if ch.is_whitespace() {
+                                        continue;
+                                    }
+                                    // Arabic: U+0600-U+06FF, U+0750-U+077F, U+08A0-U+08FF
+                                    // Hebrew: U+0590-U+05FF
+                                    let cp = ch as u32;
+                                    if (0x0590..=0x05FF).contains(&cp)
+                                        || (0x0600..=0x06FF).contains(&cp)
+                                        || (0x0750..=0x077F).contains(&cp)
+                                        || (0x08A0..=0x08FF).contains(&cp)
+                                        || (0xFB50..=0xFDFF).contains(&cp)
+                                        || (0xFE70..=0xFEFF).contains(&cp)
+                                    {
+                                        return true;
+                                    }
+                                    // If first non-whitespace char is not RTL, return false
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Convert a BorderStyle enum to a CSS border-style keyword.
@@ -9447,6 +10083,38 @@ fn render_node_to_html(model: &DocumentModel, node: &Node) -> String {
             format!(
                 "<sup class=\"endnote-ref\" data-endnote-ref=\"{}\" title=\"Endnote {}\">{}</sup>",
                 en_num, en_num, en_num
+            )
+        }
+        NodeType::BookmarkStart => {
+            if let Some(name) = node.attributes.get_string(&AttributeKey::BookmarkName) {
+                let nid = node.id;
+                format!(
+                    "<span class=\"bookmark-marker\" data-bookmark=\"{}\" data-node-id=\"{}:{}\" \
+                     contenteditable=\"false\" title=\"Bookmark: {}\">\
+                     <a id=\"{}\"></a></span>",
+                    html_escape(name),
+                    nid.replica,
+                    nid.counter,
+                    html_escape(name),
+                    html_escape(name)
+                )
+            } else {
+                String::new()
+            }
+        }
+        NodeType::Equation => {
+            let latex = node
+                .attributes
+                .get_string(&AttributeKey::EquationSource)
+                .unwrap_or("");
+            let nid = node.id;
+            format!(
+                "<span class=\"equation-inline\" data-equation=\"{}\" data-node-id=\"{}:{}\" \
+                 contenteditable=\"false\" title=\"Equation (double-click to edit)\">{}</span>",
+                html_escape(latex),
+                nid.replica,
+                nid.counter,
+                html_escape(latex)
             )
         }
         _ => String::new(),
@@ -11454,6 +12122,158 @@ mod tests {
         assert_eq!(doc.paragraph_count().unwrap(), initial_count + 1);
         doc.undo().unwrap();
         assert_eq!(doc.paragraph_count().unwrap(), initial_count);
+    }
+
+    #[test]
+    fn test_set_image_wrap_mode() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("p").unwrap();
+        let (_img_para_id, img_id) = insert_image_test_helper(&mut doc, &p);
+        let img_id_str = format!("{}:{}", img_id.replica, img_id.counter);
+
+        // Default is "inline"
+        let mode = doc.get_image_wrap_mode(&img_id_str).unwrap();
+        assert_eq!(mode, "inline");
+
+        // Set to wrapLeft
+        doc.set_image_wrap_mode(&img_id_str, "wrapLeft").unwrap();
+        let mode = doc.get_image_wrap_mode(&img_id_str).unwrap();
+        assert_eq!(mode, "wrapLeft");
+
+        // Set to behind
+        doc.set_image_wrap_mode(&img_id_str, "behind").unwrap();
+        let mode = doc.get_image_wrap_mode(&img_id_str).unwrap();
+        assert_eq!(mode, "behind");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_image_wrap_mode_invalid() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("p").unwrap();
+        let (_img_para_id, img_id) = insert_image_test_helper(&mut doc, &p);
+        let img_id_str = format!("{}:{}", img_id.replica, img_id.counter);
+        // JsError::new panics on non-wasm targets; in real wasm it returns Err
+        let _ = doc.set_image_wrap_mode(&img_id_str, "invalid");
+    }
+
+    #[test]
+    fn test_image_wrap_mode_in_html() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        let p = doc.append_paragraph("Hello").unwrap();
+        let (_img_para_id, img_id) = insert_image_test_helper(&mut doc, &p);
+        let img_id_str = format!("{}:{}", img_id.replica, img_id.counter);
+
+        doc.set_image_wrap_mode(&img_id_str, "wrapRight").unwrap();
+        let html = doc.to_html().unwrap();
+        assert!(
+            html.contains("data-wrap-mode=\"wrapRight\""),
+            "HTML should contain wrap mode data attribute: {}",
+            &html[..html.len().min(500)]
+        );
+        assert!(
+            html.contains("float:right"),
+            "HTML should contain float:right for wrapRight"
+        );
+    }
+
+    #[test]
+    fn test_set_section_columns() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+
+        // Default is 1 column
+        let json = doc.get_section_columns(0).unwrap();
+        let parsed: String = json;
+        assert!(
+            parsed.contains("\"columns\":1"),
+            "Default should be 1 column: {}",
+            parsed
+        );
+
+        // Set to 2 columns
+        doc.set_section_columns(0, 2, 36.0).unwrap();
+        let json = doc.get_section_columns(0).unwrap();
+        assert!(
+            json.contains("\"columns\":2"),
+            "Should be 2 columns: {}",
+            json
+        );
+        assert!(
+            json.contains("\"spacing\":36.0"),
+            "Should have 36pt spacing: {}",
+            json
+        );
+
+        // Set to 3 columns with custom spacing
+        doc.set_section_columns(0, 3, 18.0).unwrap();
+        let json = doc.get_section_columns(0).unwrap();
+        assert!(
+            json.contains("\"columns\":3"),
+            "Should be 3 columns: {}",
+            json
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_section_columns_zero() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+        // JsError::new panics on non-wasm targets; in real wasm it returns Err
+        let _ = doc.set_section_columns(0, 0, 36.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_section_columns_too_many() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+        let _ = doc.set_section_columns(0, 7, 36.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_section_columns_negative_spacing() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+        let _ = doc.set_section_columns(0, 2, -10.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_section_columns_invalid_index() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+        let _ = doc.set_section_columns(99, 2, 36.0);
+    }
+
+    #[test]
+    fn test_sections_json_includes_columns() {
+        let engine = WasmEngine::new();
+        let mut doc = engine.create();
+        doc.append_paragraph("Test").unwrap();
+        doc.set_section_columns(0, 2, 24.0).unwrap();
+
+        let json = doc.get_sections_json().unwrap();
+        assert!(
+            json.contains("\"columns\":2"),
+            "Sections JSON should include columns: {}",
+            json
+        );
+        assert!(
+            json.contains("\"columnSpacing\":24.0"),
+            "Sections JSON should include spacing: {}",
+            json
+        );
     }
 
     // ─── P.4: Structural Elements Tests ─────────────────────────

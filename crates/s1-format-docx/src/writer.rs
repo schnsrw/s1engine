@@ -28,10 +28,10 @@ use crate::style_writer::write_styles_xml;
 /// - `word/_rels/document.xml.rels`
 /// - `word/styles.xml` (if styles exist)
 /// - `docProps/core.xml` (if metadata exists)
-// TODO: OOXML constraint validation before writing:
-// - Empty table cells should contain at least one <w:p/>
-// - Section properties should have pgSz and pgMar
-// - Runs should not be empty (but we allow it for flexibility)
+// OOXML constraint validation (ECMA-376):
+// - Empty table cells: handled in content_writer::write_table_cell (inserts <w:p/>)
+// - Empty runs: handled in content_writer::write_run (skips empty non-revision runs)
+// - Required pgSz/pgMar: handled in write_document_xml_with_sections (injects default sectPr)
 pub fn write(doc: &DocumentModel) -> Result<Vec<u8>, DocxError> {
     let buf = Vec::new();
     let mut zip = ZipWriter::new(Cursor::new(buf));
@@ -233,11 +233,19 @@ fn write_document_xml_with_sections(
 ) -> (String, Vec<ImageRelEntry>, Vec<HyperlinkRelEntry>) {
     use s1_model::{AttributeKey, NodeId, NodeType};
 
-    let (xml, image_rels, hyperlink_rels) = write_document_xml(doc);
+    let (mut xml, image_rels, hyperlink_rels) = write_document_xml(doc);
 
-    // If there are sections, we need to inject sectPr elements.
-    // The approach: rewrite the body with section properties.
+    // OOXML constraint (ECMA-376 §17.6): every document body should have a
+    // sectPr with pgSz and pgMar.  When the model has no explicit sections we
+    // inject a default sectPr (US Letter, 1-inch margins) before </w:body>.
     if doc.sections().is_empty() {
+        let default_sect = s1_model::SectionProperties::default();
+        let sect_inner = crate::section_writer::write_section_properties(&default_sect, &[]);
+        // Inject just before closing </w:body>
+        if let Some(pos) = xml.rfind("</w:body>") {
+            let sect_xml = format!("<w:sectPr>{sect_inner}</w:sectPr>");
+            xml.insert_str(pos, &sect_xml);
+        }
         return (xml, image_rels, hyperlink_rels);
     }
 
@@ -2672,5 +2680,258 @@ mod tests {
         // The section should not have header references (the invalid one was skipped)
         // Note: section may or may not be preserved depending on whether it was the
         // only section, but we should not crash or produce invalid XML.
+    }
+
+    // -----------------------------------------------------------------------
+    // OOXML constraint validation tests (DOCX-10)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ooxml_empty_table_cell_gets_default_paragraph() {
+        // ECMA-376 §17.4.17: every <w:tc> must contain at least one <w:p>.
+        // Build a table with a cell that has zero children and verify the
+        // written XML contains a <w:p/> inside that cell.
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let tbl_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(tbl_id, NodeType::Table))
+            .unwrap();
+
+        let row_id = doc.next_id();
+        doc.insert_node(tbl_id, 0, Node::new(row_id, NodeType::TableRow))
+            .unwrap();
+
+        // Cell with NO children at all
+        let cell_id = doc.next_id();
+        doc.insert_node(row_id, 0, Node::new(cell_id, NodeType::TableCell))
+            .unwrap();
+
+        let bytes = write(&doc).unwrap();
+
+        // Read the document.xml from the ZIP and check for <w:p/> inside <w:tc>
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut doc_xml = String::new();
+        {
+            use std::io::Read as _;
+            let mut f = archive.by_name("word/document.xml").unwrap();
+            f.read_to_string(&mut doc_xml).unwrap();
+        }
+
+        // The cell must contain at least one paragraph element
+        assert!(
+            doc_xml.contains("<w:tc><w:p/></w:tc>")
+                || doc_xml.contains("<w:tc><w:tcPr>") && doc_xml.contains("<w:p/></w:tc>"),
+            "Empty table cell should get a default <w:p/> — got: {}",
+            &doc_xml[doc_xml.find("<w:tc>").unwrap_or(0)
+                ..doc_xml
+                    .find("</w:tc>")
+                    .map(|p| p + 7)
+                    .unwrap_or(doc_xml.len())]
+        );
+
+        // Round-trip should succeed
+        let doc2 = crate::read(&bytes).unwrap();
+        let body2 = doc2.node(doc2.body_id().unwrap()).unwrap();
+        let tbl2 = doc2.node(body2.children[0]).unwrap();
+        assert_eq!(tbl2.node_type, NodeType::Table);
+    }
+
+    #[test]
+    fn ooxml_empty_runs_are_omitted() {
+        // Empty <w:r></w:r> elements (no text, no special content) are wasteful
+        // and should be omitted from the output.
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        // Run 1: empty (no children) — should be omitted
+        let empty_run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(empty_run_id, NodeType::Run))
+            .unwrap();
+
+        // Run 2: has text content — should be kept
+        let good_run_id = doc.next_id();
+        doc.insert_node(para_id, 1, Node::new(good_run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(good_run_id, 0, Node::text(text_id, "Hello"))
+            .unwrap();
+
+        let bytes = write(&doc).unwrap();
+
+        // Read the document.xml from the ZIP
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut doc_xml = String::new();
+        {
+            use std::io::Read as _;
+            let mut f = archive.by_name("word/document.xml").unwrap();
+            f.read_to_string(&mut doc_xml).unwrap();
+        }
+
+        // Count <w:r> occurrences — should be exactly 1 (the non-empty run)
+        let run_count = doc_xml.matches("<w:r>").count();
+        assert_eq!(
+            run_count, 1,
+            "Expected exactly 1 <w:r> (empty run should be omitted), got {run_count} in: {doc_xml}"
+        );
+
+        // Verify the text survived
+        assert!(doc_xml.contains("Hello"));
+    }
+
+    #[test]
+    fn ooxml_empty_run_with_revision_is_preserved() {
+        // Runs with revision tracking attributes should NOT be omitted even
+        // if they have no text children.
+        use s1_model::{AttributeKey, AttributeValue};
+
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        // Empty run with FormatChange revision — should be preserved
+        let rev_run_id = doc.next_id();
+        let mut rev_run = Node::new(rev_run_id, NodeType::Run);
+        rev_run.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("FormatChange".into()),
+        );
+        rev_run
+            .attributes
+            .set(AttributeKey::RevisionId, AttributeValue::Int(42));
+        rev_run.attributes.set(
+            AttributeKey::RevisionAuthor,
+            AttributeValue::String("test".into()),
+        );
+        doc.insert_node(para_id, 0, rev_run).unwrap();
+
+        let bytes = write(&doc).unwrap();
+
+        // Read the document.xml
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut doc_xml = String::new();
+        {
+            use std::io::Read as _;
+            let mut f = archive.by_name("word/document.xml").unwrap();
+            f.read_to_string(&mut doc_xml).unwrap();
+        }
+
+        // The revision run should still be present even though it has no text
+        assert!(
+            doc_xml.contains("<w:r>"),
+            "Revision run should be preserved even without text: {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains("rPrChange"),
+            "FormatChange should emit rPrChange: {doc_xml}"
+        );
+    }
+
+    #[test]
+    fn ooxml_default_section_when_no_sections_defined() {
+        // ECMA-376 §17.6: the document body should have sectPr with pgSz
+        // and pgMar.  When no sections are defined in the model, the writer
+        // should inject a default sectPr (US Letter, 1-inch margins).
+        let doc = make_simple_doc("Minimal doc");
+        assert!(
+            doc.sections().is_empty(),
+            "precondition: no sections in model"
+        );
+
+        let bytes = write(&doc).unwrap();
+
+        // Read the raw document.xml
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut doc_xml = String::new();
+        {
+            use std::io::Read as _;
+            let mut f = archive.by_name("word/document.xml").unwrap();
+            f.read_to_string(&mut doc_xml).unwrap();
+        }
+
+        // Must contain sectPr with pgSz and pgMar
+        assert!(
+            doc_xml.contains("<w:sectPr>"),
+            "document.xml should have <w:sectPr>: {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains("<w:pgSz"),
+            "sectPr should contain <w:pgSz>: {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains("<w:pgMar"),
+            "sectPr should contain <w:pgMar>: {doc_xml}"
+        );
+
+        // Verify default US Letter dimensions in twips (612pt = 12240, 792pt = 15840)
+        assert!(
+            doc_xml.contains(r#"w:w="12240""#),
+            "pgSz width should be 12240 twips (US Letter): {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains(r#"w:h="15840""#),
+            "pgSz height should be 15840 twips (US Letter): {doc_xml}"
+        );
+
+        // Verify 1-inch margins (72pt = 1440 twips)
+        assert!(
+            doc_xml.contains(r#"w:top="1440""#),
+            "pgMar top should be 1440 twips (1 inch): {doc_xml}"
+        );
+
+        // Round-trip should succeed and now produce a section
+        let doc2 = crate::read(&bytes).unwrap();
+        assert_eq!(doc2.to_plain_text(), "Minimal doc");
+        // The reader should pick up the section from the injected sectPr
+        assert!(
+            !doc2.sections().is_empty(),
+            "round-tripped doc should have a section from injected sectPr"
+        );
+    }
+
+    #[test]
+    fn ooxml_explicit_section_still_works() {
+        // When explicit sections exist, no extra default sectPr should be injected.
+        use s1_model::SectionProperties;
+
+        let mut doc = make_simple_doc("With section");
+        let mut sect = SectionProperties::default();
+        sect.page_width = 595.0; // A4-ish
+        sect.page_height = 842.0;
+        doc.sections_mut().push(sect);
+
+        let bytes = write(&doc).unwrap();
+
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut doc_xml = String::new();
+        {
+            use std::io::Read as _;
+            let mut f = archive.by_name("word/document.xml").unwrap();
+            f.read_to_string(&mut doc_xml).unwrap();
+        }
+
+        // Should have exactly one sectPr with the custom dimensions
+        let sect_count = doc_xml.matches("<w:sectPr>").count();
+        assert_eq!(
+            sect_count, 1,
+            "should have exactly 1 sectPr, got {sect_count}"
+        );
+        // A4 width: 595pt * 20 = 11900 twips
+        assert!(
+            doc_xml.contains(r#"w:w="11900""#),
+            "should use custom page width: {doc_xml}"
+        );
     }
 }

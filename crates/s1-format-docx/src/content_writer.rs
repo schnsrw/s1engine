@@ -1124,11 +1124,40 @@ pub fn write_table_with_hyperlinks_pub(
 }
 
 /// Write a `<w:r>` element.
+///
+/// OOXML constraint: empty `<w:r></w:r>` is technically valid but wasteful.
+/// We skip runs that have no text content unless they carry revision-tracking
+/// attributes (Insert/Delete/MoveFrom/MoveTo/FormatChange) which are
+/// semantically meaningful even without visible text.
 fn write_run(doc: &DocumentModel, run_id: NodeId, xml: &mut String) {
     let run = match doc.node(run_id) {
         Some(n) => n,
         None => return,
     };
+
+    // Check if the run has any text content
+    let has_text = run.children.iter().any(|&cid| {
+        doc.node(cid)
+            .map(|c| {
+                c.node_type == NodeType::Text
+                    && c.text_content
+                        .as_ref()
+                        .map(|t| !t.is_empty())
+                        .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    });
+
+    // Skip empty runs that have no revision-tracking purpose
+    if !has_text {
+        let has_revision = run
+            .attributes
+            .get_string(&AttributeKey::RevisionType)
+            .is_some();
+        if !has_revision {
+            return;
+        }
+    }
 
     let is_delete = matches!(
         run.attributes.get_string(&AttributeKey::RevisionType),
@@ -2769,6 +2798,89 @@ mod tests {
                 r#"<w:tblPrChange w:id="80" w:author="Dave" w:date="2026-03-12T14:00:00Z">"#
             ),
             "should output tblPrChange: {xml}"
+        );
+    }
+
+    #[test]
+    fn empty_run_is_omitted_from_xml() {
+        // A run with no text children and no revision attributes should produce
+        // no <w:r> element in the output.
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        // Empty run (no children at all)
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            !xml.contains("<w:r>"),
+            "empty run should be omitted from XML, got: {xml}"
+        );
+    }
+
+    #[test]
+    fn run_with_empty_text_node_is_omitted() {
+        // A run whose only child is a Text node with empty string should be omitted.
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "")).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            !xml.contains("<w:r>"),
+            "run with empty text should be omitted, got: {xml}"
+        );
+    }
+
+    #[test]
+    fn run_with_text_is_preserved() {
+        let doc = make_simple_doc("Keep me");
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains("<w:r>"),
+            "run with text should be preserved: {xml}"
+        );
+        assert!(xml.contains("Keep me"));
+    }
+
+    #[test]
+    fn empty_run_with_revision_is_preserved() {
+        // A run with revision tracking but no text should still be emitted.
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        doc.insert_node(body_id, 0, Node::new(para_id, NodeType::Paragraph))
+            .unwrap();
+
+        let run_id = doc.next_id();
+        let mut run = Node::new(run_id, NodeType::Run);
+        run.attributes.set(
+            AttributeKey::RevisionType,
+            AttributeValue::String("Insert".into()),
+        );
+        doc.insert_node(para_id, 0, run).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains("<w:r>"),
+            "revision run should be preserved even without text: {xml}"
         );
     }
 }

@@ -32,14 +32,14 @@
 
 | ID | Feature | Gap Analysis | Status |
 |----|---------|-------------|--------|
-| UXP-16 | **Print Preview** | Ctrl+P goes straight to browser dialog. Need: preview pane showing paginated document, page range selection, print options. | OPEN |
+| UXP-16 | **Print Preview** | Ctrl+P goes straight to browser dialog. Need: preview pane showing paginated document, page range selection, print options. | FIXED |
 | UXP-17 | **Zoom Presets & Fit-to-Page** | Zoom works but no presets. Need: dropdown with 50/75/100/125/150/200%, fit-to-width, fit-to-page, Ctrl+scroll zoom. | FIXED |
 | UXP-18 | **Dark Mode Implementation** | Button exists but not functional. Need: CSS variable toggle, localStorage persistence, system preference detection (`prefers-color-scheme`). | FIXED |
 | UXP-19 | **Spell Check Integration** | Button exists but not functional. Need: either browser spellcheck integration or hunspell/nspell dictionary with squiggly underlines, right-click suggestions. | FIXED |
-| UXP-20 | **Bookmarks & Cross-References** | Not implemented. Need: insert bookmark (named anchor), insert cross-reference (to bookmark, heading, figure), auto-update. Spec: OOXML `w:bookmarkStart`/`w:bookmarkEnd`. | OPEN |
-| UXP-21 | **Image Text Wrapping** | Images are inline-only. Need: wrap modes (inline, square, tight, behind text, in front of text), drag to position. Spec: OOXML `wp:anchor` vs `wp:inline`, `wp:wrapSquare`. | OPEN |
-| UXP-22 | **Multi-Column Layout** | No multi-column section support. Need: column count/width/spacing per section, column break insertion. Spec: OOXML `w:cols`. | OPEN |
-| UXP-23 | **Equation Editor** | KaTeX installed but no insertion UI. Need: equation toolbar/palette, LaTeX input, inline vs display mode. | OPEN |
+| UXP-20 | **Bookmarks & Cross-References** | Not implemented. Need: insert bookmark (named anchor), insert cross-reference (to bookmark, heading, figure), auto-update. Spec: OOXML `w:bookmarkStart`/`w:bookmarkEnd`. | FIXED |
+| UXP-21 | **Image Text Wrapping** | Images are inline-only. Need: wrap modes (inline, square, tight, behind text, in front of text), drag to position. Spec: OOXML `wp:anchor` vs `wp:inline`, `wp:wrapSquare`. | FIXED |
+| UXP-22 | **Multi-Column Layout** | No multi-column section support. Need: column count/width/spacing per section, column break insertion. Spec: OOXML `w:cols`. | FIXED |
+| UXP-23 | **Equation Editor** | KaTeX installed but no insertion UI. Need: equation toolbar/palette, LaTeX input, inline vs display mode. | FIXED |
 
 ---
 

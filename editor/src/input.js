@@ -13,12 +13,29 @@ import { updatePageBreaks } from './pagination.js';
 import { markDirty, saveVersion, updateDirtyIndicator, updateStatusBar, openAutosaveDB } from './file.js';
 import { broadcastOp } from './collab.js';
 import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode } from './toolbar-handlers.js';
+import { closeFindBar } from './find.js';
 
 export function initInput() {
   const page = $('pageContainer');
 
   // ─── Clear pending formats on editor blur ───
-  page.addEventListener('blur', () => {
+  // ED2-06: Only clear when blur goes outside the editor UI (not toolbar/modal)
+  page.addEventListener('blur', (e) => {
+    const related = e.relatedTarget;
+    if (related) {
+      // Don't clear if blur target is inside toolbar, menubar, or a modal
+      if (related.closest && (
+        related.closest('.toolbar') ||
+        related.closest('#toolbar') ||
+        related.closest('.menubar') ||
+        related.closest('.modal-overlay') ||
+        related.closest('.modal') ||
+        related.closest('.find-bar') ||
+        related.closest('.props-panel')
+      )) {
+        return;
+      }
+    }
     state.pendingFormats = {};
   }, true);
 
@@ -54,9 +71,49 @@ export function initInput() {
     }
   }, true);
 
+  // ─── FS-38: Triple-click to select entire paragraph ───
+  let _tripleClickTimer = 0;
+  let _clickCount = 0;
+  let _lastClickTarget = null;
+  page.addEventListener('click', (e) => {
+    const para = e.target.closest('[data-node-id]');
+    if (!para) {
+      _clickCount = 0;
+      _lastClickTarget = null;
+      return;
+    }
+    // Reset if click target changed
+    if (para !== _lastClickTarget) {
+      _clickCount = 0;
+      _lastClickTarget = para;
+    }
+    _clickCount++;
+    clearTimeout(_tripleClickTimer);
+    _tripleClickTimer = setTimeout(() => { _clickCount = 0; }, 500);
+
+    if (_clickCount >= 3) {
+      _clickCount = 0;
+      e.preventDefault();
+      // Select entire paragraph content
+      const range = document.createRange();
+      // Find the text content boundaries
+      const firstChild = para.firstChild;
+      const lastChild = para.lastChild;
+      if (firstChild && lastChild) {
+        range.setStartBefore(firstChild);
+        range.setEndAfter(lastChild);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  });
+
   // ─── E-01 fix: Capture cursor offset before text insertion for pending formats ───
   page.addEventListener('beforeinput', (e) => {
     if (state.ignoreInput) return;
+    // FS-11: Block all mutations in read-only mode
+    if (state.readOnlyMode) { e.preventDefault(); return; }
     // Block browser-native drag-drop text insertion (we handle moves via WASM)
     if (e.inputType === 'insertFromDrop') {
       e.preventDefault();
@@ -81,6 +138,53 @@ export function initInput() {
       }
     }
     if (e.inputType === 'insertText' && e.data) {
+      // FS-24: Smart quotes replacement (skip in Code style blocks)
+      if (state.smartQuotesEnabled && (e.data === '"' || e.data === "'")) {
+        const el = getActiveElement();
+        if (el && el.dataset?.styleId !== 'Code' && !el.closest?.('[data-style-id="Code"]')) {
+          const text = getEditableText(el);
+          const offset = getCursorOffset(el);
+          const codepoints = [...text];
+          const charBefore = offset > 0 ? codepoints[offset - 1] : '';
+          const atWordStart = !charBefore || /\s/.test(charBefore);
+          let smartChar;
+          if (e.data === '"') {
+            smartChar = atWordStart ? '\u201C' : '\u201D';
+          } else {
+            smartChar = atWordStart ? '\u2018' : '\u2019';
+          }
+          e.preventDefault();
+          document.execCommand('insertText', false, smartChar);
+          return;
+        }
+      }
+
+      // FS-36: Auto-capitalize after sentence-ending punctuation (skip in Code style blocks)
+      if (state.autoCapitalizeEnabled && /^[a-z]$/.test(e.data)) {
+        const el = getActiveElement();
+        if (el && el.dataset?.styleId !== 'Code' && !el.closest?.('[data-style-id="Code"]')) {
+          const text = getEditableText(el);
+          const offset = getCursorOffset(el);
+          const codepoints = [...text];
+          // Check if the character before cursor is a space preceded by sentence-ending punctuation
+          if (offset >= 2) {
+            const charMinus1 = codepoints[offset - 1] || '';
+            const charMinus2 = codepoints[offset - 2] || '';
+            if (/\s/.test(charMinus1) && /[.!?]/.test(charMinus2)) {
+              e.preventDefault();
+              document.execCommand('insertText', false, e.data.toUpperCase());
+              return;
+            }
+          }
+          // Also capitalize first character at start of paragraph
+          if (offset === 0) {
+            e.preventDefault();
+            document.execCommand('insertText', false, e.data.toUpperCase());
+            return;
+          }
+        }
+      }
+
       const pending = state.pendingFormats;
       if (pending && Object.keys(pending).length > 0) {
         const el = getActiveElement();
@@ -288,6 +392,15 @@ export function initInput() {
     if (!state.doc) return;
     const doc = state.doc;
 
+    // FS-11: In read-only mode, allow navigation & copy but block editing keys
+    if (state.readOnlyMode) {
+      const isNavOrCopy = e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End'
+        || e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'Tab'
+        || e.key === 'Escape' || e.key === 'F5' || e.key === 'F11' || e.key === 'F12'
+        || ((e.ctrlKey || e.metaKey) && ['c', 'a', 'f', 'g', 'p'].includes(e.key.toLowerCase()));
+      if (!isNavOrCopy) { e.preventDefault(); return; }
+    }
+
     // Clear select-all on any non-modifier key (except Cmd+X/C/A/Z/Y which use it)
     if (state._selectAll && !(e.ctrlKey || e.metaKey)) {
       // If the user types a printable character, delete the entire selection first
@@ -456,6 +569,60 @@ export function initInput() {
 
     // ── Ctrl/Cmd shortcuts ──
     if (e.ctrlKey || e.metaKey) {
+
+      // FS-02: Ctrl+Shift+V — Paste without formatting
+      if (e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        const pasteInfo = state._selectAll ? state.lastSelInfo : info;
+        if (pasteInfo && state.doc) {
+          // Delete selection first if non-collapsed
+          if (!pasteInfo.collapsed) {
+            try {
+              state.doc.delete_selection(pasteInfo.startNodeId, pasteInfo.startOffset, pasteInfo.endNodeId, pasteInfo.endOffset);
+              renderDocument();
+            } catch (err) { console.error('paste-plain delete selection:', err); }
+          }
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(text => {
+              if (!text) return;
+              try {
+                if (text.includes('\n')) {
+                  state.doc.paste_plain_text(pasteInfo.startNodeId, pasteInfo.startOffset, text);
+                } else {
+                  state.doc.insert_text_in_paragraph(pasteInfo.startNodeId, pasteInfo.startOffset, text);
+                }
+                broadcastOp({ action: 'pasteText', nodeId: pasteInfo.startNodeId, offset: pasteInfo.startOffset, text });
+                renderDocument();
+                const container = $('pageContainer');
+                const updated = container?.querySelector(`[data-node-id="${pasteInfo.startNodeId}"]`);
+                if (updated) setCursorAtOffset(updated, pasteInfo.startOffset + Array.from(text.replace(/\n/g, '')).length);
+                recordUndoAction('Paste without formatting');
+                updateUndoRedo();
+                markDirty();
+              } catch (err) { console.error('paste plain text:', err); }
+            }).catch(() => {
+              // Clipboard API unavailable
+              import('./toolbar-handlers.js').then(mod => {
+                if (typeof mod.showToast === 'function') mod.showToast('Paste without formatting not available in this browser', 'info');
+              });
+            });
+          } else {
+            // Clipboard API not available
+            import('./toolbar-handlers.js').then(mod => {
+              if (typeof mod.showToast === 'function') mod.showToast('Paste without formatting not available in this browser', 'info');
+            });
+          }
+        }
+        return;
+      }
+
+      // FS-04: Ctrl+Shift+X — Strikethrough toggle
+      if (e.shiftKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        toggleFormat('strikethrough');
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case 'b': e.preventDefault(); toggleFormat('bold'); return;
         case 'i': e.preventDefault(); toggleFormat('italic'); return;
@@ -479,6 +646,30 @@ export function initInput() {
         case '-': e.preventDefault(); adjustEditorZoom(-10); return;
         case '0': e.preventDefault(); adjustEditorZoom(0); return;
         case '/': e.preventDefault(); { const m = document.getElementById('shortcutsModal'); if (m) m.classList.add('show'); } return;
+        // FS-03: Ctrl+K — Insert link
+        case 'k': {
+          e.preventDefault();
+          if (!state.doc) return;
+          const linkInfo = getSelectionInfo();
+          if (!linkInfo) return;
+          state._linkSelInfo = linkInfo;
+          // Save selection range so it survives modal focus change
+          try {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              state._savedLinkRange = sel.getRangeAt(0).cloneRange();
+            }
+          } catch (_) {}
+          const linkUrlInput = $('linkUrl');
+          const linkModal = $('linkModal');
+          if (linkUrlInput) linkUrlInput.value = '';
+          if (linkModal) { linkModal.classList.add('show'); if (linkUrlInput) linkUrlInput.focus(); }
+          return;
+        }
+        // FS-05: Ctrl+. — Superscript toggle
+        case '.': e.preventDefault(); toggleFormat('superscript'); return;
+        // FS-05: Ctrl+, — Subscript toggle
+        case ',': e.preventDefault(); toggleFormat('subscript'); return;
       }
 
       // Ctrl+Alt+M — insert comment at current selection
@@ -498,12 +689,79 @@ export function initInput() {
         return;
       }
 
+      // Ctrl+Shift+B — insert bookmark
+      if (e.shiftKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        import('./toolbar-handlers.js').then(mod => {
+          if (typeof mod.openBookmarkModal === 'function') mod.openBookmarkModal();
+        });
+        return;
+      }
+
       // Ctrl+Shift+O — toggle document outline panel
       if (e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         import('./toolbar-handlers.js').then(mod => {
           if (typeof mod.toggleOutlinePanel === 'function') mod.toggleOutlinePanel();
         });
+        return;
+      }
+
+      // FS-09: Ctrl+Shift+7 — Numbered list toggle
+      if (e.shiftKey && e.code === 'Digit7') {
+        e.preventDefault();
+        if (state.doc) {
+          const listInfo = getSelectionInfo();
+          if (listInfo) {
+            syncAllText();
+            try {
+              let toggleOff = false;
+              try {
+                const fmt = JSON.parse(state.doc.get_formatting_json(listInfo.startNodeId));
+                if (fmt.listFormat === 'decimal') toggleOff = true;
+              } catch (_) {}
+              const applyFmt = toggleOff ? 'none' : 'decimal';
+              state.doc.set_list_format(listInfo.startNodeId, applyFmt, 0);
+              broadcastOp({ action: 'setListFormat', nodeId: listInfo.startNodeId, format: applyFmt, level: 0 });
+              renderDocument();
+              const container = $('pageContainer');
+              const restored = container?.querySelector(`[data-node-id="${listInfo.startNodeId}"]`);
+              if (restored) setCursorAtOffset(restored, listInfo.startOffset);
+              recordUndoAction(toggleOff ? 'Remove numbered list' : 'Toggle numbered list');
+              updateUndoRedo();
+              markDirty();
+            } catch (err) { console.error('numbered list toggle:', err); }
+          }
+        }
+        return;
+      }
+
+      // FS-09: Ctrl+Shift+8 — Bullet list toggle
+      if (e.shiftKey && e.code === 'Digit8') {
+        e.preventDefault();
+        if (state.doc) {
+          const listInfo = getSelectionInfo();
+          if (listInfo) {
+            syncAllText();
+            try {
+              let toggleOff = false;
+              try {
+                const fmt = JSON.parse(state.doc.get_formatting_json(listInfo.startNodeId));
+                if (fmt.listFormat === 'bullet') toggleOff = true;
+              } catch (_) {}
+              const applyFmt = toggleOff ? 'none' : 'bullet';
+              state.doc.set_list_format(listInfo.startNodeId, applyFmt, 0);
+              broadcastOp({ action: 'setListFormat', nodeId: listInfo.startNodeId, format: applyFmt, level: 0 });
+              renderDocument();
+              const container = $('pageContainer');
+              const restored = container?.querySelector(`[data-node-id="${listInfo.startNodeId}"]`);
+              if (restored) setCursorAtOffset(restored, listInfo.startOffset);
+              recordUndoAction(toggleOff ? 'Remove bullet list' : 'Toggle bullet list');
+              updateUndoRedo();
+              markDirty();
+            } catch (err) { console.error('bullet list toggle:', err); }
+          }
+        }
         return;
       }
 
@@ -615,7 +873,7 @@ export function initInput() {
           return;
         }
       }
-      // Regular paragraph (not list, not table) — insert tab character
+      // Regular paragraph (not list, not table) — insert tab node
       if (el && !el.closest?.('td, th')) {
         e.preventDefault();
         const nodeId = el.dataset.nodeId;
@@ -623,8 +881,13 @@ export function initInput() {
           const offset = getCursorOffset(el);
           syncParagraphText(el);
           try {
-            doc.insert_text_in_paragraph(nodeId, offset, '\t');
-            broadcastOp({ action: 'insertText', nodeId, offset, text: '\t' });
+            if (typeof doc.insert_tab === 'function') {
+              doc.insert_tab(nodeId, offset);
+            } else {
+              // Fallback: insert tab as text (renders as whitespace)
+              doc.insert_text_in_paragraph(nodeId, offset, '\t');
+            }
+            broadcastOp({ action: 'insertTab', nodeId, offset });
             const updated = renderNodeById(nodeId);
             if (updated) setCursorAtOffset(updated, offset + 1);
             recordUndoAction('Insert tab');
@@ -879,6 +1142,8 @@ export function initInput() {
   page.addEventListener('paste', e => {
     e.preventDefault();
     if (!state.doc) return;
+    // FS-11: Block paste in read-only mode
+    if (state.readOnlyMode) return;
     const doc = state.doc;
 
     let info = getSelectionInfo();
@@ -961,7 +1226,9 @@ export function initInput() {
       }
     }
 
-    const text = e.clipboardData.getData('text/plain');
+    // ED2-13: Normalize \r\n to \n for consistent line break handling
+    const rawText = e.clipboardData.getData('text/plain');
+    const text = rawText ? rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : '';
     const html = e.clipboardData.getData('text/html');
 
     // E2.2: Try rich paste (HTML → structured content via WASM)
@@ -1181,9 +1448,9 @@ export function initInput() {
       closeSlashMenu();
       return;
     }
-    // Close find bar
+    // Close find bar (ED2-22: properly clears debounce timer via closeFindBar)
     if ($('findBar')?.classList.contains('show')) {
-      $('findBar').classList.remove('show');
+      closeFindBar();
       const activePage = $('pageContainer')?.querySelector('.page-content');
       if (activePage) activePage.focus();
       return;
@@ -1313,9 +1580,13 @@ export function initInput() {
     addItem('Paste', '\u2318V', async () => {
       try {
         const items = await navigator.clipboard.read();
+        // ED2-19: Guard against null/empty clipboard items
+        if (!items || items.length === 0) return;
         for (const item of items) {
+          if (!item || !item.types) continue;
           if (item.types.includes('text/html')) {
             const blob = await item.getType('text/html');
+            if (!blob) continue;
             const html = await blob.text();
             const parsed = parseClipboardHtml(html);
             if (parsed && parsed.elements.length > 0) {
@@ -1332,6 +1603,7 @@ export function initInput() {
           }
           if (item.types.includes('text/plain')) {
             const blob = await item.getType('text/plain');
+            if (!blob) continue;
             const text = await blob.text();
             const freshInfo = getSelectionInfo();
             if (text && freshInfo && state.doc) {
@@ -1658,6 +1930,20 @@ function parseClipboardHtml(html) {
   }
 }
 
+/** FS-25: Detect CSS page-break styles on an element */
+function _hasPageBreakStyle(el) {
+  if (!el || !el.style) return false;
+  const style = el.style;
+  const cssText = style.cssText || '';
+  // Check style properties directly
+  if (style.pageBreakBefore === 'always' || style.pageBreakAfter === 'always') return true;
+  if (style.breakBefore === 'page' || style.breakAfter === 'page') return true;
+  // Check cssText for various page-break patterns (MS Word uses inline styles)
+  if (/page-break-(?:before|after)\s*:\s*always/i.test(cssText)) return true;
+  if (/break-(?:before|after)\s*:\s*page/i.test(cssText)) return true;
+  return false;
+}
+
 /** Walk block-level children and produce structured elements */
 function walkBlockElements(container, elements) {
   for (const child of container.childNodes) {
@@ -1679,6 +1965,25 @@ function walkBlockElements(container, elements) {
 
     // Skip MS Office namespace elements, style/meta/link tags
     if (tag.includes(':') || tag === 'style' || tag === 'meta' || tag === 'link' || tag === 'script') continue;
+
+    // ED2-13: Handle <br> at block level as paragraph separator
+    if (tag === 'br') {
+      // FS-25: Check if this <br> has a page-break style
+      if (_hasPageBreakStyle(child)) {
+        elements.push({ type: 'pageBreak' });
+        continue;
+      }
+      // A <br> at the block level breaks the current inline run into a new paragraph
+      const prev = elements[elements.length - 1];
+      if (prev && prev.type === 'paragraph' && prev._fromInline) {
+        // Mark current inline paragraph as complete and start a new one
+        prev._fromInline = false;
+      }
+      // If no previous inline paragraph, the <br> creates an empty paragraph
+      // (equivalent to pressing Enter in an editor)
+      elements.push({ type: 'paragraph', runs: [{ text: '' }], _fromInline: true });
+      continue;
+    }
 
     // Inline-only elements at block level (span, b, i, a, etc.)
     // Merge consecutive inline elements into a single paragraph instead
@@ -1709,6 +2014,26 @@ function walkBlockElements(container, elements) {
     if (tag === 'table') {
       const tbl = extractTableElement(child);
       if (tbl) elements.push(tbl);
+      continue;
+    }
+
+    // FS-25: Detect page-break styles on <div> or <br> elements
+    if (_hasPageBreakStyle(child)) {
+      elements.push({ type: 'pageBreak' });
+      // If div has content, continue processing its children after the break
+      if (tag === 'div' && child.childNodes.length > 0) {
+        const hasBlocks = child.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, img, ul, ol, li');
+        if (hasBlocks) {
+          walkBlockElements(child, elements);
+        } else {
+          const runs = extractRunsFromElement(child);
+          if (runs.length > 0) {
+            const para = { type: 'paragraph', runs };
+            extractParagraphFormat(child, para);
+            elements.push(para);
+          }
+        }
+      }
       continue;
     }
 
@@ -1781,6 +2106,10 @@ function walkBlockElements(container, elements) {
 
     // Paragraphs and headings
     if (/^(p|h[1-6])$/.test(tag)) {
+      // FS-25: Emit a page break before this element if it has page-break-before:always
+      if (_hasPageBreakStyle(child)) {
+        elements.push({ type: 'pageBreak' });
+      }
       // Check for images inside the paragraph
       const imgs = child.querySelectorAll('img');
       const runs = extractRunsFromElement(child);
@@ -2290,6 +2619,18 @@ function pasteStructuredContent(doc, info, parsed, page) {
       } catch (e) { console.warn('paste hr:', e); }
       continue;
     }
+
+    // FS-25: Handle page breaks from pasted content
+    if (el.type === 'pageBreak') {
+      try {
+        const bodyId = getBodyNodeId(lastNodeId);
+        doc.insert_page_break(bodyId);
+        broadcastOp({ action: 'insertPageBreak', afterNodeId: bodyId });
+        lastNodeId = getLastParaId();
+        anyPasted = true;
+      } catch (e) { console.warn('paste page break:', e); }
+      continue;
+    }
   }
 
   return anyPasted;
@@ -2674,6 +3015,10 @@ function placeCursorAfterPaste(page, text, pasteNodeId, pasteOffset) {
 
 function doUndo() {
   if (!state.doc) return;
+  // ED2-21: Reset format painter on undo to prevent stale painter state
+  if (state.formatPainterMode) {
+    exitFormatPainter();
+  }
   clearTimeout(state.syncTimer);
   syncAllText();
   // Save cursor position before undo for restoration
@@ -2705,6 +3050,10 @@ function doUndo() {
 
 function doRedo() {
   if (!state.doc) return;
+  // ED2-21: Reset format painter on redo to prevent stale painter state
+  if (state.formatPainterMode) {
+    exitFormatPainter();
+  }
   clearTimeout(state.syncTimer);
   syncAllText();
   const savedSel = state.lastSelInfo ? { ...state.lastSelInfo } : null;

@@ -140,6 +140,9 @@ function connect(url) {
       }
       offlineBuffer = [];
     }
+    // Reset buffer warning flags after successful reconnect
+    _bufferWarningShown = false;
+    _bufferFullWarningShown = false;
     updateSyncStatus('synced');
   };
 
@@ -173,6 +176,9 @@ function scheduleReconnect(url) {
 }
 
 const MAX_OFFLINE_BUFFER = 10000;
+const OFFLINE_BUFFER_WARNING_THRESHOLD = 8000;
+let _bufferWarningShown = false;
+let _bufferFullWarningShown = false;
 
 function sendOp(opData) {
   const payload = JSON.stringify(opData);
@@ -181,8 +187,23 @@ function sendOp(opData) {
   } else {
     if (offlineBuffer.length < MAX_OFFLINE_BUFFER) {
       offlineBuffer.push(opData);
-    } else if (offlineBuffer.length === MAX_OFFLINE_BUFFER) {
-      console.warn('Offline buffer limit reached. Some changes may not sync when reconnected.');
+      // Warn when buffer is near capacity
+      if (offlineBuffer.length >= OFFLINE_BUFFER_WARNING_THRESHOLD && !_bufferWarningShown) {
+        _bufferWarningShown = true;
+        showCollabToast('Offline buffer nearly full \u2014 reconnect soon to avoid data loss');
+      }
+    } else {
+      if (!_bufferFullWarningShown) {
+        _bufferFullWarningShown = true;
+        console.warn('Offline buffer limit reached. Some changes may not sync when reconnected.');
+        showCollabToast('Connection lost \u2014 changes may not sync');
+        // Update sync status to show critical state
+        const syncEl = $('collabSyncStatus');
+        if (syncEl) {
+          syncEl.textContent = 'Offline (changes may be lost)';
+          syncEl.className = 'collab-sync-status offline';
+        }
+      }
     }
     // Update offline pending count in sync status
     updateSyncStatus('offline');
@@ -283,10 +304,13 @@ function applyRemoteOp(dataStr, fromPeerId) {
         // Set paragraph text from remote
         try {
           state.doc.set_paragraph_text(op.nodeId, op.text);
-          const el = $('pageContainer').querySelector(`[data-node-id="${op.nodeId}"]`);
-          if (el) {
-            const updated = renderNodeById(op.nodeId);
-            // Don't move local cursor
+          const pageContainer = $('pageContainer');
+          if (pageContainer) {
+            const el = pageContainer.querySelector(`[data-node-id="${op.nodeId}"]`);
+            if (el) {
+              renderNodeById(op.nodeId);
+              // Don't move local cursor
+            }
           }
         } catch (e) { console.error('remote setText:', e); }
         break;
@@ -781,12 +805,15 @@ function renderPeerCursor(cursor) {
     renderPeerSelection(cursor);
   }
 
-  // Auto-remove after 5s if no update
+  // Auto-remove after 30s if no update (FS-35: increased from 5s)
+  // Peer cursors should persist as long as the peer is connected;
+  // they only disappear on timeout if the peer stops sending awareness.
+  const PEER_CURSOR_TIMEOUT = 30000;
   setTimeout(() => {
     const el = document.getElementById(`peer-cursor-${cursor.peerId}`);
     if (el) el.remove();
     clearPeerSelection(cursor.peerId);
-  }, 5000);
+  }, PEER_CURSOR_TIMEOUT);
 }
 
 /**
@@ -1037,9 +1064,16 @@ export function copyShareUrl() {
   navigator.clipboard.writeText(urlInput.value).then(() => {
     const btn = $('shareCopyBtn');
     if (btn) {
-      const orig = btn.textContent;
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = orig; }, 1500);
+      const origHTML = btn.innerHTML;
+      // ED2-30: Show green "Copied!" feedback with checkmark, then revert
+      btn.innerHTML = '<span class="msi" style="font-size:16px;vertical-align:middle">check</span> Copied!';
+      btn.style.color = '#1e8e3e';
+      btn.style.borderColor = '#1e8e3e';
+      setTimeout(() => {
+        btn.innerHTML = origHTML;
+        btn.style.color = '';
+        btn.style.borderColor = '';
+      }, 1500);
     }
   }).catch(() => {
     // Fallback: select the text so the user can manually Ctrl+C

@@ -7,6 +7,7 @@ import { broadcastOp } from './collab.js';
 import { showToast } from './toolbar-handlers.js';
 import { trackEvent } from './analytics.js';
 import { ensureDocumentFonts, getFontDb } from './fonts.js';
+import { closeFindBar } from './find.js';
 
 let detect_format_fn = null;
 
@@ -138,8 +139,19 @@ function doAutosave() {
         info.textContent = 'Auto-saved';
         setTimeout(() => { info._userMsg = false; updateStatusBar(); }, 1500);
       };
-    }).catch(() => {});
-  } catch (_) {}
+    }).catch(e => {
+      // ED2-25: Log autosave failures instead of silently swallowing
+      console.warn('Autosave failed:', e);
+      const info = $('statusInfo');
+      if (info) {
+        info._userMsg = true;
+        info.textContent = 'Autosave failed';
+        setTimeout(() => { info._userMsg = false; updateStatusBar(); }, 3000);
+      }
+    });
+  } catch (e) {
+    console.warn('Autosave error:', e);
+  }
 }
 
 /**
@@ -346,6 +358,10 @@ function resetEditorState() {
   // Clear selection/undo state
   state.lastSelInfo = null;
   state.pendingFormats = {};
+  // Clear typing batch timer before nullifying
+  if (state._typingBatch && state._typingBatch.timer) {
+    clearTimeout(state._typingBatch.timer);
+  }
   state._typingBatch = null;
   state.undoHistory = [];
   state.undoHistoryPos = 0;
@@ -355,9 +371,13 @@ function resetEditorState() {
   state.resizing = null;
   // Clear timers
   clearTimeout(state.syncTimer);
+  state.syncTimer = null;
   clearTimeout(state._findRefreshTimer);
+  state._findRefreshTimer = null;
   clearInterval(state.autosaveTimer);
+  state.autosaveTimer = null;
   clearInterval(state.versionTimer);
+  state.versionTimer = null;
   // E8: Clear performance optimization state
   state._layoutCache = null;
   state._layoutDirty = true;
@@ -384,6 +404,8 @@ function resetEditorState() {
 
 export function newDocument() {
   if (!state.engine) return;
+  // ED2-29: Close find bar when creating a new document
+  closeFindBar();
   resetEditorState();
   state.doc = state.engine.create();
   state.currentFormat = 'new';
@@ -411,6 +433,8 @@ function isPdf(bytes) {
 
 export async function openFile(bytes, name) {
   if (!state.engine) return;
+  // ED2-29: Close find bar when opening a new file
+  closeFindBar();
 
   const ext = name?.split('.').pop()?.toLowerCase();
 
@@ -562,6 +586,12 @@ export function switchView(view) {
         _savedCursorForView = { nodeId: n.dataset.nodeId, offset: state.lastSelInfo?.startOffset || 0 };
       }
     }
+  }
+
+  // ED2-20: Destroy PDF viewer (and its scroll handler) when switching away from PDF view
+  if (state.currentView === 'pdf' && view !== 'pdf' && state.pdfViewer) {
+    state.pdfViewer.destroy();
+    state.pdfViewer = null;
   }
 
   state.currentView = view;

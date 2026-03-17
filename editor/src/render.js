@@ -7,7 +7,7 @@ import { markDirty, updateTrackChanges, updateStatusBar } from './file.js';
 import { broadcastTextSync, broadcastOp } from './collab.js';
 import { getEditableText } from './selection.js';
 import { getFontDb } from './fonts.js';
-import { renderDocumentEquations, refreshPageThumbnails, isSpellCheckEnabled, refreshTrackChangesPanel } from './toolbar-handlers.js';
+import { renderDocumentEquations, renderDocumentBookmarks, refreshPageThumbnails, isSpellCheckEnabled, refreshTrackChangesPanel, applyColumnLayout } from './toolbar-handlers.js';
 import {
   isCanvasMode,
   setCanvasMode,
@@ -58,9 +58,14 @@ function queryAllNodes(selector) {
   return Array.from(container.querySelectorAll(selector));
 }
 
+// ED2-04: Guard against concurrent renders during scroll
+let _rendering = false;
+
 export function renderDocument() {
   const { doc } = state;
   if (!doc) return;
+
+  _rendering = true;
 
   // F4.3: Canvas rendering mode — render via HTML5 Canvas instead of DOM
   if (isCanvasMode()) {
@@ -72,6 +77,7 @@ export function renderDocument() {
         if (ok) {
           updateUndoRedo();
           updateStatusBar();
+          _rendering = false;
           return;
         }
       }
@@ -177,7 +183,8 @@ export function renderDocument() {
 
       const content = document.createElement('div');
       content.className = 'page-content';
-      content.contentEditable = 'true';
+      // FS-11: Respect read-only mode
+      content.contentEditable = state.readOnlyMode ? 'false' : 'true';
       content.spellcheck = isSpellCheckEnabled();
       content.lang = 'en';
       content.setAttribute('role', 'textbox');
@@ -213,6 +220,7 @@ export function renderDocument() {
     fixEmptyBlocks();
     setupImages();
     cacheAllText();
+    _nodeMapDirty = true; // ED2-16: Full render — force map rebuild
     populateNodeIdMap();
     setupTrackChangeHandlers();
     setupTOCHandlers();
@@ -221,11 +229,17 @@ export function renderDocument() {
     // E9.3: Render equations via KaTeX
     renderDocumentEquations();
 
+    // UXP-20: Render bookmark markers
+    renderDocumentBookmarks();
+
     // E9.6: Auto-number footnotes/endnotes
     autoNumberFootnotes();
 
     // E9.5: Apply TOC styling
     applyTocStyling();
+
+    // UXP-22: Apply column layout to page-content elements
+    applyColumnLayout();
 
     state.ignoreInput = false;
     state.pagesRendered = false;
@@ -245,7 +259,9 @@ export function renderDocument() {
     state._onTextChanged?.();
     // Update page thumbnails in sidebar
     refreshPageThumbnails();
-  } catch (e) { console.error('Render error:', e); }
+  } catch (e) { console.error('Render error:', e); } finally {
+    _rendering = false;
+  }
 }
 
 // ─── Per-change Track Changes popup (event delegation) ─────────────────
@@ -339,7 +355,8 @@ function showTcPopup(el) {
       document.removeEventListener('click', dismiss, true);
     }
   };
-  setTimeout(() => document.addEventListener('click', dismiss, true), 0);
+  // ED2-09: Use requestAnimationFrame instead of setTimeout(0) to avoid DOM race
+  requestAnimationFrame(() => document.addEventListener('click', dismiss, true));
 }
 
 /**
@@ -392,12 +409,24 @@ function applyZoom() {
 // E8.2: nodeIdToElement map — O(1) DOM lookups
 // ═══════════════════════════════════════════════════
 
+// ED2-16: Track whether the node map needs a full rebuild.
+// Set to true on full renders; incremental updates patch the map directly.
+let _nodeMapDirty = true;
+
 function populateNodeIdMap() {
+  // ED2-16: Skip full querySelectorAll if map is still valid (incremental update)
+  if (!_nodeMapDirty && state.nodeIdToElement.size > 0) return;
   const map = state.nodeIdToElement;
   map.clear();
   queryAllNodes('[data-node-id]').forEach(el => {
     map.set(el.dataset.nodeId, el);
   });
+  _nodeMapDirty = false;
+}
+
+/** ED2-16: Mark node map as needing a full rebuild (called on full render). */
+export function markNodeMapDirty() {
+  _nodeMapDirty = true;
 }
 
 export function lookupNodeElement(nodeIdStr) {
@@ -788,6 +817,20 @@ function checkLargeDocumentWarning() {
       info.classList.remove('perf-warning');
       updateStatusBar();
     }, 6000);
+
+    // ED2-27: Show a one-time toast notification for large documents
+    const tc = $('toastContainer');
+    if (tc) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = 'Large document \u2014 some features may be slower';
+      tc.appendChild(toast);
+      setTimeout(() => {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 350);
+      }, 5000);
+    }
   }
 }
 
@@ -1240,8 +1283,11 @@ function initVirtualScroll(blocks) {
 function _handleVirtualScroll() {
   // E8.1e: Throttle with requestAnimationFrame
   if (state._vsRAF) return;
+  // ED2-04: Skip scroll handling during active render to prevent race condition
+  if (_rendering) return;
   state._vsRAF = requestAnimationFrame(() => {
     state._vsRAF = null;
+    if (_rendering) return; // Re-check inside rAF callback
     const canvas = $('editorCanvas');
     if (!canvas || !state.virtualScroll) return;
 
@@ -1431,6 +1477,12 @@ function teardownVirtualScroll() {
       } catch (_) {}
     }
   }
+  // ED2-24: Remove any leftover virtual scroll placeholder elements
+  const container = $('pageContainer');
+  if (container) {
+    container.querySelectorAll('.vs-placeholder').forEach(el => el.remove());
+  }
+
   // Clear all references so entries + indexMap can be GC'd
   vs.entries.length = 0;
   state.virtualScroll = null;

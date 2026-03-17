@@ -2,6 +2,12 @@
 
 A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a web editor.
 
+**Release:** `1.0.1` · **Branch:** `main` · **Editor:** S1 Editor
+
+## What is s1engine?
+
+s1engine is a modular Rust SDK that powers document workflows across desktop, server, and web. It combines format conversion (DOCX, ODT, PDF, TXT, Markdown), a Fugue CRDT core for collaboration, and native/WASM/FFI bindings so the same engine can be embedded in editors, clients, and services.
+
 ## Highlights
 
 - **Multi-format** — DOCX, ODT, PDF, TXT, Markdown, and legacy DOC (read)
@@ -10,30 +16,6 @@ A modular document engine SDK built in pure Rust. Read, write, edit, and convert
 - **Layout engine** — Pagination, text shaping (rustybuzz), font subsetting, PDF export
 - **Web editor** — S1 Editor: browser-based document editor with toolbar, comments, track changes, and PDF viewer
 - **Embeddable** — Use as a Rust library, WASM module, or C shared library
-
-## Architecture
-
-```
-Consumer Applications
-        |  Rust API / C FFI / WASM
-+-------v--------------------------------------------+
-|                s1engine (facade)                    |
-|----------------------------------------------------|
-|  s1-ops       s1-layout       s1-convert           |
-|  Operations   Page Layout     Format Conversion    |
-|  Undo/Redo    Pagination      DOC -> DOCX          |
-|----------------------------------------------------|
-|  s1-crdt                s1-model                   |
-|  Collaborative          Core Document Model        |
-|  Editing (Fugue)        (zero external deps)       |
-|----------------------------------------------------|
-|  format-docx  format-odt  format-pdf  format-txt   |
-|  format-md                                         |
-|----------------------------------------------------|
-|                s1-text (Pure Rust)                  |
-|        rustybuzz  ttf-parser  fontdb               |
-+----------------------------------------------------+
-```
 
 ## Quick Start
 
@@ -109,19 +91,16 @@ std::fs::write("output.odt", doc.export(Format::Odt)?)?;
 
 ## S1 Editor
 
-s1engine ships with **S1 Editor**, a browser-based document editor that runs via WASM.
+S1 Editor is the WASM-powered web interface that lets teams collaborate on DOCX, ODT, PDF, TXT, and Markdown content through the same engine used in the Rust SDK. Multi-page layout, annotations, track-changes, and export tools appear inside the browser canvas while Fugue CRDT keeps collaborators in sync.
 
-### Features
+### Experience highlights
 
-- WYSIWYG editing with multi-page layout
-- Toolbar with formatting, styles, tables, images, comments
-- Collaboration via WebSocket relay
-- Track changes with accept/reject
-- PDF viewer with annotation tools (highlight, comment, draw, text)
-- Export to DOCX, ODT, PDF, TXT, Markdown
-- Keyboard shortcuts, find & replace
-- Drag-and-drop file opening
-- Dark mode support
+- **Layout and rendering** — Multi-page, paginated canvas with measured text shaping and consistent spacing (see the layout screenshot).
+- **Toolbar & styling** — Unified formatting toolbar, templates, and table/insert controls keep rich editing easily accessible.
+- **Collaboration & comments** — Inline mentions, comments, and presence indicators sync through the network-backed CRDT relay.
+- **Track changes** — Accept/reject controls, history detail, and blame context surface editorial intent.
+- **PDF + export** — Built-in PDF viewer/annotator (highlight, draw, markup) plus DOCX/ODT/PDF/TXT/Markdown export pipelines.
+- **Developer-ready** — Keyboard shortcuts, drag-and-drop importing, dark mode, WASM bindings, and Docker deployments keep integration painless.
 
 ### Running the Editor
 
@@ -149,6 +128,38 @@ docker compose up
 ```
 
 The editor is served at `http://localhost:8787`.
+
+### Experience gallery
+
+| Upload & landing | Toolbar & controls |
+|-------------------|---------------------|
+| ![Landing page with file upload call to action](images/s1-editor-file-upload.png)<br>_Landing canvas for drag-and-drop files, templates, and import workflows._ | ![Toolbar with rich formatting controls](images/s1-editor-toolbar.png)<br>_Formatting toolbar featuring paragraph styles, tables, lists, and insert tools._ |
+| Document view | Track changes panel |
+| ![Document view with paragraph properties panel](images/s1-editor-document-view.png)<br>_Light-mode document canvas with paragraph properties and layout controls exposed._ | ![Track changes panel in dark theme](images/s1-editor-track-changes-panel.png)<br>_Dark track changes inspector with accept/reject, comment context, and comparison indicators._ |
+
+## Architecture
+
+```
+Consumer Applications
+        |  Rust API / C FFI / WASM
++-------v--------------------------------------------+
+|                s1engine (facade)                    |
+|----------------------------------------------------|
+|  s1-ops       s1-layout       s1-convert           |
+|  Operations   Page Layout     Format Conversion    |
+|  Undo/Redo    Pagination      DOC -> DOCX          |
+|----------------------------------------------------|
+|  s1-crdt                s1-model                   |
+|  Collaborative          Core Document Model        |
+|  Editing (Fugue)        (zero external deps)       |
+|----------------------------------------------------|
+|  format-docx  format-odt  format-pdf  format-txt   |
+|  format-md                                         |
+|----------------------------------------------------|
+|                s1-text (Pure Rust)                  |
+|        rustybuzz  ttf-parser  fontdb               |
++----------------------------------------------------+
+```
 
 ## Crate Structure
 

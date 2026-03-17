@@ -14,6 +14,7 @@ import { initTouch } from './touch.js';
 import { trackEvent } from './analytics.js';
 import { recordError } from './error-tracking.js';
 import { initShapes } from './shapes.js';
+import { initPropertiesPanel } from './properties-panel.js';
 import { initFonts, ensureDocumentFonts } from './fonts.js';
 
 // ── Service Worker Registration ──────────────────────
@@ -77,6 +78,7 @@ async function boot() {
     initPinchToZoom();
     initTableCellAnnouncements();
     initShapes();
+    initPropertiesPanel();
     renderRuler();
     initPdfToolbar();
 

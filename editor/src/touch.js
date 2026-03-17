@@ -100,7 +100,13 @@ function caretFromPoint(x, y) {
   return null;
 }
 
+let _handleDragSetup = false;
+
 function setupHandleDrag() {
+  // Guard: prevent listener accumulation if called more than once
+  if (_handleDragSetup) return;
+  _handleDragSetup = true;
+
   const onTouchStart = (handle, which) => {
     handle.addEventListener('touchstart', (e) => {
       e.preventDefault();
@@ -384,11 +390,13 @@ function showTouchContextMenu(x, y) {
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
 
-  // Close on tap outside
-  setTimeout(() => {
+  // Close on tap outside — remove old listeners first to prevent accumulation
+  document.removeEventListener('touchstart', closeTouchContextMenuOnOutside);
+  document.removeEventListener('mousedown', closeTouchContextMenuOnOutside);
+  requestAnimationFrame(() => {
     document.addEventListener('touchstart', closeTouchContextMenuOnOutside, { passive: true });
     document.addEventListener('mousedown', closeTouchContextMenuOnOutside);
-  }, 50);
+  });
 }
 
 function closeTouchContextMenuOnOutside(e) {

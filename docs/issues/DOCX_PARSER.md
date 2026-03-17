@@ -26,7 +26,7 @@
 |----|-------|------|-------|--------|
 | DOCX-08 | Missing error context in node insertion errors — no node type/index/path info | `content_parser.rs` | throughout | FIXED |
 | DOCX-09 | Media deduplication not verified — same image stored N times in ZIP | `content_parser.rs` | 1622 | FIXED |
-| DOCX-10 | No OOXML constraint validation (empty cells, empty runs, required pgSz/pgMar) | various | — | OPEN |
+| DOCX-10 | No OOXML constraint validation (empty cells, empty runs, required pgSz/pgMar) | various | — | FIXED |
 | DOCX-11 | Section properties writer doesn't validate header/footer NodeIds exist | `writer.rs` | — | FIXED |
 | DOCX-12 | Repeated `Vec` allocation per XML element in hot parsing loop | `content_parser.rs` | throughout | FIXED |
 | DOCX-13 | Return values discarded with `let _ =` in optional file parsing | `reader.rs` | 124-134 | FIXED |

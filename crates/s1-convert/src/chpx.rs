@@ -190,7 +190,7 @@ pub fn parse_chpx_bin_table(
     }
 
     let remaining = plcf_data.len() - 4;
-    if remaining % 8 != 0 {
+    if !remaining.is_multiple_of(8) {
         return Err(ConvertError::InvalidDoc(format!(
             "PlcfBteChpx size {} not valid: (size - 4) must be divisible by 8",
             plcf_data.len()

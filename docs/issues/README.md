@@ -8,15 +8,15 @@
 | Category | File | Total | Fixed | Won't Fix | Open |
 |----------|------|-------|-------|-----------|------|
 | Core Engine (s1-model, s1-ops) | [CORE_ENGINE.md](CORE_ENGINE.md) | 11 | 10 | 1 | 0 |
-| DOCX Parser | [DOCX_PARSER.md](DOCX_PARSER.md) | 13 | 11 | 1 | 1 |
+| DOCX Parser | [DOCX_PARSER.md](DOCX_PARSER.md) | 13 | 12 | 1 | 0 |
 | ODT Parser | [ODT_PARSER.md](ODT_PARSER.md) | 12 | 10 | 2 | 0 |
 | Layout / Text / PDF | [LAYOUT_TEXT_PDF.md](LAYOUT_TEXT_PDF.md) | 17 | 17 | 0 | 0 |
 | WASM / FFI / CRDT | [WASM_FFI_CRDT.md](WASM_FFI_CRDT.md) | 15 | 15 | 0 | 0 |
 | Editor UI/UX | [EDITOR_UI.md](EDITOR_UI.md) | 15 | 14 | 1 | 0 |
-| UX Parity | [UX_PARITY.md](UX_PARITY.md) | 23 | 18 | 0 | 5 |
-| **TOTAL** | | **106** | **95** | **5** | **6** |
+| UX Parity | [UX_PARITY.md](UX_PARITY.md) | 23 | 23 | 0 | 0 |
+| **TOTAL** | | **106** | **101** | **5** | **0** |
 
-## Fix Progress: 100/106 resolved (94%)
+## Fix Progress: 106/106 resolved (100%)
 
 ### What was fixed (2026-03-17, batch 2)
 
