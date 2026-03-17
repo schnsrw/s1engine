@@ -92,6 +92,8 @@ export const state = {
   _composing: false,
   // E5.4: Editing mode — 'editing' | 'suggesting' | 'viewing'
   editingMode: 'editing',
+  // FS-11: Read-only / Viewer mode — blocks all editing when true
+  readOnlyMode: false,
   // UXP-14: Format Painter
   formatPainterMode: null, // null | 'once' | 'sticky'
   copiedFormat: null,       // { bold, italic, underline, strikethrough, ... } or null
@@ -99,6 +101,10 @@ export const state = {
   hfEditingMode: null,
   // UXP-02: Which page (1-based) is being edited for header/footer
   hfEditingPage: null,
+  // FS-24: Smart quotes toggle
+  smartQuotesEnabled: true,
+  // FS-36: Auto-capitalize at sentence start toggle
+  autoCapitalizeEnabled: true,
   // E9.5: TOC style — 'default' | 'dotted' | 'dashed' | 'no-page-numbers'
   tocStyle: 'default',
   // PDF viewer state

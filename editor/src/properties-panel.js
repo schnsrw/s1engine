@@ -624,11 +624,11 @@ function findImageNodeId(paraNodeIdStr) {
 // ─── Table Properties (Stub) ─────────────────────
 function initTableControls() {
   // Table width mode
-  const tpWidthMode = $('tpWidthMode');
-  if (tpWidthMode) {
-    tpWidthMode.addEventListener('change', () => {
+  const propsWidthMode = $('propsWidthMode');
+  if (propsWidthMode) {
+    propsWidthMode.addEventListener('change', () => {
       // Stub: table width mode not yet wired to WASM
-      console.debug('Table width mode:', tpWidthMode.value);
+      console.debug('Table width mode:', propsWidthMode.value);
     });
   }
 

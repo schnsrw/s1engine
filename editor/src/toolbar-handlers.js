@@ -100,6 +100,10 @@ export function showToast(message, type = 'info', duration = 4000) {
   if (!container) { console.warn('toast:', message); return; }
   const toast = document.createElement('div');
   toast.className = 'toast' + (type === 'error' ? ' toast-error' : type === 'success' ? ' toast-success' : '');
+  // FS-12: Ensure individual toasts are accessible to screen readers
+  if (type === 'error') {
+    toast.setAttribute('role', 'alert');
+  }
   toast.textContent = message;
   container.appendChild(toast);
   const remove = () => {
@@ -193,74 +197,13 @@ export function initToolbar() {
   // Style gallery dropdown
   initStyleGallery();
 
-  // Text color
+  // FS-21: Text color — Google Docs-style palette dropdown
   const colorPicker = $('colorPicker');
-  if (colorPicker) {
-    let _colorSelInfo = null;
-    colorPicker.addEventListener('pointerdown', () => {
-      saveSelection();
-      _colorSelInfo = state.lastSelInfo ? { ...state.lastSelInfo } : null;
-    });
-    colorPicker.addEventListener('input', e => {
-      const hex = e.target.value.replace('#', '').toUpperCase();
-      $('colorSwatch').style.background = '#' + hex;
-      // Restore saved selection and apply directly via WASM
-      if (_colorSelInfo && !_colorSelInfo.collapsed && state.doc) {
-        // Apply format directly using saved selection info (bypasses DOM selection issues)
-        try {
-          syncAllText();
-          state.doc.format_selection(
-            _colorSelInfo.startNodeId, _colorSelInfo.startOffset,
-            _colorSelInfo.endNodeId, _colorSelInfo.endOffset,
-            'color', hex
-          );
-          restoreSelectionForPickers();
-          renderNodesById(collectNodeIdsBetween($('pageContainer'), _colorSelInfo.startNodeId, _colorSelInfo.endNodeId));
-          updateToolbarState();
-          updateUndoRedo();
-          markDirty();
-          broadcastOp({ action: 'formatSelection', startNode: _colorSelInfo.startNodeId, startOffset: _colorSelInfo.startOffset, endNode: _colorSelInfo.endNodeId, endOffset: _colorSelInfo.endOffset, key: 'color', value: hex });
-        } catch (err) { console.error('color apply:', err); }
-      } else {
-        // Collapsed cursor — store as pending format
-        restoreSelectionForPickers();
-        applyFormat('color', hex);
-      }
-    });
-  }
+  initColorPaletteDropdown(colorPicker, $('colorSwatch'), 'color');
 
-  // Highlight color
+  // FS-22: Highlight color — preset highlight palette dropdown
   const highlightPicker = $('highlightPicker');
-  if (highlightPicker) {
-    let _hlSelInfo = null;
-    highlightPicker.addEventListener('pointerdown', () => {
-      saveSelection();
-      _hlSelInfo = state.lastSelInfo ? { ...state.lastSelInfo } : null;
-    });
-    highlightPicker.addEventListener('input', e => {
-      const hex = e.target.value.replace('#', '').toUpperCase();
-      // Apply highlight directly using saved selection info
-      if (_hlSelInfo && !_hlSelInfo.collapsed && state.doc) {
-        try {
-          syncAllText();
-          state.doc.format_selection(
-            _hlSelInfo.startNodeId, _hlSelInfo.startOffset,
-            _hlSelInfo.endNodeId, _hlSelInfo.endOffset,
-            'highlightColor', hex
-          );
-          restoreSelectionForPickers();
-          renderNodesById(collectNodeIdsBetween($('pageContainer'), _hlSelInfo.startNodeId, _hlSelInfo.endNodeId));
-          updateToolbarState();
-          updateUndoRedo();
-          markDirty();
-          broadcastOp({ action: 'formatSelection', startNode: _hlSelInfo.startNodeId, startOffset: _hlSelInfo.startOffset, endNode: _hlSelInfo.endNodeId, endOffset: _hlSelInfo.endOffset, key: 'highlightColor', value: hex });
-        } catch (err) { console.error('highlight apply:', err); }
-      } else {
-        restoreSelectionForPickers();
-        applyFormat('highlightColor', hex);
-      }
-    });
-  }
+  initHighlightPaletteDropdown(highlightPicker);
 
   // Line spacing
   $('lineSpacing').addEventListener('change', e => {
@@ -301,14 +244,15 @@ export function initToolbar() {
     menu.classList.toggle('show');
     if (!wasOpen) {
       const rect = $('btnInsertMenu').getBoundingClientRect();
-      // Clamp menu position to stay within the viewport
+      // FS-23: Clamp menu position to stay within the viewport, flip above if overflowing
       let top = rect.bottom + 4;
       let left = rect.left;
       // Measure menu after making it visible
       requestAnimationFrame(() => {
         const menuRect = menu.getBoundingClientRect();
         if (top + menuRect.height > window.innerHeight) {
-          top = Math.max(4, window.innerHeight - menuRect.height - 4);
+          const flipped = rect.top - menuRect.height - 4;
+          top = flipped > 4 ? flipped : Math.max(4, window.innerHeight - menuRect.height - 4);
         }
         if (left + menuRect.width > window.innerWidth) {
           left = Math.max(4, window.innerWidth - menuRect.width - 4);
@@ -318,8 +262,41 @@ export function initToolbar() {
       });
       menu.style.top = top + 'px';
       menu.style.left = left + 'px';
+      // FS-06: Focus first item when opening via keyboard/click
+      requestAnimationFrame(() => {
+        const firstItem = menu.querySelector('[data-action]');
+        if (firstItem) firstItem.focus();
+      });
     }
     $('btnInsertMenu').setAttribute('aria-expanded', menu.classList.contains('show') ? 'true' : 'false');
+  });
+
+  // FS-06: Arrow-key navigation in insert dropdown (WAI-ARIA Menu Pattern)
+  $('insertMenu')?.addEventListener('keydown', e => {
+    const menu = $('insertMenu');
+    const items = Array.from(menu.querySelectorAll('[data-action]'));
+    if (items.length === 0) return;
+    const currentIdx = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = currentIdx < 0 ? 0 : (currentIdx + 1) % items.length;
+      items[next].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = currentIdx <= 0 ? items.length - 1 : currentIdx - 1;
+      items[prev].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      menu.classList.remove('show');
+      $('btnInsertMenu').setAttribute('aria-expanded', 'false');
+      $('btnInsertMenu').focus();
+    }
   });
 
 
@@ -586,7 +563,7 @@ export function initToolbar() {
 
     // Build header HTML
     if (headerText) {
-      state.docHeaderHtml = '<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">' + escapeHtml(headerText) + '</span>';
+      state.docHeaderHtml = '<span style="display:block;text-align:center;color:var(--text-secondary,#5f6368);font-size:9pt">' + escapeHtml(headerText) + '</span>';
     } else {
       state.docHeaderHtml = '';
     }
@@ -600,7 +577,7 @@ export function initToolbar() {
       footerParts.push('<span data-field="PageNumber"></span>');
     }
     if (footerParts.length > 0) {
-      state.docFooterHtml = '<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">' + footerParts.join(' \u2014 ') + '</span>';
+      state.docFooterHtml = '<span style="display:block;text-align:center;color:var(--text-secondary,#5f6368);font-size:9pt">' + footerParts.join(' \u2014 ') + '</span>';
     } else {
       state.docFooterHtml = '';
     }
@@ -792,6 +769,13 @@ export function initToolbar() {
     closeAllMenus();
     openPrintPreview();
   });
+
+  // FS-11: Read-Only Mode toggle
+  if ($('menuReadOnly')) $('menuReadOnly').addEventListener('click', () => {
+    closeAllMenus();
+    toggleReadOnlyMode();
+  });
+
   // Wire up print preview overlay buttons
   if ($('printPreviewClose')) $('printPreviewClose').addEventListener('click', closePrintPreview);
   if ($('printPreviewPrint')) $('printPreviewPrint').addEventListener('click', () => {
@@ -876,6 +860,7 @@ export function initToolbar() {
         else if (action === 'bookmark') $('miBookmark')?.click();
         else if (action === 'drawing') $('miDrawing')?.click();
         else if (action === 'columnbreak') $('miColumnBreak')?.click();
+        else if (action === 'specialchars') $('miSpecialChars')?.click();
       });
     });
   }
@@ -922,6 +907,12 @@ export function initToolbar() {
 
   // E5.4: @mention in comments
   initCommentMentions();
+
+  // FS-43: Special Characters dialog
+  initSpecialCharsModal();
+
+  // FS-44: Borders & Shading dialog
+  initBordersModal();
 
   // Close menus on outside click
   document.addEventListener('click', e => {
@@ -2095,7 +2086,7 @@ export function exitHeaderFooterEditMode() {
         finalHtml = userHtml;
       } else {
         // Wrap in styled span
-        finalHtml = '<span style="display:block;text-align:center;color:#5f6368;font-size:9pt">' +
+        finalHtml = '<span style="display:block;text-align:center;color:var(--text-secondary,#5f6368);font-size:9pt">' +
           _escapeHtmlForHF(userText) + '</span>';
       }
 
@@ -2413,11 +2404,12 @@ function initStyleGallery() {
       const rect = btn.getBoundingClientRect();
       let top = rect.bottom + 4;
       let left = rect.left;
-      // Clamp to viewport
+      // FS-23: Clamp to viewport, flip above if overflowing
       requestAnimationFrame(() => {
         const panelRect = panel.getBoundingClientRect();
         if (top + panelRect.height > window.innerHeight) {
-          top = Math.max(4, window.innerHeight - panelRect.height - 4);
+          const flipped = rect.top - panelRect.height - 4;
+          top = flipped > 4 ? flipped : Math.max(4, window.innerHeight - panelRect.height - 4);
         }
         if (left + panelRect.width > window.innerWidth) {
           left = Math.max(4, window.innerWidth - panelRect.width - 4);
@@ -3052,11 +3044,50 @@ function initMoreMenu() {
     closeMoreMenu();
     if (!wasOpen) {
       const rect = btn.getBoundingClientRect();
-      menu.style.top = (rect.bottom + 4) + 'px';
-      // Align right edge of menu to right edge of button
+      let top = rect.bottom + 4;
       menu.style.left = Math.max(0, rect.right - 220) + 'px';
+      menu.style.top = top + 'px';
       menu.classList.add('show');
       btn.setAttribute('aria-expanded', 'true');
+      // FS-23: Flip above trigger if dropdown overflows viewport bottom
+      requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        if (top + menuRect.height > window.innerHeight) {
+          top = rect.top - menuRect.height - 4;
+          menu.style.top = Math.max(4, top) + 'px';
+        }
+      });
+      // FS-06: Focus first item when opening
+      requestAnimationFrame(() => {
+        const firstItem = menu.querySelector('button:not([type="color"])');
+        if (firstItem) firstItem.focus();
+      });
+    }
+  });
+
+  // FS-06: Arrow-key navigation in more dropdown (WAI-ARIA Menu Pattern)
+  menu.addEventListener('keydown', e => {
+    const items = Array.from(menu.querySelectorAll('button:not([type="color"])'));
+    if (items.length === 0) return;
+    const currentIdx = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = currentIdx < 0 ? 0 : (currentIdx + 1) % items.length;
+      items[next].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = currentIdx <= 0 ? items.length - 1 : currentIdx - 1;
+      items[prev].focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMoreMenu();
+      btn.focus();
     }
   });
 
@@ -3228,6 +3259,246 @@ function closeMoreMenu() {
   const btn = $('btnMore');
   if (menu) menu.classList.remove('show');
   if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+// ── FS-21: Color Palette Dropdown ──────────────────
+// Google Docs-style 8x5 preset grid + recently used + custom button
+const _COLOR_PALETTE = [
+  // Row 1: blacks/grays
+  '000000','434343','666666','999999','B7B7B7','CCCCCC','D9D9D9','EFEFEF','F3F3F3','FFFFFF',
+  // Row 2: saturated
+  '980000','FF0000','FF9900','FFFF00','00FF00','00FFFF','4A86E8','0000FF','9900FF','FF00FF',
+  // Row 3: dark tones
+  'E6B8AF','F4CCCC','FCE5CD','FFF2CC','D9EAD3','D0E0E3','C9DAF8','CFE2F3','D9D2E9','EAD1DC',
+  // Row 4: medium tones
+  'DD7E6B','EA9999','F9CB9C','FFE599','B6D7A8','A2C4C9','A4C2F4','9FC5E8','B4A7D6','D5A6BD',
+];
+let _recentColors = [];
+
+function _applyColorFormat(hex, formatKey) {
+  saveSelection();
+  const selInfo = state.lastSelInfo ? { ...state.lastSelInfo } : null;
+  if (selInfo && !selInfo.collapsed && state.doc) {
+    try {
+      syncAllText();
+      state.doc.format_selection(
+        selInfo.startNodeId, selInfo.startOffset,
+        selInfo.endNodeId, selInfo.endOffset,
+        formatKey, hex
+      );
+      restoreSelectionForPickers();
+      restoreSelectionForPickers();
+      renderDocument();
+      updateToolbarState();
+      updateUndoRedo();
+      markDirty();
+      broadcastOp({ action: 'formatSelection', startNode: selInfo.startNodeId, startOffset: selInfo.startOffset, endNode: selInfo.endNodeId, endOffset: selInfo.endOffset, key: formatKey, value: hex });
+    } catch (err) { console.error(formatKey + ' apply:', err); }
+  } else {
+    restoreSelectionForPickers();
+    applyFormat(formatKey, hex);
+  }
+}
+
+function _addRecentColor(hex) {
+  _recentColors = _recentColors.filter(c => c !== hex);
+  _recentColors.unshift(hex);
+  if (_recentColors.length > 8) _recentColors.length = 8;
+}
+
+function initColorPaletteDropdown(pickerInput, swatchEl, formatKey) {
+  if (!pickerInput) return;
+  const colorBtn = pickerInput.closest('.color-btn');
+  if (!colorBtn) return;
+
+  // Create the dropdown
+  const dd = document.createElement('div');
+  dd.className = 'color-palette-dropdown';
+  dd.id = 'colorPaletteDD_' + formatKey;
+  document.body.appendChild(dd);
+
+  function buildDropdown() {
+    let html = '';
+    if (_recentColors.length > 0) {
+      html += '<div class="color-palette-section"><div class="color-palette-label">Recently used</div><div class="color-palette-grid">';
+      _recentColors.forEach(c => {
+        html += `<button class="color-palette-swatch" data-color="${c}" title="#${c}" style="background:#${c}"></button>`;
+      });
+      html += '</div></div>';
+    }
+    html += '<div class="color-palette-section"><div class="color-palette-grid">';
+    _COLOR_PALETTE.forEach(c => {
+      html += `<button class="color-palette-swatch" data-color="${c}" title="#${c}" style="background:#${c}"></button>`;
+    });
+    html += '</div></div>';
+    html += '<button class="color-palette-custom" title="Pick a custom color">Custom...</button>';
+    dd.innerHTML = html;
+  }
+
+  function openPalette() {
+    saveSelection();
+    buildDropdown();
+    const rect = colorBtn.getBoundingClientRect();
+    let top = rect.bottom + 4;
+    let left = rect.left;
+    dd.classList.add('show');
+    // FS-23: height check
+    requestAnimationFrame(() => {
+      const ddRect = dd.getBoundingClientRect();
+      if (top + ddRect.height > window.innerHeight) {
+        top = rect.top - ddRect.height - 4;
+      }
+      if (left + ddRect.width > window.innerWidth) {
+        left = Math.max(4, window.innerWidth - ddRect.width - 4);
+      }
+      dd.style.top = Math.max(4, top) + 'px';
+      dd.style.left = Math.max(4, left) + 'px';
+    });
+    dd.style.top = top + 'px';
+    dd.style.left = left + 'px';
+  }
+
+  function closePalette() {
+    dd.classList.remove('show');
+  }
+
+  // Click the toolbar button to open palette
+  colorBtn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dd.classList.contains('show')) { closePalette(); return; }
+    // Close other palettes
+    document.querySelectorAll('.color-palette-dropdown.show, .highlight-palette-dropdown.show').forEach(d => d.classList.remove('show'));
+    openPalette();
+  });
+
+  // Swatch clicks
+  dd.addEventListener('click', e => {
+    const swatch = e.target.closest('.color-palette-swatch');
+    if (swatch) {
+      const hex = swatch.dataset.color;
+      if (swatchEl) swatchEl.style.background = '#' + hex;
+      _addRecentColor(hex);
+      _applyColorFormat(hex, formatKey);
+      closePalette();
+      return;
+    }
+    if (e.target.closest('.color-palette-custom')) {
+      closePalette();
+      // Open native color picker
+      pickerInput.style.pointerEvents = 'auto';
+      pickerInput.click();
+      const onInput = ev => {
+        const hex = ev.target.value.replace('#', '').toUpperCase();
+        if (swatchEl) swatchEl.style.background = '#' + hex;
+        _addRecentColor(hex);
+        _applyColorFormat(hex, formatKey);
+      };
+      const onChange = () => {
+        pickerInput.removeEventListener('input', onInput);
+        pickerInput.removeEventListener('change', onChange);
+        pickerInput.style.pointerEvents = 'none';
+      };
+      pickerInput.addEventListener('input', onInput);
+      pickerInput.addEventListener('change', onChange);
+    }
+  });
+
+  // Close on outside click
+  document.addEventListener('click', e => {
+    if (!dd.classList.contains('show')) return;
+    if (e.target.closest('.color-palette-dropdown') || e.target.closest('.color-btn')) return;
+    closePalette();
+  });
+}
+
+// ── FS-22: Highlight Color Palette Dropdown ──────────
+const _HIGHLIGHT_COLORS = [
+  { hex: 'FCE94F', label: 'Yellow' },
+  { hex: '8AE234', label: 'Green' },
+  { hex: '89CFF0', label: 'Cyan' },
+  { hex: 'F4A7B9', label: 'Pink' },
+  { hex: 'FCAF3E', label: 'Orange' },
+  { hex: 'AD7FA8', label: 'Purple' },
+  { hex: 'EF2929', label: 'Red' },
+  { hex: '729FCF', label: 'Blue' },
+];
+
+function initHighlightPaletteDropdown(pickerInput) {
+  if (!pickerInput) return;
+  const hlBtn = pickerInput.closest('.color-btn');
+  if (!hlBtn) return;
+
+  const dd = document.createElement('div');
+  dd.className = 'highlight-palette-dropdown';
+  dd.id = 'highlightPaletteDD';
+  document.body.appendChild(dd);
+
+  function buildDropdown() {
+    let html = '<div class="highlight-palette-grid">';
+    _HIGHLIGHT_COLORS.forEach(c => {
+      html += `<button class="highlight-palette-swatch" data-color="${c.hex}" title="${c.label}" style="background:#${c.hex}"></button>`;
+    });
+    html += '</div>';
+    html += '<button class="highlight-palette-none" title="Remove highlight">None</button>';
+    dd.innerHTML = html;
+  }
+
+  function openPalette() {
+    saveSelection();
+    buildDropdown();
+    const rect = hlBtn.getBoundingClientRect();
+    let top = rect.bottom + 4;
+    let left = rect.left;
+    dd.classList.add('show');
+    // FS-23: height check
+    requestAnimationFrame(() => {
+      const ddRect = dd.getBoundingClientRect();
+      if (top + ddRect.height > window.innerHeight) {
+        top = rect.top - ddRect.height - 4;
+      }
+      if (left + ddRect.width > window.innerWidth) {
+        left = Math.max(4, window.innerWidth - ddRect.width - 4);
+      }
+      dd.style.top = Math.max(4, top) + 'px';
+      dd.style.left = Math.max(4, left) + 'px';
+    });
+    dd.style.top = top + 'px';
+    dd.style.left = left + 'px';
+  }
+
+  function closePalette() {
+    dd.classList.remove('show');
+  }
+
+  hlBtn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dd.classList.contains('show')) { closePalette(); return; }
+    document.querySelectorAll('.color-palette-dropdown.show, .highlight-palette-dropdown.show').forEach(d => d.classList.remove('show'));
+    openPalette();
+  });
+
+  dd.addEventListener('click', e => {
+    const swatch = e.target.closest('.highlight-palette-swatch');
+    if (swatch) {
+      const hex = swatch.dataset.color;
+      _applyColorFormat(hex, 'highlightColor');
+      closePalette();
+      return;
+    }
+    if (e.target.closest('.highlight-palette-none')) {
+      // Remove highlight by applying empty/transparent value
+      _applyColorFormat('', 'highlightColor');
+      closePalette();
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!dd.classList.contains('show')) return;
+    if (e.target.closest('.highlight-palette-dropdown') || e.target.closest('.color-btn')) return;
+    closePalette();
+  });
 }
 
 // ── E6.2: Touch Selection Support ────────────────
@@ -5023,6 +5294,33 @@ function applyEditingMode(mode) {
 }
 
 // ═══════════════════════════════════════════════════════
+// FS-11 — Read-Only / Viewer Mode
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Toggle the read-only viewer mode.
+ * When active, all editing is disabled but selection, copy, and navigation work.
+ */
+function toggleReadOnlyMode() {
+  state.readOnlyMode = !state.readOnlyMode;
+  const pages = document.querySelectorAll('.page-content');
+  pages.forEach(p => {
+    p.contentEditable = state.readOnlyMode ? 'false' : 'true';
+  });
+  // Update menu entry to reflect current state
+  const btn = $('menuReadOnly');
+  if (btn) {
+    btn.classList.toggle('active', state.readOnlyMode);
+    const icon = btn.querySelector('.msi');
+    if (icon) icon.textContent = state.readOnlyMode ? 'lock_open' : 'lock';
+    btn.innerHTML = state.readOnlyMode
+      ? '<span class="msi">lock_open</span> Exit Read-Only'
+      : '<span class="msi">lock</span> Read-Only Mode';
+  }
+  announce(state.readOnlyMode ? 'Read-only mode enabled' : 'Read-only mode disabled');
+}
+
+// ═══════════════════════════════════════════════════════
 // UXP-07 — Review Menu
 // ═══════════════════════════════════════════════════════
 
@@ -6220,3 +6518,662 @@ export function refreshPageThumbnails() {
   const activeTab = panel.querySelector('.pages-tab.active');
   if (activeTab?.dataset.tab === 'pages') renderPageThumbnails();
 }
+
+// ═══════════════════════════════════════════════════
+// FS-43: Special Characters Dialog
+// ═══════════════════════════════════════════════════
+
+const _SC_DATA = {
+  common: [
+    { ch: '\u00A9', name: 'Copyright' },
+    { ch: '\u00AE', name: 'Registered' },
+    { ch: '\u2122', name: 'Trademark' },
+    { ch: '\u00B0', name: 'Degree' },
+    { ch: '\u00B1', name: 'Plus-Minus' },
+    { ch: '\u00B7', name: 'Middle Dot' },
+    { ch: '\u2026', name: 'Ellipsis' },
+    { ch: '\u2014', name: 'Em Dash' },
+    { ch: '\u2013', name: 'En Dash' },
+    { ch: '\u2018', name: 'Left Single Quote' },
+    { ch: '\u2019', name: 'Right Single Quote' },
+    { ch: '\u201C', name: 'Left Double Quote' },
+    { ch: '\u201D', name: 'Right Double Quote' },
+    { ch: '\u00AB', name: 'Left Guillemet' },
+    { ch: '\u00BB', name: 'Right Guillemet' },
+    { ch: '\u2020', name: 'Dagger' },
+    { ch: '\u2021', name: 'Double Dagger' },
+    { ch: '\u00A7', name: 'Section' },
+    { ch: '\u00B6', name: 'Pilcrow' },
+    { ch: '\u2022', name: 'Bullet' },
+    { ch: '\u25CF', name: 'Black Circle' },
+    { ch: '\u25CB', name: 'White Circle' },
+    { ch: '\u25A0', name: 'Black Square' },
+    { ch: '\u25A1', name: 'White Square' },
+    { ch: '\u2605', name: 'Black Star' },
+    { ch: '\u2606', name: 'White Star' },
+    { ch: '\u2665', name: 'Heart' },
+    { ch: '\u2666', name: 'Diamond' },
+    { ch: '\u266A', name: 'Music Note' },
+    { ch: '\u00BF', name: 'Inverted Question' },
+    { ch: '\u00A1', name: 'Inverted Exclamation' },
+    { ch: '\u00D7', name: 'Multiplication' },
+    { ch: '\u00F7', name: 'Division' },
+    { ch: '\u221A', name: 'Square Root' },
+    { ch: '\u221E', name: 'Infinity' },
+    { ch: '\u2248', name: 'Almost Equal' },
+    { ch: '\u2260', name: 'Not Equal' },
+    { ch: '\u2264', name: 'Less or Equal' },
+    { ch: '\u2265', name: 'Greater or Equal' },
+  ],
+  arrows: [
+    { ch: '\u2190', name: 'Left Arrow' },
+    { ch: '\u2191', name: 'Up Arrow' },
+    { ch: '\u2192', name: 'Right Arrow' },
+    { ch: '\u2193', name: 'Down Arrow' },
+    { ch: '\u2194', name: 'Left Right Arrow' },
+    { ch: '\u2195', name: 'Up Down Arrow' },
+    { ch: '\u2196', name: 'NW Arrow' },
+    { ch: '\u2197', name: 'NE Arrow' },
+    { ch: '\u2198', name: 'SE Arrow' },
+    { ch: '\u2199', name: 'SW Arrow' },
+    { ch: '\u21D0', name: 'Left Double Arrow' },
+    { ch: '\u21D1', name: 'Up Double Arrow' },
+    { ch: '\u21D2', name: 'Right Double Arrow' },
+    { ch: '\u21D3', name: 'Down Double Arrow' },
+    { ch: '\u21D4', name: 'Left Right Double Arrow' },
+    { ch: '\u21B5', name: 'Return Arrow' },
+    { ch: '\u21BA', name: 'CCW Arrow' },
+    { ch: '\u21BB', name: 'CW Arrow' },
+    { ch: '\u27A1', name: 'Black Right Arrow' },
+    { ch: '\u2B05', name: 'Black Left Arrow' },
+    { ch: '\u2B06', name: 'Black Up Arrow' },
+    { ch: '\u2B07', name: 'Black Down Arrow' },
+    { ch: '\u25B2', name: 'Up Triangle' },
+    { ch: '\u25BC', name: 'Down Triangle' },
+    { ch: '\u25C0', name: 'Left Triangle' },
+    { ch: '\u25B6', name: 'Right Triangle' },
+  ],
+  math: [
+    { ch: '\u00B1', name: 'Plus-Minus' },
+    { ch: '\u00D7', name: 'Multiplication' },
+    { ch: '\u00F7', name: 'Division' },
+    { ch: '\u2212', name: 'Minus' },
+    { ch: '\u221A', name: 'Square Root' },
+    { ch: '\u221B', name: 'Cube Root' },
+    { ch: '\u221E', name: 'Infinity' },
+    { ch: '\u2248', name: 'Almost Equal' },
+    { ch: '\u2260', name: 'Not Equal' },
+    { ch: '\u2261', name: 'Identical' },
+    { ch: '\u2264', name: 'Less or Equal' },
+    { ch: '\u2265', name: 'Greater or Equal' },
+    { ch: '\u226A', name: 'Much Less Than' },
+    { ch: '\u226B', name: 'Much Greater Than' },
+    { ch: '\u2282', name: 'Subset' },
+    { ch: '\u2283', name: 'Superset' },
+    { ch: '\u2286', name: 'Subset or Equal' },
+    { ch: '\u2287', name: 'Superset or Equal' },
+    { ch: '\u2208', name: 'Element Of' },
+    { ch: '\u2209', name: 'Not Element Of' },
+    { ch: '\u2205', name: 'Empty Set' },
+    { ch: '\u2200', name: 'For All' },
+    { ch: '\u2203', name: 'There Exists' },
+    { ch: '\u2204', name: 'Not Exists' },
+    { ch: '\u2227', name: 'Logical And' },
+    { ch: '\u2228', name: 'Logical Or' },
+    { ch: '\u00AC', name: 'Not' },
+    { ch: '\u2234', name: 'Therefore' },
+    { ch: '\u2235', name: 'Because' },
+    { ch: '\u2211', name: 'Summation' },
+    { ch: '\u220F', name: 'Product' },
+    { ch: '\u222B', name: 'Integral' },
+    { ch: '\u2202', name: 'Partial Differential' },
+    { ch: '\u2207', name: 'Nabla' },
+    { ch: '\u03C0', name: 'Pi' },
+    { ch: '\u2220', name: 'Angle' },
+    { ch: '\u22A5', name: 'Perpendicular' },
+    { ch: '\u2225', name: 'Parallel' },
+  ],
+  currency: [
+    { ch: '$', name: 'Dollar' },
+    { ch: '\u20AC', name: 'Euro' },
+    { ch: '\u00A3', name: 'Pound' },
+    { ch: '\u00A5', name: 'Yen' },
+    { ch: '\u20A3', name: 'French Franc' },
+    { ch: '\u20B9', name: 'Indian Rupee' },
+    { ch: '\u20BD', name: 'Russian Ruble' },
+    { ch: '\u20A9', name: 'Won' },
+    { ch: '\u20B1', name: 'Peso' },
+    { ch: '\u20BA', name: 'Turkish Lira' },
+    { ch: '\u20B4', name: 'Ukrainian Hryvnia' },
+    { ch: '\u20BF', name: 'Bitcoin' },
+    { ch: '\u00A2', name: 'Cent' },
+    { ch: '\u20AB', name: 'Dong' },
+    { ch: '\u20AA', name: 'Shekel' },
+    { ch: '\u20B8', name: 'Tenge' },
+    { ch: '\u20AE', name: 'Tugrik' },
+    { ch: '\u00A4', name: 'Currency Sign' },
+  ],
+  greek: [
+    { ch: '\u0391', name: 'Alpha' },
+    { ch: '\u0392', name: 'Beta' },
+    { ch: '\u0393', name: 'Gamma' },
+    { ch: '\u0394', name: 'Delta' },
+    { ch: '\u0395', name: 'Epsilon' },
+    { ch: '\u0396', name: 'Zeta' },
+    { ch: '\u0397', name: 'Eta' },
+    { ch: '\u0398', name: 'Theta' },
+    { ch: '\u0399', name: 'Iota' },
+    { ch: '\u039A', name: 'Kappa' },
+    { ch: '\u039B', name: 'Lambda' },
+    { ch: '\u039C', name: 'Mu' },
+    { ch: '\u039D', name: 'Nu' },
+    { ch: '\u039E', name: 'Xi' },
+    { ch: '\u039F', name: 'Omicron' },
+    { ch: '\u03A0', name: 'Pi' },
+    { ch: '\u03A1', name: 'Rho' },
+    { ch: '\u03A3', name: 'Sigma' },
+    { ch: '\u03A4', name: 'Tau' },
+    { ch: '\u03A5', name: 'Upsilon' },
+    { ch: '\u03A6', name: 'Phi' },
+    { ch: '\u03A7', name: 'Chi' },
+    { ch: '\u03A8', name: 'Psi' },
+    { ch: '\u03A9', name: 'Omega' },
+    { ch: '\u03B1', name: 'alpha' },
+    { ch: '\u03B2', name: 'beta' },
+    { ch: '\u03B3', name: 'gamma' },
+    { ch: '\u03B4', name: 'delta' },
+    { ch: '\u03B5', name: 'epsilon' },
+    { ch: '\u03B6', name: 'zeta' },
+    { ch: '\u03B7', name: 'eta' },
+    { ch: '\u03B8', name: 'theta' },
+    { ch: '\u03B9', name: 'iota' },
+    { ch: '\u03BA', name: 'kappa' },
+    { ch: '\u03BB', name: 'lambda' },
+    { ch: '\u03BC', name: 'mu' },
+    { ch: '\u03BD', name: 'nu' },
+    { ch: '\u03BE', name: 'xi' },
+    { ch: '\u03BF', name: 'omicron' },
+    { ch: '\u03C0', name: 'pi' },
+    { ch: '\u03C1', name: 'rho' },
+    { ch: '\u03C3', name: 'sigma' },
+    { ch: '\u03C4', name: 'tau' },
+    { ch: '\u03C5', name: 'upsilon' },
+    { ch: '\u03C6', name: 'phi' },
+    { ch: '\u03C7', name: 'chi' },
+    { ch: '\u03C8', name: 'psi' },
+    { ch: '\u03C9', name: 'omega' },
+  ],
+  punctuation: [
+    { ch: '\u00A0', name: 'Non-Breaking Space' },
+    { ch: '\u2002', name: 'En Space' },
+    { ch: '\u2003', name: 'Em Space' },
+    { ch: '\u2009', name: 'Thin Space' },
+    { ch: '\u200B', name: 'Zero-Width Space' },
+    { ch: '\u200D', name: 'Zero-Width Joiner' },
+    { ch: '\u200C', name: 'Zero-Width Non-Joiner' },
+    { ch: '\u2010', name: 'Hyphen' },
+    { ch: '\u2011', name: 'Non-Breaking Hyphen' },
+    { ch: '\u2012', name: 'Figure Dash' },
+    { ch: '\u2013', name: 'En Dash' },
+    { ch: '\u2014', name: 'Em Dash' },
+    { ch: '\u2015', name: 'Horizontal Bar' },
+    { ch: '\u2018', name: 'Left Single Quote' },
+    { ch: '\u2019', name: 'Right Single Quote' },
+    { ch: '\u201A', name: 'Single Low Quote' },
+    { ch: '\u201C', name: 'Left Double Quote' },
+    { ch: '\u201D', name: 'Right Double Quote' },
+    { ch: '\u201E', name: 'Double Low Quote' },
+    { ch: '\u2026', name: 'Ellipsis' },
+    { ch: '\u00AB', name: 'Left Guillemet' },
+    { ch: '\u00BB', name: 'Right Guillemet' },
+    { ch: '\u2039', name: 'Left Single Guillemet' },
+    { ch: '\u203A', name: 'Right Single Guillemet' },
+    { ch: '\u00BF', name: 'Inverted Question' },
+    { ch: '\u00A1', name: 'Inverted Exclamation' },
+    { ch: '\u2030', name: 'Per Mille' },
+    { ch: '\u2031', name: 'Per Ten Thousand' },
+    { ch: '\u2032', name: 'Prime' },
+    { ch: '\u2033', name: 'Double Prime' },
+  ],
+};
+
+function initSpecialCharsModal() {
+  const modal = $('specialCharsModal');
+  const grid = $('scGrid');
+  const tabs = $('scCategoryTabs');
+  const search = $('scSearch');
+  const previewChar = $('scPreviewChar');
+  const previewName = $('scPreviewName');
+  const previewCode = $('scPreviewCode');
+  const closeBtn = $('scCloseBtn');
+  const miSpecialChars = $('miSpecialChars');
+
+  if (!modal || !grid) return;
+
+  let _savedSel = null;
+  let _currentCat = 'common';
+
+  function renderGrid(category, filter) {
+    const chars = _SC_DATA[category] || [];
+    const filtered = filter
+      ? chars.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()) || c.ch === filter)
+      : chars;
+    grid.innerHTML = '';
+    for (const item of filtered) {
+      const btn = document.createElement('button');
+      btn.className = 'sc-cell';
+      btn.textContent = item.ch;
+      btn.title = `${item.name} (U+${item.ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`;
+      btn.dataset.char = item.ch;
+      btn.dataset.name = item.name;
+      grid.appendChild(btn);
+    }
+  }
+
+  // Open modal from menu bar
+  if (miSpecialChars) {
+    miSpecialChars.addEventListener('click', () => {
+      // Close all parent menus
+      document.querySelectorAll('.app-menu-item.open').forEach(m => m.classList.remove('open'));
+      openSpecialCharsModal();
+    });
+  }
+
+  function openSpecialCharsModal() {
+    // Save selection
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        _savedSel = sel.getRangeAt(0).cloneRange();
+      }
+    } catch (_) { _savedSel = null; }
+    _currentCat = 'common';
+    search.value = '';
+    renderGrid('common');
+    tabs.querySelectorAll('.sc-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === 'common'));
+    previewChar.textContent = '';
+    previewName.textContent = '';
+    previewCode.textContent = '';
+    modal.classList.add('show');
+    search.focus();
+  }
+
+  // Tab switching
+  tabs.addEventListener('click', (e) => {
+    const tab = e.target.closest('.sc-tab');
+    if (!tab) return;
+    _currentCat = tab.dataset.cat;
+    tabs.querySelectorAll('.sc-tab').forEach(t => t.classList.toggle('active', t === tab));
+    search.value = '';
+    renderGrid(_currentCat);
+  });
+
+  // Search filtering
+  search.addEventListener('input', () => {
+    const q = search.value.trim();
+    if (q) {
+      // Search across all categories
+      const allChars = [];
+      for (const cat of Object.values(_SC_DATA)) {
+        for (const item of cat) {
+          if (item.name.toLowerCase().includes(q.toLowerCase()) || item.ch === q) {
+            // Avoid duplicates
+            if (!allChars.find(c => c.ch === item.ch)) {
+              allChars.push(item);
+            }
+          }
+        }
+      }
+      grid.innerHTML = '';
+      for (const item of allChars) {
+        const btn = document.createElement('button');
+        btn.className = 'sc-cell';
+        btn.textContent = item.ch;
+        btn.title = `${item.name} (U+${item.ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`;
+        btn.dataset.char = item.ch;
+        btn.dataset.name = item.name;
+        grid.appendChild(btn);
+      }
+    } else {
+      renderGrid(_currentCat);
+    }
+  });
+
+  // Hover preview
+  grid.addEventListener('mouseover', (e) => {
+    const cell = e.target.closest('.sc-cell');
+    if (!cell) return;
+    const ch = cell.dataset.char;
+    const name = cell.dataset.name;
+    previewChar.textContent = ch;
+    previewName.textContent = name;
+    previewCode.textContent = 'U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
+  });
+
+  // Click to insert
+  grid.addEventListener('click', (e) => {
+    const cell = e.target.closest('.sc-cell');
+    if (!cell) return;
+    if (state.readOnlyMode) return;
+    const ch = cell.dataset.char;
+    modal.classList.remove('show');
+
+    // Restore selection and insert at cursor
+    if (_savedSel) {
+      try {
+        const startOk = _savedSel.startContainer && _savedSel.startContainer.isConnected;
+        const endOk = _savedSel.endContainer && _savedSel.endContainer.isConnected;
+        if (startOk && endOk) {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(_savedSel);
+        }
+      } catch (_) {}
+    }
+
+    // Block insertion in read-only mode
+    if (state.readOnlyMode) return;
+    // Focus editor and insert text
+    const pageContent = $('pageContainer')?.querySelector('.page-content');
+    if (pageContent) pageContent.focus();
+    // Use execCommand to insert at cursor position, preserving undo
+    document.execCommand('insertText', false, ch);
+    announce('Inserted ' + (cell.dataset.name || 'character'));
+    trackEvent('insert', 'special-char');
+  });
+
+  // Close
+  closeBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+    // Restore focus
+    if (_savedSel) {
+      try {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_savedSel);
+      } catch (_) {}
+    }
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('show');
+  });
+
+  // Keyboard handling
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      modal.classList.remove('show');
+    }
+  });
+
+  // Render initial grid
+  renderGrid('common');
+}
+
+// ═══════════════════════════════════════════════════
+// FS-44: Borders & Shading Dialog
+// ═══════════════════════════════════════════════════
+
+function initBordersModal() {
+  const modal = $('bordersModal');
+  const presets = $('bordersPresets');
+  const borderTop = $('borderTop');
+  const borderBottom = $('borderBottom');
+  const borderLeft = $('borderLeft');
+  const borderRight = $('borderRight');
+  const borderStyle = $('borderStyle');
+  const borderWidth = $('borderWidth');
+  const borderColor = $('borderColor');
+  const shadingColor = $('shadingColor');
+  const previewInner = $('bordersPreviewInner');
+  const applyBtn = $('bordersApplyBtn');
+  const cancelBtn = $('bordersCancelBtn');
+  const resetBtn = $('bordersResetBtn');
+  const menuBtn = $('menuBordersShading');
+
+  if (!modal || !applyBtn) return;
+
+  let _savedSel = null;
+
+  function updatePreview() {
+    const style = borderStyle.value;
+    const width = borderWidth.value + 'pt';
+    const color = borderColor.value;
+    const bg = shadingColor.value;
+
+    const makeBorder = (on) => on ? `${width} ${style} ${color}` : 'none';
+    previewInner.style.borderTop = makeBorder(borderTop.checked);
+    previewInner.style.borderBottom = makeBorder(borderBottom.checked);
+    previewInner.style.borderLeft = makeBorder(borderLeft.checked);
+    previewInner.style.borderRight = makeBorder(borderRight.checked);
+    previewInner.style.backgroundColor = (bg && bg !== '#ffffff') ? bg : '';
+
+    // Update active preset
+    presets.querySelectorAll('.borders-preset').forEach(p => p.classList.remove('active'));
+    const allOn = borderTop.checked && borderBottom.checked && borderLeft.checked && borderRight.checked;
+    const allOff = !borderTop.checked && !borderBottom.checked && !borderLeft.checked && !borderRight.checked;
+    const topBottomOnly = borderTop.checked && borderBottom.checked && !borderLeft.checked && !borderRight.checked;
+    const topOnly = borderTop.checked && !borderBottom.checked && !borderLeft.checked && !borderRight.checked;
+    const bottomOnly = !borderTop.checked && borderBottom.checked && !borderLeft.checked && !borderRight.checked;
+
+    if (allOff) presets.querySelector('[data-preset="none"]')?.classList.add('active');
+    else if (allOn) presets.querySelector('[data-preset="box"]')?.classList.add('active');
+    else if (topOnly) presets.querySelector('[data-preset="top"]')?.classList.add('active');
+    else if (bottomOnly) presets.querySelector('[data-preset="bottom"]')?.classList.add('active');
+    else if (topBottomOnly) presets.querySelector('[data-preset="topBottom"]')?.classList.add('active');
+  }
+
+  // Preset buttons
+  presets.addEventListener('click', (e) => {
+    const btn = e.target.closest('.borders-preset');
+    if (!btn) return;
+    const preset = btn.dataset.preset;
+    switch (preset) {
+      case 'none':
+        borderTop.checked = false;
+        borderBottom.checked = false;
+        borderLeft.checked = false;
+        borderRight.checked = false;
+        break;
+      case 'box':
+        borderTop.checked = true;
+        borderBottom.checked = true;
+        borderLeft.checked = true;
+        borderRight.checked = true;
+        break;
+      case 'top':
+        borderTop.checked = true;
+        borderBottom.checked = false;
+        borderLeft.checked = false;
+        borderRight.checked = false;
+        break;
+      case 'bottom':
+        borderTop.checked = false;
+        borderBottom.checked = true;
+        borderLeft.checked = false;
+        borderRight.checked = false;
+        break;
+      case 'topBottom':
+        borderTop.checked = true;
+        borderBottom.checked = true;
+        borderLeft.checked = false;
+        borderRight.checked = false;
+        break;
+    }
+    updatePreview();
+  });
+
+  // Individual toggles
+  [borderTop, borderBottom, borderLeft, borderRight].forEach(cb => {
+    cb.addEventListener('change', updatePreview);
+  });
+  [borderStyle, borderWidth, borderColor, shadingColor].forEach(el => {
+    el.addEventListener('change', updatePreview);
+    el.addEventListener('input', updatePreview);
+  });
+
+  // Open from Format menu
+  if (menuBtn) {
+    menuBtn.addEventListener('click', () => {
+      document.querySelectorAll('.app-menu-item.open').forEach(m => m.classList.remove('open'));
+      openBordersModal();
+    });
+  }
+
+  function openBordersModal() {
+    // Save selection
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        _savedSel = sel.getRangeAt(0).cloneRange();
+      }
+    } catch (_) { _savedSel = null; }
+
+    // Reset to defaults
+    borderTop.checked = false;
+    borderBottom.checked = false;
+    borderLeft.checked = false;
+    borderRight.checked = false;
+    borderStyle.value = 'solid';
+    borderWidth.value = '1';
+    borderColor.value = '#000000';
+    shadingColor.value = '#ffffff';
+    updatePreview();
+    modal.classList.add('show');
+  }
+
+  // Apply borders
+  applyBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+
+    // Restore selection
+    if (_savedSel) {
+      try {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(_savedSel);
+      } catch (_) {}
+    }
+
+    if (!state.doc) return;
+    const info = getSelectionInfo();
+    if (!info) return;
+    syncAllText();
+
+    const paraIds = getSelectedParagraphIds(info);
+    if (!paraIds || paraIds.length === 0) return;
+
+    const style = borderStyle.value;
+    const width = borderWidth.value;
+    const color = borderColor.value.replace('#', '');
+    const bg = shadingColor.value;
+    const bgHex = bg.replace('#', '');
+
+    // Build border value string: "width style color" or "none"
+    const makeBorderVal = (on) => on ? `${width} ${style} ${color}` : 'none';
+    const bTop = makeBorderVal(borderTop.checked);
+    const bBottom = makeBorderVal(borderBottom.checked);
+    const bLeft = makeBorderVal(borderLeft.checked);
+    const bRight = makeBorderVal(borderRight.checked);
+
+    for (const nodeId of paraIds) {
+      try {
+        // Try WASM set_attributes for border properties
+        if (typeof state.doc.set_paragraph_borders === 'function') {
+          state.doc.set_paragraph_borders(nodeId, bTop, bBottom, bLeft, bRight);
+        } else {
+          // Fallback: set individual border attributes
+          try { state.doc.set_attribute(nodeId, 'borderTop', bTop); } catch (_) {}
+          try { state.doc.set_attribute(nodeId, 'borderBottom', bBottom); } catch (_) {}
+          try { state.doc.set_attribute(nodeId, 'borderLeft', bLeft); } catch (_) {}
+          try { state.doc.set_attribute(nodeId, 'borderRight', bRight); } catch (_) {}
+        }
+        // Shading / background
+        if (bgHex !== 'ffffff') {
+          try {
+            if (typeof state.doc.set_paragraph_shading === 'function') {
+              state.doc.set_paragraph_shading(nodeId, bgHex);
+            } else {
+              try { state.doc.set_attribute(nodeId, 'backgroundColor', bgHex); } catch (_) {}
+            }
+          } catch (_) {}
+        } else {
+          // Clear background
+          try {
+            if (typeof state.doc.set_paragraph_shading === 'function') {
+              state.doc.set_paragraph_shading(nodeId, '');
+            } else {
+              try { state.doc.set_attribute(nodeId, 'backgroundColor', ''); } catch (_) {}
+            }
+          } catch (_) {}
+        }
+        broadcastOp({
+          action: 'setParagraphBorders', nodeId,
+          borderTop: bTop, borderBottom: bBottom,
+          borderLeft: bLeft, borderRight: bRight,
+          backgroundColor: bgHex !== 'ffffff' ? bgHex : '',
+        });
+      } catch (err) {
+        console.error('borders apply:', err);
+      }
+    }
+
+    // Visual fallback: apply directly to DOM elements if WASM attributes not rendered
+    const page = $('pageContainer');
+    if (page) {
+      for (const nodeId of paraIds) {
+        const el = page.querySelector(`[data-node-id="${nodeId}"]`);
+        if (el) {
+          const px = (parseFloat(width) * 1.333).toFixed(1) + 'px';
+          el.style.borderTop = borderTop.checked ? `${px} ${style} #${color}` : '';
+          el.style.borderBottom = borderBottom.checked ? `${px} ${style} #${color}` : '';
+          el.style.borderLeft = borderLeft.checked ? `${px} ${style} #${color}` : '';
+          el.style.borderRight = borderRight.checked ? `${px} ${style} #${color}` : '';
+          el.style.backgroundColor = bgHex !== 'ffffff' ? `#${bgHex}` : '';
+          // Padding for bordered paragraphs
+          if (borderTop.checked || borderBottom.checked || borderLeft.checked || borderRight.checked) {
+            el.style.padding = el.style.padding || '4px 8px';
+          }
+        }
+      }
+    }
+
+    renderDocument();
+    recordUndoAction('Apply borders and shading');
+    updateUndoRedo();
+    // Notify if only visual fallback was used (not persisted to model)
+    if (typeof state.doc?.set_paragraph_borders !== 'function') {
+      announce('Borders applied visually (re-export to preserve)');
+    } else {
+      announce('Borders applied');
+    }
+    trackEvent('format', 'borders');
+  });
+
+  // Reset
+  resetBtn.addEventListener('click', () => {
+    borderTop.checked = false;
+    borderBottom.checked = false;
+    borderLeft.checked = false;
+    borderRight.checked = false;
+    borderStyle.value = 'solid';
+    borderWidth.value = '1';
+    borderColor.value = '#000000';
+    shadingColor.value = '#ffffff';
+    updatePreview();
+  });
+
+  // Cancel
+  cancelBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('show');
+  });
+
+  // Initialize preview
+  updatePreview();
+}
+

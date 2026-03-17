@@ -5253,6 +5253,149 @@ impl WasmDocument {
         }
         Ok(format!("[{}]", notes.join(",")))
     }
+
+    // ─── FS-15: Document Statistics API ────────────────────
+
+    /// Get document statistics as JSON.
+    ///
+    /// Returns `{"words":N,"characters":N,"charactersNoSpaces":N,"paragraphs":N,"pages":N}`.
+    pub fn get_document_stats_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let text = doc.to_plain_text();
+        let paragraphs = doc.paragraph_count();
+
+        let characters: usize = text.chars().count();
+        let characters_no_spaces: usize = text.chars().filter(|c| !c.is_whitespace()).count();
+        let words = count_words_in_str(&text);
+
+        // Page count from layout engine (best-effort; falls back to 1 on error)
+        let pages = {
+            let font_db = s1_text::FontDatabase::empty();
+            match doc.layout(&font_db) {
+                Ok(layout) => layout.pages.len().max(1),
+                Err(_) => 1usize,
+            }
+        };
+
+        Ok(format!(
+            "{{\"words\":{},\"characters\":{},\"charactersNoSpaces\":{},\"paragraphs\":{},\"pages\":{}}}",
+            words, characters, characters_no_spaces, paragraphs, pages
+        ))
+    }
+
+    /// Count words in a selection range.
+    ///
+    /// Takes start/end node IDs and character offsets. Returns the word count
+    /// for text within that range.
+    pub fn get_selection_word_count(
+        &self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+    ) -> Result<usize, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let start_id = parse_node_id(start_node_str)?;
+        let end_id = parse_node_id(end_node_str)?;
+
+        let body_id = model
+            .body_id()
+            .ok_or_else(|| JsError::new("No body"))?;
+        let body = model
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+
+        // Collect text from the selected range
+        let mut text = String::new();
+        let mut inside = false;
+        let same_node = start_id == end_id;
+
+        for &child_id in &body.children {
+            if model.node(child_id).is_none() {
+                continue;
+            }
+            // Recurse into tables and other containers
+            let para_ids = collect_paragraph_ids_recursive(model, child_id);
+            for para_id in para_ids {
+                if para_id == start_id && same_node {
+                    // Single-node selection
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let s = start_offset.min(chars.len());
+                    let e = end_offset.min(chars.len());
+                    let slice: String = chars[s..e].iter().collect();
+                    text.push_str(&slice);
+                    break;
+                } else if para_id == start_id {
+                    inside = true;
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let s = start_offset.min(chars.len());
+                    let slice: String = chars[s..].iter().collect();
+                    text.push_str(&slice);
+                    text.push(' ');
+                } else if para_id == end_id {
+                    let para_text = extract_paragraph_text(model, para_id);
+                    let chars: Vec<char> = para_text.chars().collect();
+                    let e = end_offset.min(chars.len());
+                    let slice: String = chars[..e].iter().collect();
+                    text.push_str(&slice);
+                    inside = false;
+                    break;
+                } else if inside {
+                    let para_text = extract_paragraph_text(model, para_id);
+                    text.push_str(&para_text);
+                    text.push(' ');
+                }
+            }
+            if !inside && (same_node || para_ids_contain(model, child_id, end_id)) {
+                break;
+            }
+        }
+
+        Ok(count_words_in_str(&text))
+    }
+}
+
+/// Count words in a string (split on whitespace, filter empty).
+fn count_words_in_str(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+/// Recursively collect paragraph NodeIds from a node (handles tables, sections, etc.).
+fn collect_paragraph_ids_recursive(model: &DocumentModel, node_id: NodeId) -> Vec<NodeId> {
+    let node = match model.node(node_id) {
+        Some(n) => n,
+        None => return vec![],
+    };
+    match node.node_type {
+        NodeType::Paragraph => vec![node_id],
+        _ => {
+            let mut result = Vec::new();
+            for &child_id in &node.children {
+                result.extend(collect_paragraph_ids_recursive(model, child_id));
+            }
+            result
+        }
+    }
+}
+
+/// Check if a subtree contains a specific node ID.
+fn para_ids_contain(model: &DocumentModel, root_id: NodeId, target: NodeId) -> bool {
+    if root_id == target {
+        return true;
+    }
+    let node = match model.node(root_id) {
+        Some(n) => n,
+        None => return false,
+    };
+    for &child_id in &node.children {
+        if para_ids_contain(model, child_id, target) {
+            return true;
+        }
+    }
+    false
 }
 
 // --- WasmDocumentBuilder ---
@@ -7381,6 +7524,13 @@ fn render_paragraph(
         para_id.replica, para_id.counter, list_type_attr
     );
 
+    // FS-07: Add dir="rtl" if paragraph text starts with RTL characters
+    let dir_attr = if paragraph_starts_rtl(model, para_id) {
+        " dir=\"rtl\""
+    } else {
+        ""
+    };
+
     // List marker prefix — use computed ordinal if available, fall back to start
     let list_marker = list_info.as_ref().map(|li| {
         let n = list_ordinal.unwrap_or(li.start.unwrap_or(1));
@@ -7473,7 +7623,7 @@ fn render_paragraph(
             } else {
                 format!(" style=\"{heading_style}\"")
             };
-            html.push_str(&format!("<h{l}{nid_attr}{h_style_attr}>"));
+            html.push_str(&format!("<h{l}{nid_attr}{h_style_attr}{dir_attr}>"));
             render_inline_children(model, para_id, html);
             // Ensure empty headings are editable (non-collapsing)
             if is_empty_paragraph(model, para_id) {
@@ -7549,7 +7699,7 @@ fn render_paragraph(
             } else {
                 format!(" style=\"{para_style}\"")
             };
-            html.push_str(&format!("<p{nid_attr}{p_style_attr}{data_style_attr}>"));
+            html.push_str(&format!("<p{nid_attr}{p_style_attr}{data_style_attr}{dir_attr}>"));
             if let Some(marker) = list_marker {
                 html.push_str(&format!(
                     "<span class=\"list-marker\" style=\"user-select:none\" contenteditable=\"false\">{marker}</span>"
@@ -7988,7 +8138,14 @@ fn render_paragraph_clean_partial(
         _ => "p".to_string(),
     };
 
-    html.push_str(&format!("<{tag}{style_attr}{list_attrs}>"));
+    // FS-07: Add dir="rtl" if paragraph text starts with RTL characters
+    let dir_attr = if paragraph_starts_rtl(model, para_id) {
+        " dir=\"rtl\""
+    } else {
+        ""
+    };
+
+    html.push_str(&format!("<{tag}{style_attr}{list_attrs}{dir_attr}>"));
 
     // Walk children (runs, images, etc.) with character offset tracking
     let sel_start = start_char.unwrap_or(0);
@@ -8439,6 +8596,49 @@ fn is_empty_paragraph(model: &DocumentModel, para_id: NodeId) -> bool {
         }
     }
     true
+}
+
+/// FS-07: Detect if a paragraph's text starts with RTL characters (Arabic/Hebrew).
+/// Returns true if the first alphabetic character is in an RTL script range.
+fn paragraph_starts_rtl(model: &DocumentModel, para_id: NodeId) -> bool {
+    let para = match model.node(para_id) {
+        Some(n) => n,
+        None => return false,
+    };
+    for &child_id in &para.children {
+        if let Some(child) = model.node(child_id) {
+            if child.node_type == NodeType::Run {
+                for &sub_id in &child.children {
+                    if let Some(sub) = model.node(sub_id) {
+                        if sub.node_type == NodeType::Text {
+                            if let Some(content) = sub.text_content.as_deref() {
+                                for ch in content.chars() {
+                                    if ch.is_whitespace() {
+                                        continue;
+                                    }
+                                    // Arabic: U+0600-U+06FF, U+0750-U+077F, U+08A0-U+08FF
+                                    // Hebrew: U+0590-U+05FF
+                                    let cp = ch as u32;
+                                    if (0x0590..=0x05FF).contains(&cp)
+                                        || (0x0600..=0x06FF).contains(&cp)
+                                        || (0x0750..=0x077F).contains(&cp)
+                                        || (0x08A0..=0x08FF).contains(&cp)
+                                        || (0xFB50..=0xFDFF).contains(&cp)
+                                        || (0xFE70..=0xFEFF).contains(&cp)
+                                    {
+                                        return true;
+                                    }
+                                    // If first non-whitespace char is not RTL, return false
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Convert a BorderStyle enum to a CSS border-style keyword.

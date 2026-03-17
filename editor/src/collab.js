@@ -805,12 +805,15 @@ function renderPeerCursor(cursor) {
     renderPeerSelection(cursor);
   }
 
-  // Auto-remove after 5s if no update
+  // Auto-remove after 30s if no update (FS-35: increased from 5s)
+  // Peer cursors should persist as long as the peer is connected;
+  // they only disappear on timeout if the peer stops sending awareness.
+  const PEER_CURSOR_TIMEOUT = 30000;
   setTimeout(() => {
     const el = document.getElementById(`peer-cursor-${cursor.peerId}`);
     if (el) el.remove();
     clearPeerSelection(cursor.peerId);
-  }, 5000);
+  }, PEER_CURSOR_TIMEOUT);
 }
 
 /**

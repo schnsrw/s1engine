@@ -423,7 +423,8 @@ function createPageElement(pageNum, pgData, dims, headerHtml, footerHtml, totalP
   // Content (editable)
   const content = document.createElement('div');
   content.className = 'page-content';
-  content.contentEditable = 'true';
+  // FS-11: Respect read-only mode
+  content.contentEditable = state.readOnlyMode ? 'false' : 'true';
   content.spellcheck = isSpellCheckEnabled();
   content.lang = 'en';
   content.setAttribute('role', 'textbox');

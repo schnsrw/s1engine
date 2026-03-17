@@ -15,6 +15,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 </head>
 <body>
+<a href="#pageContainer" class="skip-link">Skip to document</a>
 <div class="app" id="app">
   <!-- Title Bar -->
   <div class="menubar">
@@ -85,6 +86,8 @@
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuPrintPreview" role="menuitem" tabindex="-1"><span class="msi">preview</span> Print Preview</button>
         <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuReadOnly" role="menuitem" tabindex="-1" title="Toggle read-only viewer mode (disables all editing)"><span class="msi">lock</span> Read-Only Mode</button>
+        <div class="app-menu-sep" role="separator"></div>
         <label class="app-menu-entry" id="menuCanvasMode" role="menuitem" tabindex="-1" style="display:flex;align-items:center;gap:8px;cursor:pointer" title="Render document using HTML5 Canvas for pixel-accurate glyph placement">
           <span class="msi">brush</span> Canvas Mode
           <input type="checkbox" id="canvasModeToggle" style="margin-left:auto;cursor:pointer" title="Toggle canvas-based rendering">
@@ -122,6 +125,8 @@
         <button class="app-menu-entry" id="miBookmark" role="menuitem" tabindex="-1"><span class="msi">bookmark</span> Bookmark... <span class="shortcut">Ctrl+Shift+B</span></button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="miDrawing" role="menuitem" tabindex="-1" title="Insert a drawing"><span class="msi">draw</span> Drawing...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="miSpecialChars" role="menuitem" tabindex="-1" title="Insert a special character or symbol"><span class="msi">special_character</span> Special Characters...</button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="formatMenu">
@@ -134,6 +139,8 @@
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuClearFormat" role="menuitem" tabindex="-1"><span class="msi">format_clear</span> Clear formatting</button>
         <button class="app-menu-entry" id="menuFormatPainter" role="menuitem" tabindex="-1"><span class="msi">format_paint</span> Format Painter</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuBordersShading" role="menuitem" tabindex="-1" title="Configure paragraph borders and shading"><span class="msi">border_all</span> Borders &amp; Shading...</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuPageSetup" role="menuitem" tabindex="-1"><span class="msi">description</span> Page Setup...</button>
         <button class="app-menu-entry" id="menuColumns" role="menuitem" tabindex="-1"><span class="msi">view_column</span> Columns...</button>
@@ -361,6 +368,8 @@
         <button class="ctx-item" data-action="bookmark" role="menuitem" title="Insert bookmark (Ctrl+Shift+B)"><span class="msi ctx-icon">bookmark</span> Bookmark...</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" data-action="drawing" role="menuitem"><span class="msi ctx-icon">draw</span> Drawing...</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" data-action="specialchars" role="menuitem" title="Insert a special character or symbol"><span class="msi ctx-icon">special_character</span> Special Characters...</button>
       </div>
     </div>
     <div class="tb-sep" role="separator"></div>
@@ -473,7 +482,11 @@
         <input class="find-input" id="findInput" placeholder="Find in document..." autocomplete="off">
         <button class="find-option-btn" id="findMatchCase" title="Match case (Alt+C)">Aa</button>
         <button class="find-option-btn" id="findWholeWord" title="Whole words (Alt+W)">W</button>
+        <button class="find-option-btn" id="findRegex" title="Use regular expression (Alt+R)">.*</button>
+        <button class="find-option-btn" id="findInSelection" title="Find in selection (Alt+S)">Sel</button>
         <span class="find-count" id="findCount"></span>
+        <span class="find-regex-error" id="findRegexError" style="display:none;color:#d93025;font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title=""></span>
+        <span class="sr-only" id="findCountLive" aria-live="polite" aria-atomic="true"></span>
         <button class="find-btn" id="findPrev" title="Previous match"><span class="msi">keyboard_arrow_up</span></button>
         <button class="find-btn" id="findNext" title="Next match"><span class="msi">keyboard_arrow_down</span></button>
         <button class="find-close" id="findClose" title="Close"><span class="msi">close</span></button>
@@ -658,8 +671,8 @@
         </div>
 
         <div class="props-group">
-          <label class="props-label" for="tpWidthMode">Table width</label>
-          <select class="props-select" id="tpWidthMode" title="Table width mode">
+          <label class="props-label" for="propsWidthMode">Table width</label>
+          <select class="props-select" id="propsWidthMode" title="Table width mode">
             <option value="auto">Auto</option>
             <option value="fixed">Fixed</option>
             <option value="percent">Percentage</option>
@@ -920,6 +933,18 @@
   </div>
 </div>
 
+<!-- FS-20: Image Caption Modal -->
+<div class="modal-overlay" id="captionModal" role="dialog" aria-modal="true" aria-label="Image Caption">
+  <div class="modal">
+    <h3><span class="msi modal-icon">closed_caption</span> Image Caption</h3>
+    <label>Caption text: <input type="text" id="captionInput" placeholder="Enter a caption for this image..." style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
+    <div class="modal-actions">
+      <button id="captionCancelBtn">Cancel</button>
+      <button class="primary" id="captionSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Header/Footer Modal -->
 <div class="modal-overlay" id="headerFooterModal" role="dialog" aria-modal="true" aria-label="Headers & Footers">
   <div class="modal" style="max-width:500px">
@@ -1040,6 +1065,8 @@
     </div>
   </div>
   <div class="ctx-sep"></div>
+  <button class="ctx-item" id="imCrop" title="Crop this image"><span class="msi ctx-icon">crop</span> Crop Image</button>
+  <button class="ctx-item" id="imCaption" title="Add a caption below the image"><span class="msi ctx-icon">closed_caption</span> Caption...</button>
   <button class="ctx-item" id="imAltText" title="Set alternative text for accessibility"><span class="msi ctx-icon">text_fields</span> Alt Text...</button>
   <button class="ctx-item" id="imReplace" title="Replace with a different image"><span class="msi ctx-icon">swap_horiz</span> Replace Image...</button>
   <div class="ctx-sep"></div>
@@ -1213,7 +1240,7 @@
 <div id="a11yLive" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
 
 <!-- Toast Notification Container (E5.3) -->
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer" role="status" aria-live="polite"></div>
 
 <!-- E9.2: Template Gallery Modal -->
 <div class="modal-overlay" id="templateModal" role="dialog" aria-modal="true" aria-label="New from Template">
@@ -1631,6 +1658,89 @@
     <div class="modal-actions">
       <button id="usageStatsClearBtn">Clear Data</button>
       <button class="primary" id="usageStatsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- FS-43: Special Characters Modal -->
+<div class="modal-overlay" id="specialCharsModal" role="dialog" aria-modal="true" aria-label="Special Characters">
+  <div class="modal" style="max-width:520px">
+    <h3><span class="msi modal-icon">special_character</span> Special Characters</h3>
+    <div class="sc-category-tabs" id="scCategoryTabs" role="tablist" aria-label="Character categories">
+      <button class="sc-tab active" data-cat="common" role="tab" aria-selected="true" title="Common symbols">Common</button>
+      <button class="sc-tab" data-cat="arrows" role="tab" aria-selected="false" title="Arrow symbols">Arrows</button>
+      <button class="sc-tab" data-cat="math" role="tab" aria-selected="false" title="Math operators">Math</button>
+      <button class="sc-tab" data-cat="currency" role="tab" aria-selected="false" title="Currency symbols">Currency</button>
+      <button class="sc-tab" data-cat="greek" role="tab" aria-selected="false" title="Greek letters">Greek</button>
+      <button class="sc-tab" data-cat="punctuation" role="tab" aria-selected="false" title="Punctuation marks">Punctuation</button>
+    </div>
+    <div class="sc-search-row">
+      <input type="text" id="scSearch" placeholder="Search characters..." autocomplete="off" title="Filter special characters by name" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none">
+    </div>
+    <div class="sc-grid" id="scGrid" role="grid" aria-label="Character grid"></div>
+    <div class="sc-preview-row">
+      <span class="sc-preview-char" id="scPreviewChar"></span>
+      <span class="sc-preview-name" id="scPreviewName"></span>
+      <span class="sc-preview-code" id="scPreviewCode"></span>
+    </div>
+    <div class="modal-actions">
+      <button id="scCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- FS-44: Borders & Shading Modal -->
+<div class="modal-overlay" id="bordersModal" role="dialog" aria-modal="true" aria-label="Borders and Shading">
+  <div class="modal" style="max-width:480px">
+    <h3><span class="msi modal-icon">border_all</span> Borders &amp; Shading</h3>
+    <div class="borders-presets" id="bordersPresets">
+      <button class="borders-preset active" data-preset="none" title="No borders"><span class="msi">border_clear</span><span>None</span></button>
+      <button class="borders-preset" data-preset="box" title="Box border on all sides"><span class="msi">border_all</span><span>Box</span></button>
+      <button class="borders-preset" data-preset="top" title="Top border only"><span class="msi">border_top</span><span>Top</span></button>
+      <button class="borders-preset" data-preset="bottom" title="Bottom border only"><span class="msi">border_bottom</span><span>Bottom</span></button>
+      <button class="borders-preset" data-preset="topBottom" title="Top and bottom borders"><span class="msi">border_horizontal</span><span>Top + Bottom</span></button>
+    </div>
+    <div class="borders-toggles" id="bordersToggles">
+      <label class="borders-toggle" title="Toggle top border"><input type="checkbox" id="borderTop"> Top</label>
+      <label class="borders-toggle" title="Toggle bottom border"><input type="checkbox" id="borderBottom"> Bottom</label>
+      <label class="borders-toggle" title="Toggle left border"><input type="checkbox" id="borderLeft"> Left</label>
+      <label class="borders-toggle" title="Toggle right border"><input type="checkbox" id="borderRight"> Right</label>
+    </div>
+    <div class="modal-field">
+      <label for="borderStyle">Border style</label>
+      <select id="borderStyle" title="Border line style" style="width:100%">
+        <option value="solid">Solid</option>
+        <option value="dashed">Dashed</option>
+        <option value="dotted">Dotted</option>
+        <option value="double">Double</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label for="borderWidth">Border width</label>
+      <select id="borderWidth" title="Border line width" style="width:100%">
+        <option value="1">1pt (Thin)</option>
+        <option value="2">2pt (Medium)</option>
+        <option value="3">3pt (Thick)</option>
+        <option value="4">4pt (Extra thick)</option>
+      </select>
+    </div>
+    <div class="modal-field" style="display:flex;gap:16px">
+      <div style="flex:1">
+        <label for="borderColor">Border color</label>
+        <input type="color" id="borderColor" value="#000000" title="Choose border color" style="width:100%;height:32px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">
+      </div>
+      <div style="flex:1">
+        <label for="shadingColor">Background / shading</label>
+        <input type="color" id="shadingColor" value="#ffffff" title="Choose paragraph background color" style="width:100%;height:32px;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">
+      </div>
+    </div>
+    <div class="borders-preview" id="bordersPreview" title="Preview of the configured border">
+      <div class="borders-preview-inner" id="bordersPreviewInner">Sample paragraph text</div>
+    </div>
+    <div class="modal-actions">
+      <button id="bordersResetBtn" title="Remove all borders and shading">Reset</button>
+      <button id="bordersCancelBtn">Cancel</button>
+      <button class="primary" id="bordersApplyBtn">Apply</button>
     </div>
   </div>
 </div>

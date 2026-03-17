@@ -486,6 +486,44 @@ export function initImageContextMenu() {
     input.click();
   });
 
+  // FS-10: Crop image from context menu
+  document.getElementById('imCrop').addEventListener('click', () => {
+    document.getElementById('imageContextMenu').style.display = 'none';
+    if (!state.selectedImg) return;
+    startCrop(state.selectedImg);
+  });
+
+  // FS-20: Caption image from context menu
+  document.getElementById('imCaption').addEventListener('click', () => {
+    document.getElementById('imageContextMenu').style.display = 'none';
+    if (!state._ctxImageNodeId || !state.doc) return;
+    // Pre-fill current caption from data attribute
+    const img = state.selectedImg;
+    const currentCaption = img ? (img.dataset.caption || '') : '';
+    const input = document.getElementById('captionInput');
+    input.value = currentCaption;
+    document.getElementById('captionModal').classList.add('show');
+    input.focus();
+  });
+
+  // FS-20: Caption modal handlers
+  document.getElementById('captionCancelBtn').addEventListener('click', () => {
+    document.getElementById('captionModal').classList.remove('show');
+  });
+  document.getElementById('captionSaveBtn').addEventListener('click', () => {
+    const captionText = document.getElementById('captionInput').value.trim();
+    document.getElementById('captionModal').classList.remove('show');
+    if (!state._ctxImageNodeId || !state.doc) return;
+    _applyCaptionToImage(state._ctxImageNodeId, captionText);
+  });
+  document.getElementById('captionModal').addEventListener('click', e => {
+    if (e.target.id === 'captionModal') document.getElementById('captionModal').classList.remove('show');
+  });
+  document.getElementById('captionInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('captionSaveBtn').click(); }
+    if (e.key === 'Escape') document.getElementById('captionModal').classList.remove('show');
+  });
+
   // Delete image from context menu
   document.getElementById('imDelete').addEventListener('click', () => {
     document.getElementById('imageContextMenu').style.display = 'none';
@@ -531,6 +569,242 @@ export function initImageContextMenu() {
         });
       });
     }
+  }
+}
+
+// ─── FS-10: Image Crop Tool ───────────────────────
+let _cropState = null;
+
+function startCrop(img) {
+  cancelCrop();
+  const wrap = img.closest('.img-wrap');
+  if (!wrap) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'crop-overlay';
+  overlay.contentEditable = 'false';
+  overlay.style.pointerEvents = 'all';
+  wrap.appendChild(overlay);
+
+  const cropBox = document.createElement('div');
+  cropBox.className = 'crop-box';
+  wrap.appendChild(cropBox);
+
+  // 4 corners + 4 edges
+  const positions = ['tl', 'tr', 'bl', 'br', 'tm', 'bm', 'ml', 'mr'];
+  positions.forEach(pos => {
+    const h = document.createElement('span');
+    h.className = 'crop-handle ' + pos;
+    h.dataset.cropHandle = pos;
+    cropBox.appendChild(h);
+  });
+
+  const imgW = img.offsetWidth;
+  const imgH = img.offsetHeight;
+
+  // Start with full image selected (no crop)
+  _cropState = {
+    img, wrap, overlay, cropBox,
+    top: 0, left: 0, right: 0, bottom: 0, // percentages
+    imgW, imgH, dragging: null, startX: 0, startY: 0,
+    startCrop: null,
+  };
+
+  _updateCropBox();
+
+  // Attach events
+  cropBox.addEventListener('mousedown', _onCropHandleDown);
+  cropBox.addEventListener('touchstart', _onCropHandleDown, { passive: false });
+  document.addEventListener('keydown', _onCropKeydown);
+  wrap.addEventListener('dblclick', _onCropConfirm);
+}
+
+function _updateCropBox() {
+  if (!_cropState) return;
+  const { cropBox, overlay, imgW, imgH, top, left, right, bottom } = _cropState;
+  const x = left / 100 * imgW;
+  const y = top / 100 * imgH;
+  const w = imgW - (left / 100 * imgW) - (right / 100 * imgW);
+  const h = imgH - (top / 100 * imgH) - (bottom / 100 * imgH);
+  cropBox.style.left = x + 'px';
+  cropBox.style.top = y + 'px';
+  cropBox.style.width = Math.max(10, w) + 'px';
+  cropBox.style.height = Math.max(10, h) + 'px';
+  overlay.style.clipPath = `polygon(
+    0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+    ${left}% ${top}%, ${left}% ${100 - bottom}%, ${100 - right}% ${100 - bottom}%, ${100 - right}% ${top}%, ${left}% ${top}%
+  )`;
+}
+
+function _onCropHandleDown(e) {
+  const handle = e.target.dataset?.cropHandle;
+  if (!handle || !_cropState) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const zoom = (state.zoomLevel || 100) / 100;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  _cropState.dragging = handle;
+  _cropState.startX = clientX / zoom;
+  _cropState.startY = clientY / zoom;
+  _cropState.startCrop = {
+    top: _cropState.top, left: _cropState.left,
+    right: _cropState.right, bottom: _cropState.bottom,
+  };
+  document.addEventListener('mousemove', _onCropHandleMove);
+  document.addEventListener('mouseup', _onCropHandleUp);
+  document.addEventListener('touchmove', _onCropHandleMove, { passive: false });
+  document.addEventListener('touchend', _onCropHandleUp);
+}
+
+function _onCropHandleMove(e) {
+  if (!_cropState || !_cropState.dragging) return;
+  if (e.cancelable) e.preventDefault();
+  const zoom = (state.zoomLevel || 100) / 100;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const dx = (clientX / zoom) - _cropState.startX;
+  const dy = (clientY / zoom) - _cropState.startY;
+  const { imgW, imgH, startCrop, dragging } = _cropState;
+  const dxPct = (dx / imgW) * 100;
+  const dyPct = (dy / imgH) * 100;
+
+  let { top, left, right, bottom } = startCrop;
+
+  if (dragging.includes('t')) top = Math.max(0, Math.min(100 - bottom - 5, startCrop.top + dyPct));
+  if (dragging.includes('b')) bottom = Math.max(0, Math.min(100 - top - 5, startCrop.bottom - dyPct));
+  if (dragging.includes('l')) left = Math.max(0, Math.min(100 - right - 5, startCrop.left + dxPct));
+  if (dragging.includes('r')) right = Math.max(0, Math.min(100 - left - 5, startCrop.right - dxPct));
+
+  // Edge-only handles
+  if (dragging === 'tm') { left = startCrop.left; right = startCrop.right; }
+  if (dragging === 'bm') { left = startCrop.left; right = startCrop.right; }
+  if (dragging === 'ml') { top = startCrop.top; bottom = startCrop.bottom; }
+  if (dragging === 'mr') { top = startCrop.top; bottom = startCrop.bottom; }
+
+  _cropState.top = top;
+  _cropState.left = left;
+  _cropState.right = right;
+  _cropState.bottom = bottom;
+  _updateCropBox();
+}
+
+function _onCropHandleUp() {
+  if (_cropState) _cropState.dragging = null;
+  document.removeEventListener('mousemove', _onCropHandleMove);
+  document.removeEventListener('mouseup', _onCropHandleUp);
+  document.removeEventListener('touchmove', _onCropHandleMove);
+  document.removeEventListener('touchend', _onCropHandleUp);
+}
+
+function _onCropKeydown(e) {
+  if (!_cropState) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    _applyCrop();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelCrop();
+  }
+}
+
+function _onCropConfirm(e) {
+  if (!_cropState) return;
+  e.preventDefault();
+  e.stopPropagation();
+  _applyCrop();
+}
+
+function _applyCrop() {
+  if (!_cropState) return;
+  const { img, top, left, right, bottom } = _cropState;
+  // Apply clip-path inset to visually crop
+  img.style.clipPath = `inset(${top.toFixed(1)}% ${right.toFixed(1)}% ${bottom.toFixed(1)}% ${left.toFixed(1)}%)`;
+  // Store crop data as data attributes
+  img.dataset.cropTop = top.toFixed(1);
+  img.dataset.cropRight = right.toFixed(1);
+  img.dataset.cropBottom = bottom.toFixed(1);
+  img.dataset.cropLeft = left.toFixed(1);
+
+  // Persist crop data to WASM if possible
+  const nodeEl = img.closest('[data-node-id]');
+  if (nodeEl && state.doc) {
+    const nodeId = nodeEl.dataset.nodeId;
+    try {
+      if (typeof state.doc.set_image_crop === 'function') {
+        state.doc.set_image_crop(nodeId, top, bottom, left, right);
+        broadcastOp({ action: 'setImageCrop', nodeId, top, bottom, left, right });
+      }
+    } catch (_) {}
+    recordUndoAction('Crop image');
+    updateUndoRedo();
+  }
+  cancelCrop();
+}
+
+function cancelCrop() {
+  if (!_cropState) return;
+  const { overlay, cropBox } = _cropState;
+  overlay?.remove();
+  cropBox?.remove();
+  document.removeEventListener('keydown', _onCropKeydown);
+  document.removeEventListener('mousemove', _onCropHandleMove);
+  document.removeEventListener('mouseup', _onCropHandleUp);
+  document.removeEventListener('touchmove', _onCropHandleMove);
+  document.removeEventListener('touchend', _onCropHandleUp);
+  _cropState = null;
+}
+
+/**
+ * FS-20: Apply a caption to an image.
+ * Inserts a caption paragraph after the image node via WASM if possible,
+ * otherwise adds a data-caption attribute and renders a figcaption element.
+ */
+function _applyCaptionToImage(imageNodeId, captionText) {
+  try {
+    // Try to insert a caption paragraph via WASM
+    if (typeof state.doc.insert_image_caption === 'function') {
+      state.doc.insert_image_caption(imageNodeId, captionText);
+      broadcastOp({ action: 'insertImageCaption', nodeId: imageNodeId, caption: captionText });
+    } else {
+      // Fallback: insert a new paragraph after the image node with the caption text
+      try {
+        const newParaId = state.doc.insert_paragraph_after(imageNodeId, captionText);
+        if (newParaId) {
+          // Style it as a caption — center-aligned, small italic
+          try { state.doc.set_alignment(newParaId, 'center'); } catch (_) {}
+          try { state.doc.format_selection(newParaId, 0, newParaId, Array.from(captionText).length, 'italic', 'true'); } catch (_) {}
+          try { state.doc.format_selection(newParaId, 0, newParaId, Array.from(captionText).length, 'fontSize', '10'); } catch (_) {}
+          broadcastOp({ action: 'insertCaptionParagraph', afterNodeId: imageNodeId, text: captionText });
+        }
+      } catch (_) {
+        // Last resort: store caption as data attribute on the image element
+        if (state.selectedImg) {
+          state.selectedImg.dataset.caption = captionText;
+          // Add or update visual figcaption
+          const imgContainer = state.selectedImg.closest('[data-node-id]');
+          if (imgContainer) {
+            let figcap = imgContainer.querySelector('.img-caption');
+            if (captionText) {
+              if (!figcap) {
+                figcap = document.createElement('div');
+                figcap.className = 'img-caption';
+                figcap.contentEditable = 'false';
+                imgContainer.appendChild(figcap);
+              }
+              figcap.textContent = captionText;
+            } else if (figcap) {
+              figcap.remove();
+            }
+          }
+        }
+      }
+    }
+    renderDocument();
+    recordUndoAction('Set image caption');
+    updateUndoRedo();
+  } catch (err) {
+    console.error('set image caption:', err);
   }
 }
 
