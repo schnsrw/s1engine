@@ -23,13 +23,15 @@ This directory contains the complete planning documentation for transforming s1e
 
 ## Current State (as of 2026-03-16)
 
+**Release:** `1.0.1` · **Branch:** `main`
+
 The s1engine core is **complete and production-tested**:
 - 14 Rust crates, 1,172+ tests, zero warnings
 - Full format support: DOCX, ODT, PDF, TXT, Markdown
 - CRDT-based collaboration with Fugue text + Kleppmann tree
 - Layout engine with Knuth-Plass line breaking
 - WASM bindings (wasm-bindgen) + C FFI (cbindgen)
-- Production web editor ("Folio") — vanilla JS, multi-page, collaboration-ready
+- Production web editor ("S1 Editor") — vanilla JS, multi-page, collaboration-ready
 - Docker deployment with multi-stage builds
 
 ## What This Plan Adds
