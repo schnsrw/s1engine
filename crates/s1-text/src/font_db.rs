@@ -163,7 +163,7 @@ pub struct FontDatabase {
     db: fontdb::Database,
     /// Cache for fallback lookups: char → FontId.
     fallback_cache: Mutex<HashMap<char, Option<FontId>>>,
-    /// Cache for substitution lookups: (family_lower, bold, italic) → Option<FontId>.
+    /// Cache for substitution lookups: (family_lower, bold, italic) → `Option<FontId>`.
     substitution_cache: Mutex<HashMap<(String, bool, bool), Option<FontId>>>,
 }
 

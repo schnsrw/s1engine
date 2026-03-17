@@ -141,7 +141,7 @@ impl PieceTable {
         // Calculate number of pieces: total = (n+1)*4 + n*8 = 4 + n*12
         // So n = (total - 4) / 12
         let remaining = data.len() - 4;
-        if remaining % 12 != 0 {
+        if !remaining.is_multiple_of(12) {
             return Err(ConvertError::InvalidDoc(format!(
                 "PlcPcd size {} not valid: (size - 4) must be divisible by 12",
                 data.len()
@@ -287,7 +287,7 @@ fn decode_cp1252(data: &[u8]) -> String {
 
 /// Decode a UTF-16LE byte slice to a Rust String.
 fn decode_utf16le(data: &[u8]) -> Result<String, ConvertError> {
-    if data.len() % 2 != 0 {
+    if !data.len().is_multiple_of(2) {
         return Err(ConvertError::InvalidDoc(
             "UTF-16LE data has odd byte count".into(),
         ));

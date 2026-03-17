@@ -790,7 +790,7 @@ const SECURITY_HEADERS = {
     "default-src 'self'",
     "script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
-    "font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com https://cdn.jsdelivr.net",
     "connect-src 'self' ws: wss: https://fonts.googleapis.com https://fonts.gstatic.com",
     "img-src 'self' data: blob:",
   ].join('; '),
