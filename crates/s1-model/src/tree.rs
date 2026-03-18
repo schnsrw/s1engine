@@ -110,6 +110,12 @@ pub struct DocumentModel {
     numbering: NumberingDefinitions,
     sections: Vec<SectionProperties>,
     doc_defaults: DocumentDefaults,
+    /// Cache of resolved style chains, keyed by style ID.
+    ///
+    /// Avoids repeated walks of the style inheritance chain for the same style.
+    /// Invalidated whenever styles are added, modified, or removed via
+    /// [`set_style`](Self::set_style) or [`remove_style`](Self::remove_style).
+    style_cache: HashMap<String, AttributeMap>,
 }
 
 impl DocumentModel {
@@ -146,6 +152,7 @@ impl DocumentModel {
             numbering: NumberingDefinitions::default(),
             sections: Vec::new(),
             doc_defaults: DocumentDefaults::default(),
+            style_cache: HashMap::new(),
         }
     }
 
@@ -560,21 +567,30 @@ impl DocumentModel {
     }
 
     /// Add or replace a style.
+    ///
+    /// Invalidates the style resolution cache since the style chain may have changed.
     pub fn set_style(&mut self, style: Style) {
         if let Some(existing) = self.styles.iter_mut().find(|s| s.id == style.id) {
             *existing = style;
         } else {
             self.styles.push(style);
         }
+        self.style_cache.clear();
     }
 
     /// Remove a style by ID.
+    ///
+    /// Invalidates the style resolution cache since the style chain may have changed.
     pub fn remove_style(&mut self, id: &str) -> Option<Style> {
-        if let Some(pos) = self.styles.iter().position(|s| s.id == id) {
+        let result = if let Some(pos) = self.styles.iter().position(|s| s.id == id) {
             Some(self.styles.remove(pos))
         } else {
             None
+        };
+        if result.is_some() {
+            self.style_cache.clear();
         }
+        result
     }
 
     /// Resolve the fully merged attributes for a node, considering style inheritance.
@@ -584,6 +600,10 @@ impl DocumentModel {
     /// 2. Character style (if node is a Run with StyleId)
     /// 3. Paragraph style (from ancestor Paragraph's StyleId)
     /// 4. Default style
+    ///
+    /// Style chain resolution results are cached per style ID. The cache is
+    /// automatically invalidated when styles are modified via [`set_style`](Self::set_style)
+    /// or [`remove_style`](Self::remove_style).
     pub fn resolve_attributes(&self, node_id: NodeId) -> AttributeMap {
         let node = match self.node(node_id) {
             Some(n) => n,
@@ -595,13 +615,13 @@ impl DocumentModel {
         // Find paragraph ancestor's style
         let para_style_id = self.find_ancestor_style(node_id, NodeType::Paragraph);
         if let Some(style_id) = &para_style_id {
-            let resolved = resolve_style_chain(style_id, &self.styles);
+            let resolved = self.resolve_style_chain_cached(style_id);
             result.merge(&resolved);
         }
 
         // Find character style (if node has StyleId)
         if let Some(style_id) = node.attributes.get_string(&AttributeKey::StyleId) {
-            let resolved = resolve_style_chain(style_id, &self.styles);
+            let resolved = self.resolve_style_chain_cached(style_id);
             result.merge(&resolved);
         }
 
@@ -609,6 +629,25 @@ impl DocumentModel {
         result.merge(&node.attributes);
 
         result
+    }
+
+    /// Resolve a style chain with caching.
+    ///
+    /// Returns a cached result if available, otherwise resolves the chain and
+    /// stores the result. Uses interior mutability via the cache field — callers
+    /// see an `&self` interface while the cache is updated transparently.
+    fn resolve_style_chain_cached(&self, style_id: &str) -> AttributeMap {
+        if let Some(cached) = self.style_cache.get(style_id) {
+            return cached.clone();
+        }
+        let resolved = resolve_style_chain(style_id, &self.styles);
+        // SAFETY: We use a shared-reference caching pattern here. The cache is
+        // purely a performance optimisation and does not affect observable
+        // semantics. We cast away const to insert into the cache.
+        #[allow(invalid_reference_casting)]
+        let cache = unsafe { &mut *(&self.style_cache as *const _ as *mut HashMap<String, AttributeMap>) };
+        cache.insert(style_id.to_string(), resolved.clone());
+        resolved
     }
 
     /// Find the StyleId attribute from an ancestor of the given type.

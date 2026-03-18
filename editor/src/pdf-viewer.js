@@ -284,6 +284,8 @@ export class PdfViewer {
 
     pageInfo.rendered = true;
     pageInfo.element.classList.remove('pdf-page-loading');
+    const event = new CustomEvent('pdfPageRendered', { detail: { pageNum, width: viewport.width, height: viewport.height } });
+    document.dispatchEvent(event);
   }
 
   async _rerenderAllPages() {

@@ -524,6 +524,9 @@ export function initImageContextMenu() {
     if (e.key === 'Escape') document.getElementById('captionModal').classList.remove('show');
   });
 
+  // ─── FS-42: Image Transparency & Filter Controls ───────────────────
+  _initImageFilterControls();
+
   // Delete image from context menu
   document.getElementById('imDelete').addEventListener('click', () => {
     document.getElementById('imageContextMenu').style.display = 'none';
@@ -805,6 +808,219 @@ function _applyCaptionToImage(imageNodeId, captionText) {
     updateUndoRedo();
   } catch (err) {
     console.error('set image caption:', err);
+  }
+}
+
+// ─── FS-42: Image Transparency & Filter Controls ────────────────────────
+
+/**
+ * Initializes the image filter controls section in the context menu.
+ * Adds opacity slider, filter sliders, and filter presets.
+ */
+function _initImageFilterControls() {
+  const menu = document.getElementById('imageContextMenu');
+  if (!menu) return;
+
+  // Check if already initialized
+  if (menu.querySelector('.img-filter-controls')) return;
+
+  // Create the filter controls section
+  const filterSection = document.createElement('div');
+  filterSection.className = 'img-filter-controls';
+
+  // Opacity slider
+  const opacityRow = _createFilterRow('Opacity', 'imgOpacitySlider', 0, 100, 100, '%');
+  filterSection.appendChild(opacityRow);
+
+  // Brightness slider
+  const brightnessRow = _createFilterRow('Brightness', 'imgBrightnessSlider', 0, 200, 100, '%');
+  filterSection.appendChild(brightnessRow);
+
+  // Blur slider
+  const blurRow = _createFilterRow('Blur', 'imgBlurSlider', 0, 10, 0, 'px');
+  filterSection.appendChild(blurRow);
+
+  // Insert before the delete button separator
+  const deleteSep = menu.querySelector('#imDelete')?.previousElementSibling;
+  if (deleteSep) {
+    menu.insertBefore(filterSection, deleteSep);
+  } else {
+    menu.appendChild(filterSection);
+  }
+
+  // Presets row
+  const presetRow = document.createElement('div');
+  presetRow.className = 'img-filter-preset-row';
+  const presets = [
+    { label: 'Original', filter: 'none', opacity: 100 },
+    { label: 'Grayscale', filter: 'grayscale(100%)', opacity: 100 },
+    { label: 'Sepia', filter: 'sepia(80%)', opacity: 100 },
+    { label: 'Brighten', filter: 'brightness(130%)', opacity: 100 },
+    { label: 'Darken', filter: 'brightness(70%)', opacity: 100 },
+  ];
+  for (const preset of presets) {
+    const btn = document.createElement('button');
+    btn.className = 'img-filter-preset';
+    btn.textContent = preset.label;
+    btn.title = `Apply "${preset.label}" filter preset`;
+    btn.dataset.preset = preset.label;
+    btn.addEventListener('click', () => {
+      if (!state.selectedImg) return;
+      _applyImageFilter(state.selectedImg, preset.filter, preset.opacity);
+      _syncFilterSlidersToImage(state.selectedImg);
+      // Highlight active preset
+      presetRow.querySelectorAll('.img-filter-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+    presetRow.appendChild(btn);
+  }
+  if (deleteSep) {
+    menu.insertBefore(presetRow, deleteSep);
+  } else {
+    menu.appendChild(presetRow);
+  }
+
+  // Wire up slider events
+  const opacitySlider = document.getElementById('imgOpacitySlider');
+  const brightnessSlider = document.getElementById('imgBrightnessSlider');
+  const blurSlider = document.getElementById('imgBlurSlider');
+
+  const updateFilter = () => {
+    if (!state.selectedImg) return;
+    const opacity = parseInt(opacitySlider.value);
+    const brightness = parseInt(brightnessSlider.value);
+    const blur = parseInt(blurSlider.value);
+    const filterParts = [];
+    if (brightness !== 100) filterParts.push(`brightness(${brightness}%)`);
+    if (blur > 0) filterParts.push(`blur(${blur}px)`);
+    const filterStr = filterParts.length > 0 ? filterParts.join(' ') : 'none';
+    _applyImageFilter(state.selectedImg, filterStr, opacity);
+    // Clear active preset since user is manually adjusting
+    presetRow.querySelectorAll('.img-filter-preset').forEach(b => b.classList.remove('active'));
+  };
+
+  opacitySlider.addEventListener('input', () => {
+    opacitySlider.nextElementSibling.textContent = opacitySlider.value + '%';
+    updateFilter();
+  });
+  brightnessSlider.addEventListener('input', () => {
+    brightnessSlider.nextElementSibling.textContent = brightnessSlider.value + '%';
+    updateFilter();
+  });
+  blurSlider.addEventListener('input', () => {
+    blurSlider.nextElementSibling.textContent = blurSlider.value + 'px';
+    updateFilter();
+  });
+
+  // Sync sliders when context menu opens for an image
+  const menuEl = document.getElementById('imageContextMenu');
+  const observer = new MutationObserver(() => {
+    if (menuEl.style.display !== 'none' && state.selectedImg) {
+      _syncFilterSlidersToImage(state.selectedImg);
+    }
+  });
+  observer.observe(menuEl, { attributes: true, attributeFilter: ['style'] });
+}
+
+/**
+ * Create a slider row for the filter controls section.
+ */
+function _createFilterRow(label, id, min, max, defaultVal, unit) {
+  const row = document.createElement('div');
+  row.className = 'img-filter-row';
+  const lbl = document.createElement('label');
+  lbl.textContent = label;
+  lbl.setAttribute('for', id);
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.id = id;
+  slider.min = min;
+  slider.max = max;
+  slider.value = defaultVal;
+  slider.title = `Adjust image ${label.toLowerCase()}`;
+  const val = document.createElement('span');
+  val.className = 'filter-value';
+  val.textContent = defaultVal + unit;
+  row.appendChild(lbl);
+  row.appendChild(slider);
+  row.appendChild(val);
+  return row;
+}
+
+/**
+ * Apply CSS filter and opacity to an image element, and store as data attributes.
+ */
+function _applyImageFilter(img, filterStr, opacity) {
+  // Apply CSS properties
+  img.style.opacity = (opacity / 100).toFixed(2);
+  img.style.filter = filterStr === 'none' ? '' : filterStr;
+
+  // Store as data attributes for persistence
+  img.dataset.filterOpacity = opacity;
+  img.dataset.filter = filterStr;
+
+  // Persist to WASM model if available
+  const nodeEl = img.closest('[data-node-id]');
+  if (nodeEl && state.doc) {
+    const nodeId = nodeEl.dataset.nodeId;
+    try {
+      if (typeof state.doc.set_image_attribute === 'function') {
+        state.doc.set_image_attribute(nodeId, 'filter', filterStr);
+        state.doc.set_image_attribute(nodeId, 'opacity', String(opacity));
+      }
+    } catch (_) {}
+    broadcastOp({ action: 'setImageFilter', nodeId, filter: filterStr, opacity });
+  }
+
+  recordUndoAction('Adjust image filter');
+  updateUndoRedo();
+}
+
+/**
+ * Sync the filter control sliders to match the currently selected image's properties.
+ */
+function _syncFilterSlidersToImage(img) {
+  const opacitySlider = document.getElementById('imgOpacitySlider');
+  const brightnessSlider = document.getElementById('imgBrightnessSlider');
+  const blurSlider = document.getElementById('imgBlurSlider');
+  if (!opacitySlider || !brightnessSlider || !blurSlider) return;
+
+  // Read from data attributes or CSS
+  const opacity = img.dataset.filterOpacity ? parseInt(img.dataset.filterOpacity) : Math.round(parseFloat(img.style.opacity || 1) * 100);
+  const filterStr = img.dataset.filter || img.style.filter || 'none';
+
+  opacitySlider.value = opacity;
+  opacitySlider.nextElementSibling.textContent = opacity + '%';
+
+  // Parse brightness from filter string
+  const brightnessMatch = filterStr.match(/brightness\((\d+)%?\)/);
+  const brightness = brightnessMatch ? parseInt(brightnessMatch[1]) : 100;
+  brightnessSlider.value = brightness;
+  brightnessSlider.nextElementSibling.textContent = brightness + '%';
+
+  // Parse blur from filter string
+  const blurMatch = filterStr.match(/blur\((\d+)px?\)/);
+  const blur = blurMatch ? parseInt(blurMatch[1]) : 0;
+  blurSlider.value = blur;
+  blurSlider.nextElementSibling.textContent = blur + 'px';
+
+  // Highlight matching preset
+  const presetRow = document.querySelector('.img-filter-preset-row');
+  if (presetRow) {
+    presetRow.querySelectorAll('.img-filter-preset').forEach(btn => {
+      btn.classList.remove('active');
+      if (filterStr === 'none' && opacity === 100 && btn.dataset.preset === 'Original') {
+        btn.classList.add('active');
+      } else if (filterStr === 'grayscale(100%)' && btn.dataset.preset === 'Grayscale') {
+        btn.classList.add('active');
+      } else if (filterStr === 'sepia(80%)' && btn.dataset.preset === 'Sepia') {
+        btn.classList.add('active');
+      } else if (filterStr === 'brightness(130%)' && btn.dataset.preset === 'Brighten') {
+        btn.classList.add('active');
+      } else if (filterStr === 'brightness(70%)' && btn.dataset.preset === 'Darken') {
+        btn.classList.add('active');
+      }
+    });
   }
 }
 

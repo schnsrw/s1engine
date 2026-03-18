@@ -1,0 +1,47 @@
+{
+  "name": "@s1engine/editor",
+  "version": "1.0.1",
+  "description": "Embeddable document editor component powered by s1engine — drop-in DOCX/ODT/PDF editing for any web app",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schnsrw/s1engine",
+    "directory": "packages/editor"
+  },
+  "type": "module",
+  "main": "./dist/s1-editor.js",
+  "module": "./dist/s1-editor.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/s1-editor.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "peerDependencies": {
+    "@s1engine/wasm": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0"
+  },
+  "keywords": [
+    "document",
+    "editor",
+    "docx",
+    "odt",
+    "pdf",
+    "wysiwyg",
+    "collaboration",
+    "embeddable"
+  ]
+}

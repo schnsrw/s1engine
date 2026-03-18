@@ -1,8 +1,11 @@
 # s1engine
 
-A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a web editor.
+[![CI](https://github.com/schnsrw/s1engine/actions/workflows/ci.yml/badge.svg)](https://github.com/schnsrw/s1engine/actions)
+[![License: MIT/Apache-2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 
-**Release:** `1.0.1` · **Branch:** `main` · **Editor:** S1 Editor
+A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a production web editor.
+
+**1,380+ tests** · **Zero C/C++ dependencies** · **MIT / Apache-2.0**
 
 ## What is s1engine?
 
@@ -184,7 +187,7 @@ Consumer Applications
 
 ### Prerequisites
 
-- Rust 1.85+ (`rustup install stable`)
+- Rust 1.88+ (`rustup install stable`)
 - For WASM: `wasm-pack` (`cargo install wasm-pack`)
 - For editor: Node.js 18+ and npm
 - For Docker: Docker 20+
@@ -195,7 +198,7 @@ Consumer Applications
 # Build all crates
 cargo build --workspace
 
-# Run all tests (1,310 tests)
+# Run all tests (1,380+ tests)
 cargo test --workspace
 
 # Lint

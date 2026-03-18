@@ -1247,7 +1247,8 @@ fn parse_table_into(
         .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
 
     let mut row_index = 0;
-    let mut column_count: usize = 0;
+    let mut _column_count: usize = 0;
+    let mut column_widths: Vec<String> = Vec::new();
 
     loop {
         match reader.read_event() {
@@ -1259,14 +1260,15 @@ fn parse_table_into(
                         row_index += 1;
                     }
                     b"table-column" => {
-                        // Count columns; table-column as a Start event has a closing tag
                         let repeated = get_attr(e, b"number-columns-repeated")
                             .and_then(|v| v.parse::<usize>().ok())
                             .unwrap_or(1);
-                        column_count += repeated;
-                        // TODO: Parse column width from automatic style
-                        // Column width definitions affect layout but are not yet
-                        // stored in the model; we track the count for now.
+                        _column_count += repeated;
+                        // Track column style names for width extraction
+                        let style_name = get_attr(e, b"style-name").unwrap_or_default();
+                        for _ in 0..repeated {
+                            column_widths.push(style_name.clone());
+                        }
                     }
                     _ => {}
                 }
@@ -1277,7 +1279,11 @@ fn parse_table_into(
                     let repeated = get_attr(e, b"number-columns-repeated")
                         .and_then(|v| v.parse::<usize>().ok())
                         .unwrap_or(1);
-                    column_count += repeated;
+                    _column_count += repeated;
+                    let style_name = get_attr(e, b"style-name").unwrap_or_default();
+                    for _ in 0..repeated {
+                        column_widths.push(style_name.clone());
+                    }
                 }
             }
             Ok(Event::End(ref e)) if e.local_name().as_ref() == b"table" => break,
@@ -1287,9 +1293,17 @@ fn parse_table_into(
         }
     }
 
-    // Column count is tracked for future layout use.
-    // TODO: Store column widths once the model supports per-column width attributes.
-    let _ = column_count;
+    // Store column style names on the table node for round-trip fidelity.
+    // Column widths are resolved from these style names during layout.
+    if !column_widths.is_empty() && column_widths.iter().any(|w| !w.is_empty()) {
+        let styles_str = column_widths.join(",");
+        if let Some(table_node) = doc.node_mut(table_id) {
+            table_node.attributes.set(
+                AttributeKey::TableColumnWidths,
+                AttributeValue::String(styles_str),
+            );
+        }
+    }
 
     Ok(table_id)
 }

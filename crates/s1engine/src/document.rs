@@ -216,6 +216,20 @@ impl Document {
         self.history.set_max_undo(max);
     }
 
+    /// Get the number of undo steps currently on the stack.
+    pub fn undo_count(&self) -> usize {
+        self.history.undo_count()
+    }
+
+    /// Merge the last `count` undo entries into a single undo step.
+    ///
+    /// Used by the batch operation API to group multiple operations
+    /// into one undo unit.
+    pub fn merge_undo_entries(&mut self, count: usize, label: &str) -> Result<(), Error> {
+        self.history.merge_undo_entries(count, label);
+        Ok(())
+    }
+
     // ─── TOC ────────────────────────────────────────────────────────
 
     /// Update all Table of Contents entries in the document.

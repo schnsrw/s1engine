@@ -5,7 +5,7 @@ import { repaginate } from './pagination.js';
 import { updateUndoRedo } from './toolbar.js';
 import { markDirty, updateTrackChanges, updateStatusBar } from './file.js';
 import { broadcastTextSync, broadcastOp } from './collab.js';
-import { getEditableText } from './selection.js';
+import { getEditableText, setCursorAtOffset, refreshSecondarySelections } from './selection.js';
 import { getFontDb } from './fonts.js';
 import { renderDocumentEquations, renderDocumentBookmarks, refreshPageThumbnails, isSpellCheckEnabled, refreshTrackChangesPanel, applyColumnLayout } from './toolbar-handlers.js';
 import {
@@ -60,6 +60,92 @@ function queryAllNodes(selector) {
 
 // ED2-04: Guard against concurrent renders during scroll
 let _rendering = false;
+
+// ═══════════════════════════════════════════════════════════════════════
+// FS-29: Layout Incremental Rendering — Design Notes
+// ═══════════════════════════════════════════════════════════════════════
+//
+// CURRENT APPROACH:
+// renderDocument() performs a full re-render on every structural change:
+//   1. Calls doc.to_html() to get the full document HTML from WASM
+//   2. Clears the entire pageContainer DOM
+//   3. Rebuilds all pages via repaginate()
+//   4. Runs post-render fixups (images, equations, bookmarks, etc.)
+//
+// This is simple and correct, but O(n) in document size for every edit.
+// For large documents (500+ paragraphs), this causes noticeable lag.
+//
+// INCREMENTAL APPROACH (TODO):
+// For single-paragraph edits, use renderNodeById() instead of full re-render.
+// renderNodeById() already exists and:
+//   - Calls doc.render_node_html(nodeId) for just one node
+//   - Does innerHTML diffing to skip no-op updates
+//   - Uses tryPatchAttributes() for attribute-only changes
+//   - Preserves cursor position within the paragraph
+//
+// The renderSingleParagraphIfPossible() function below attempts this
+// optimization. It should be called from input handlers (typing, formatting)
+// where only one paragraph changed, instead of calling renderDocument().
+//
+// FULL INCREMENTAL (FUTURE):
+//   - Track which paragraphs changed via WASM dirty flags
+//   - Only re-render changed paragraphs + re-paginate affected pages
+//   - Use MutationObserver or WASM diff to detect structural changes
+//   - Incremental repagination: only reflow pages after the edit point
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * FS-29: Attempt to re-render only a single paragraph instead of the full document.
+ * Returns true if the incremental render was sufficient, false if a full
+ * renderDocument() is still needed (e.g., structural changes like paragraph
+ * split/merge, table edits, or page reflow required).
+ *
+ * Callers should use:
+ *   if (!renderSingleParagraphIfPossible(nodeId)) renderDocument();
+ *
+ * @param {string} nodeId - The paragraph node ID that was edited
+ * @param {object} [options] - Optional settings
+ * @param {number} [options.cursorOffset] - Restore cursor at this offset after render
+ * @returns {boolean} true if incremental render was applied
+ */
+export function renderSingleParagraphIfPossible(nodeId, options = {}) {
+  if (!state.doc || !nodeId) return false;
+
+  // Check if the node still exists in the DOM — if not, a full render is needed
+  const existingEl = lookupNodeElement(nodeId);
+  if (!existingEl) return false;
+
+  // Check if the node still exists in the WASM model
+  try {
+    state.doc.render_node_html(nodeId);
+  } catch (_) {
+    return false; // Node was deleted or merged — full render needed
+  }
+
+  // Perform the incremental render
+  const updatedEl = renderNodeById(nodeId);
+  if (!updatedEl) return false;
+
+  // Restore cursor if requested
+  if (typeof options.cursorOffset === 'number') {
+    const content = updatedEl.closest('.page-content');
+    if (content) content.focus();
+    setCursorAtOffset(updatedEl, options.cursorOffset);
+  }
+
+  // Mark layout as potentially dirty for pagination check
+  state.pagesRendered = false;
+
+  // Run lightweight post-render updates (skip full fixups)
+  try {
+    setupImages(updatedEl);
+    updateUndoRedo();
+    updateStatusBar();
+    state._onTextChanged?.();
+  } catch (_) {}
+
+  return true;
+}
 
 export function renderDocument() {
   const { doc } = state;

@@ -6,7 +6,7 @@ Thank you for your interest in contributing to s1engine. This document provides 
 
 ### Prerequisites
 
-- **Rust 1.75+** — Install via [rustup](https://rustup.rs/)
+- **Rust 1.88+** — Install via [rustup](https://rustup.rs/)
 - **wasm-pack** — For WASM builds: `cargo install wasm-pack`
 - **Node.js 18+** — For the editor and relay server
 - **Git** — For version control
@@ -15,7 +15,7 @@ Thank you for your interest in contributing to s1engine. This document provides 
 
 ```bash
 # Clone the repository
-git clone https://github.com/nicholasgasior/s1engine.git
+git clone https://github.com/schnsrw/s1engine.git
 cd s1engine
 
 # Build and test

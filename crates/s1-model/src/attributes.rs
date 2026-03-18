@@ -405,6 +405,28 @@ pub enum AttributeKey {
     ShapeStrokeWidth,
     /// Raw VML/DrawingML XML for preserving shapes that can't be fully modeled.
     ShapeRawXml,
+
+    /// Comma-separated column widths in points for a table node.
+    ///
+    /// Stored as a string like `"72.0,108.0,72.0"` representing each column's
+    /// width. Repeated columns (e.g., ODF `number-columns-repeated`) are
+    /// expanded into individual values.
+    TableColumnWidths,
+
+    // Text effect attributes (round-trip preservation)
+    /// Text shadow effect definition (CSS-like or raw XML string).
+    TextShadow,
+    /// Text outline effect definition (CSS-like or raw XML string).
+    TextOutline,
+    /// Text glow effect definition (CSS-like or raw XML string).
+    TextGlow,
+    /// Text reflection effect definition (CSS-like or raw XML string).
+    TextReflection,
+
+    // Raw XML preservation
+    /// Raw XML content from elements not fully modeled (e.g., SmartArt, charts,
+    /// form controls, content controls). Stored for round-trip fidelity.
+    RawXml,
 }
 
 /// Typed attribute values.

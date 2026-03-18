@@ -253,6 +253,29 @@ export function applyFormat(key, value) {
     let sn, so, en, eo;
     doc.format_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset, key, value);
     sn = info.startNodeId; so = info.startOffset; en = info.endNodeId; eo = info.endOffset;
+
+    // FS-37: Batch undo for rapid formatting operations (within 500ms)
+    // Multiple format operations (e.g., bold then italic) within the batch window
+    // are grouped into a single undo step.
+    const now = Date.now();
+    const BATCH_WINDOW_MS = 500;
+    const batch = state._formatBatch;
+    if (batch && (now - batch.lastTime) < BATCH_WINDOW_MS) {
+      // Continue the batch — increment count, reset timer
+      batch.count++;
+      batch.lastTime = now;
+      clearTimeout(batch.timer);
+      batch.timer = setTimeout(() => { state._formatBatch = null; }, BATCH_WINDOW_MS);
+    } else {
+      // Start a new batch
+      if (batch) clearTimeout(batch.timer);
+      state._formatBatch = {
+        count: 1,
+        lastTime: now,
+        timer: setTimeout(() => { state._formatBatch = null; }, BATCH_WINDOW_MS),
+      };
+    }
+
     // E3.4: Record formatting action
     const friendlyKey = key.charAt(0).toUpperCase() + key.slice(1);
     recordUndoAction(`${value === 'false' ? 'Remove' : 'Apply'} ${friendlyKey}`);

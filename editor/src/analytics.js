@@ -1,37 +1,28 @@
-// s1 Editor — Lightweight, privacy-respecting usage analytics
-// All data stays local in localStorage. No network requests.
-
-const STORAGE_KEY = 's1-analytics';
-let events = {};
-let sessionStart = Date.now();
-
-// Load persisted events from localStorage
-try {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    events = JSON.parse(stored);
-  }
-} catch (_) {
-  events = {};
-}
+// s1 Editor — Analytics stubs
+//
+// These are no-op stubs. Replace with your own analytics provider
+// (e.g., Plausible, PostHog, Mixpanel) by implementing trackEvent().
+//
+// Example:
+//   export function trackEvent(category, action) {
+//     posthog.capture(`${category}:${action}`);
+//   }
 
 /**
- * Track a feature usage event. Increments the counter for the given category:action key.
- * @param {string} category - Event category (e.g., 'toolbar', 'menu', 'export')
- * @param {string} action - Specific action (e.g., 'bold', 'save-docx', 'insert-table')
+ * Track a feature usage event.
+ * @param {string} _category - Event category (e.g., 'toolbar', 'insert')
+ * @param {string} _action - Specific action (e.g., 'bold', 'save-docx')
  */
-export function trackEvent(category, action) {
-  const key = `${category}:${action}`;
-  events[key] = (events[key] || 0) + 1;
-  persist();
+export function trackEvent(_category, _action) {
+  // No-op — replace with your analytics provider
 }
 
 /**
- * Get a copy of all tracked event counts.
- * @returns {Object} Map of "category:action" to count
+ * Get usage statistics.
+ * @returns {Object} Empty object (stub)
  */
 export function getStats() {
-  return { ...events };
+  return {};
 }
 
 /**
@@ -39,22 +30,12 @@ export function getStats() {
  * @returns {number}
  */
 export function getSessionDuration() {
-  return Math.floor((Date.now() - sessionStart) / 1000);
+  return 0;
 }
 
 /**
- * Clear all tracked analytics data.
+ * Clear analytics data.
  */
 export function clearStats() {
-  events = {};
-  persist();
-}
-
-/** Persist current event counts to localStorage */
-function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-  } catch (_) {
-    // localStorage may be full or unavailable — silently ignore
-  }
+  // No-op
 }

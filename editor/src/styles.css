@@ -1005,7 +1005,6 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   min-width: 160px;
 }
 .app-menu-submenu:hover > .app-submenu-dropdown,
-.app-menu-submenu:focus-within > .app-submenu-dropdown,
 .app-menu-submenu.open > .app-submenu-dropdown {
   display: block;
 }
@@ -1042,8 +1041,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   padding: 4px 0;
   z-index: calc(var(--z-dropdown, 100) + 1);
 }
-.ctx-submenu-wrapper:hover > .ctx-submenu,
-.ctx-submenu-wrapper:focus-within > .ctx-submenu {
+.ctx-submenu-wrapper:hover > .ctx-submenu {
   display: block;
 }
 [data-theme="dark"] .ctx-submenu {
@@ -1309,27 +1307,22 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .pdf-text-layer{
   position:absolute;top:0;left:0;
   overflow:hidden;
-  opacity:0.25;
+  opacity:1;
   line-height:1;
-  color:transparent;
   z-index:1;
 }
 .pdf-text-layer span{
   position:absolute;
   white-space:pre;
   color:transparent;
-}
-.pdf-text-layer span::selection{
-  background:rgba(26,115,232,.4);
-  color:transparent;
-}
-/* When highlight tool is active, boost text layer for selection */
-.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer{
-  opacity:0.5;
-  z-index:4;
   cursor:text;
 }
-.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer span{
+.pdf-text-layer span::selection{
+  background:rgba(26,115,232,.35);
+}
+/* When highlight tool is active, boost text layer above overlays */
+.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer{
+  z-index:6;
   cursor:text;
 }
 .pdf-annotation-layer{
@@ -5761,6 +5754,96 @@ table[data-node-id] th {
   background: var(--bg-white);
   transition: border 0.15s, background 0.15s;
   border: 1px solid transparent;
+}
+
+/* ═══════════════════════════════════════════════════
+   FS-39: MULTI-CURSOR (stub visual indicators)
+   ═══════════════════════════════════════════════════ */
+.secondary-cursor {
+  position: absolute;
+  width: 2px;
+  background: var(--accent, #1a73e8);
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.7;
+  animation: secondary-cursor-blink 1s step-end infinite;
+}
+@keyframes secondary-cursor-blink {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0; }
+}
+[data-theme="dark"] .secondary-cursor {
+  background: #8ab4f8;
+}
+
+/* ═══════════════════════════════════════════════════
+   FS-42: IMAGE TRANSPARENCY / FILTER CONTROLS
+   ═══════════════════════════════════════════════════ */
+.img-filter-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-light);
+}
+.img-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.img-filter-row label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 60px;
+}
+.img-filter-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  accent-color: var(--accent, #1a73e8);
+  cursor: pointer;
+}
+.img-filter-row .filter-value {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: right;
+}
+.img-filter-preset-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px 16px 8px;
+}
+.img-filter-preset {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: background 0.15s, border-color 0.15s;
+}
+.img-filter-preset:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent, #1a73e8);
+}
+.img-filter-preset.active {
+  background: var(--accent, #1a73e8);
+  color: #fff;
+  border-color: var(--accent, #1a73e8);
+}
+[data-theme="dark"] .img-filter-preset {
+  background: #35363a;
+  border-color: #5f6368;
+  color: #e8eaed;
+}
+[data-theme="dark"] .img-filter-preset:hover {
+  background: #44454a;
+}
+[data-theme="dark"] .img-filter-preset.active {
+  background: #8ab4f8;
+  color: #202124;
 }
 
 /* ─── Hide print preview overlay when printing ─── */

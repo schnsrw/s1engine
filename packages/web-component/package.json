@@ -1,0 +1,23 @@
+{
+  "name": "@s1engine/web-component",
+  "version": "1.0.1",
+  "description": "Web Component (<s1-editor>) for embedding the s1engine document editor",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schnsrw/s1engine",
+    "directory": "packages/web-component"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist/", "README.md"],
+  "peerDependencies": {
+    "@s1engine/editor": "^1.0.0",
+    "@s1engine/wasm": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "keywords": ["s1engine", "web-component", "custom-element", "editor", "document"]
+}

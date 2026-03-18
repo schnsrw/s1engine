@@ -34,6 +34,8 @@ impl WasmEngine {
     pub fn create(&self) -> WasmDocument {
         WasmDocument {
             inner: Some(self.inner.create()),
+            batch_label: None,
+            batch_count: 0,
         }
     }
 
@@ -45,7 +47,7 @@ impl WasmEngine {
             .inner
             .open(data)
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(WasmDocument { inner: Some(doc) })
+        Ok(WasmDocument { batch_label: None, batch_count: 0, inner: Some(doc) })
     }
 
     /// Open a document from bytes with an explicit format.
@@ -57,7 +59,7 @@ impl WasmEngine {
             .inner
             .open_as(data, fmt)
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(WasmDocument { inner: Some(doc) })
+        Ok(WasmDocument { batch_label: None, batch_count: 0, inner: Some(doc) })
     }
 }
 
@@ -191,6 +193,10 @@ impl WasmLayoutConfig {
 #[wasm_bindgen]
 pub struct WasmDocument {
     inner: Option<s1engine::Document>,
+    /// When set, operations are accumulated instead of applied immediately.
+    /// Call `end_batch()` to apply all as a single undo step.
+    batch_label: Option<String>,
+    batch_count: usize,
 }
 
 #[wasm_bindgen]
@@ -198,6 +204,44 @@ impl WasmDocument {
     /// Explicitly release document memory. The document cannot be used after this.
     pub fn close(&mut self) {
         self.inner = None;
+        self.batch_label = None;
+        self.batch_count = 0;
+    }
+
+    /// Begin a batch of operations that form a single undo step.
+    ///
+    /// All operations between `begin_batch()` and `end_batch()` are applied
+    /// individually. On `end_batch()`, they are merged into a single undo
+    /// unit by collapsing the undo history.
+    pub fn begin_batch(&mut self, label: &str) -> Result<(), JsError> {
+        let count = self.doc()?.undo_count();
+        self.batch_label = Some(label.to_string());
+        self.batch_count = count;
+        Ok(())
+    }
+
+    /// End a batch and merge all operations since `begin_batch()` into
+    /// a single undo step.
+    pub fn end_batch(&mut self) -> Result<(), JsError> {
+        let start_count = self.batch_count;
+        let label = self.batch_label.take();
+        self.batch_count = 0;
+
+        let doc = self.doc_mut()?;
+        let current_count = doc.undo_count();
+        let delta = current_count.saturating_sub(start_count);
+        if delta > 1 {
+            if let Some(lbl) = label {
+                doc.merge_undo_entries(delta, &lbl)
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if a batch is currently active.
+    pub fn is_batching(&self) -> bool {
+        self.batch_label.is_some()
     }
 
     /// Extract all text content as a plain string.
@@ -3979,6 +4023,125 @@ impl WasmDocument {
         Ok(comment_id_val)
     }
 
+    /// Insert a comment with markers positioned at the selected text range.
+    ///
+    /// Unlike `insert_comment` which places markers at paragraph boundaries,
+    /// this positions CommentStart/CommentEnd at the correct run indices
+    /// based on character offsets within the paragraphs.
+    pub fn insert_comment_at_range(
+        &mut self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+        author: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc_mut()?;
+        let start_para_id = parse_node_id(start_node_str)?;
+        let end_para_id = parse_node_id(end_node_str)?;
+
+        let comment_id_val = format!("{}:{}", doc.next_id().replica, doc.next_id().counter);
+
+        // Helper: find the child index in a paragraph that corresponds to a character offset
+        fn find_run_index_at_offset(
+            doc: &s1engine::Document,
+            para_id: NodeId,
+            char_offset: usize,
+        ) -> usize {
+            let para = match doc.node(para_id) {
+                Some(n) => n,
+                None => return 0,
+            };
+            let mut accumulated = 0usize;
+            for (idx, &child_id) in para.children.iter().enumerate() {
+                if let Some(child) = doc.node(child_id) {
+                    if child.node_type == NodeType::Run {
+                        let rlen = run_char_len(doc.model(), child_id);
+                        if char_offset <= accumulated + rlen {
+                            return idx;
+                        }
+                        accumulated += rlen;
+                    }
+                }
+            }
+            para.children.len()
+        }
+
+        let start_idx = find_run_index_at_offset(doc, start_para_id, start_offset);
+
+        // Create CommentStart
+        let cs_id = doc.next_id();
+        let mut cs_node = Node::new(cs_id, NodeType::CommentStart);
+        cs_node.attributes.set(
+            AttributeKey::CommentId,
+            AttributeValue::String(comment_id_val.clone()),
+        );
+        cs_node.attributes.set(
+            AttributeKey::CommentAuthor,
+            AttributeValue::String(author.to_string()),
+        );
+
+        // Create CommentEnd
+        let ce_id = doc.next_id();
+        let mut ce_node = Node::new(ce_id, NodeType::CommentEnd);
+        ce_node.attributes.set(
+            AttributeKey::CommentId,
+            AttributeValue::String(comment_id_val.clone()),
+        );
+
+        let end_idx = find_run_index_at_offset(doc, end_para_id, end_offset);
+        let end_adj = if start_para_id == end_para_id {
+            // Account for the CommentStart we're about to insert
+            end_idx + 1 + 1
+        } else {
+            end_idx + 1
+        };
+
+        // Create CommentBody on root
+        let root_id = doc.model().root_id();
+        let root_children = doc.node(root_id).map(|n| n.children.len()).unwrap_or(0);
+        let cb_id = doc.next_id();
+        let mut cb_node = Node::new(cb_id, NodeType::CommentBody);
+        cb_node.attributes.set(
+            AttributeKey::CommentId,
+            AttributeValue::String(comment_id_val.clone()),
+        );
+        cb_node.attributes.set(
+            AttributeKey::CommentAuthor,
+            AttributeValue::String(author.to_string()),
+        );
+        // Date is set by the editor JS side (no chrono in WASM)
+
+        let cb_para_id = doc.next_id();
+        let cb_run_id = doc.next_id();
+        let cb_text_id = doc.next_id();
+
+        let mut txn = Transaction::with_label("Insert comment at range");
+        txn.push(Operation::insert_node(start_para_id, start_idx, cs_node));
+        txn.push(Operation::insert_node(end_para_id, end_adj, ce_node));
+        txn.push(Operation::insert_node(root_id, root_children, cb_node));
+        txn.push(Operation::insert_node(
+            cb_id,
+            0,
+            Node::new(cb_para_id, NodeType::Paragraph),
+        ));
+        txn.push(Operation::insert_node(
+            cb_para_id,
+            0,
+            Node::new(cb_run_id, NodeType::Run),
+        ));
+        txn.push(Operation::insert_node(
+            cb_run_id,
+            0,
+            Node::text(cb_text_id, text),
+        ));
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(comment_id_val)
+    }
+
     /// Delete a comment and its range markers.
     pub fn delete_comment(&mut self, comment_id: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
@@ -5525,7 +5688,7 @@ impl WasmDocumentBuilder {
             )));
         }
 
-        Ok(WasmDocument { inner: Some(doc) })
+        Ok(WasmDocument { batch_label: None, batch_count: 0, inner: Some(doc) })
     }
 }
 

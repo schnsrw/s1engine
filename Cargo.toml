@@ -18,6 +18,7 @@ members = [
     "crates/s1engine",
     "ffi/wasm",
     "ffi/c",
+    "server",
 ]
 
 [workspace.package]
@@ -31,19 +32,19 @@ keywords = ["document", "docx", "odt", "pdf", "editor"]
 categories = ["parsing", "text-processing"]
 
 [workspace.dependencies]
-# Internal crates
-s1-model = { path = "crates/s1-model" }
-s1-ops = { path = "crates/s1-ops" }
-s1-format-docx = { path = "crates/s1-format-docx" }
-s1-format-odt = { path = "crates/s1-format-odt" }
-s1-format-pdf = { path = "crates/s1-format-pdf" }
-s1-format-txt = { path = "crates/s1-format-txt" }
-s1-format-md = { path = "crates/s1-format-md" }
-s1-convert = { path = "crates/s1-convert" }
-s1-layout = { path = "crates/s1-layout" }
-s1-text = { path = "crates/s1-text" }
-s1-crdt = { path = "crates/s1-crdt" }
-s1engine = { path = "crates/s1engine" }
+# Internal crates (path for local dev, version for crates.io publish)
+s1-model = { version = "1.0.1", path = "crates/s1-model" }
+s1-ops = { version = "1.0.1", path = "crates/s1-ops" }
+s1-format-docx = { version = "1.0.1", path = "crates/s1-format-docx" }
+s1-format-odt = { version = "1.0.1", path = "crates/s1-format-odt" }
+s1-format-pdf = { version = "1.0.1", path = "crates/s1-format-pdf" }
+s1-format-txt = { version = "1.0.1", path = "crates/s1-format-txt" }
+s1-format-md = { version = "1.0.1", path = "crates/s1-format-md" }
+s1-convert = { version = "1.0.1", path = "crates/s1-convert" }
+s1-layout = { version = "1.0.1", path = "crates/s1-layout" }
+s1-text = { version = "1.0.1", path = "crates/s1-text" }
+s1-crdt = { version = "1.0.1", path = "crates/s1-crdt" }
+s1engine = { version = "1.0.1", path = "crates/s1engine" }
 
 # External dependencies
 thiserror = "2"

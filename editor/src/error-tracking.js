@@ -1,5 +1,6 @@
 // s1 Editor — Lightweight global error tracking
 // Captures uncaught errors and unhandled promise rejections, surfaces them in the status bar.
+// No external services — all errors stay local. Replace with your own error reporter if needed.
 
 let _lastError = null;
 let _errorCount = 0;

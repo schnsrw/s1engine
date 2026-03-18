@@ -4,8 +4,9 @@ import {
   getSelectionInfo, getActiveElement, getCursorOffset,
   setCursorAtOffset, setCursorAtStart, isCursorAtStart, isCursorAtEnd,
   getEditableText,
+  addSecondaryCursor, clearSecondarySelections,
 } from './selection.js';
-import { renderDocument, renderNodeById, syncParagraphText, syncAllText, debouncedSync, markLayoutDirty } from './render.js';
+import { renderDocument, renderNodeById, renderSingleParagraphIfPossible, syncParagraphText, syncAllText, debouncedSync, markLayoutDirty } from './render.js';
 import { toggleFormat, applyFormat, updateToolbarState, updateUndoRedo, recordUndoAction, renderUndoHistory } from './toolbar.js';
 import { deleteSelectedImage, setupImages } from './images.js';
 import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
@@ -70,6 +71,49 @@ export function initInput() {
       exitHeaderFooterEditMode();
     }
   }, true);
+
+  // ─── FS-39: Ctrl+Click to add secondary cursor ───
+  page.addEventListener('click', (e) => {
+    // Ctrl+Click adds a secondary cursor (all platforms — Cmd is reserved for shortcuts on Mac)
+    const isCtrlClick = e.ctrlKey && !e.metaKey && !e.shiftKey;
+    if (isCtrlClick && !e.altKey) {
+      const para = e.target.closest('[data-node-id]');
+      if (para && para.dataset.nodeId) {
+        // Calculate the offset at the click point
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const clickEl = para;
+          // Count characters to the click point
+          const walker = document.createTreeWalker(clickEl, NodeFilter.SHOW_TEXT, null);
+          let count = 0;
+          let node;
+          let offset = 0;
+          while ((node = walker.nextNode())) {
+            // Skip non-editable text
+            let ne = node;
+            let skip = false;
+            while (ne && ne !== clickEl) {
+              if (ne.nodeType === 1 && ne.getAttribute?.('contenteditable') === 'false') { skip = true; break; }
+              ne = ne.parentElement;
+            }
+            if (skip) continue;
+            if (node === range.startContainer) {
+              offset = count + Array.from(node.textContent.substring(0, range.startOffset)).length;
+              break;
+            }
+            count += Array.from(node.textContent).length;
+          }
+          addSecondaryCursor(para.dataset.nodeId, offset);
+        }
+      }
+    } else if (!e.ctrlKey && !e.metaKey) {
+      // Regular click clears secondary cursors
+      if (state.multiSelections.length > 0) {
+        clearSecondarySelections();
+      }
+    }
+  });
 
   // ─── FS-38: Triple-click to select entire paragraph ───
   let _tripleClickTimer = 0;
@@ -1919,6 +1963,13 @@ function parseClipboardHtml(html) {
       return null;
     }
 
+    // FS-26: Detect Word footnotes/endnotes in pasted HTML
+    // Word footnotes appear as <a href="#_ftn1"> refs in body and <div id="ftn1"> blocks at bottom
+    const footnoteBlocks = _extractWordFootnoteBlocks(walkRoot);
+    if (footnoteBlocks.size > 0) {
+      _resolveFootnoteReferences(elements, footnoteBlocks);
+    }
+
     // Clean up internal _fromInline marker
     for (const el of elements) {
       delete el._fromInline;
@@ -2037,6 +2088,16 @@ function walkBlockElements(container, elements) {
       continue;
     }
 
+    // FS-26: Detect Word footnote/endnote body divs (id="ftn1", "edn1", etc.)
+    if (tag === 'div' && child.id && /^(ftn|edn)\d+$/.test(child.id)) {
+      const noteType = child.id.startsWith('ftn') ? 'footnote' : 'endnote';
+      const noteText = child.textContent?.replace(/^\[\d+\]\s*/, '').trim() || '';
+      if (noteText) {
+        elements.push({ type: noteType, text: noteText });
+      }
+      continue;
+    }
+
     // Block elements that contain paragraphs (divs, sections)
     if (tag === 'div' || tag === 'section' || tag === 'article' || tag === 'main') {
       // Check if it contains block children or is just a wrapper for inline content
@@ -2113,7 +2174,8 @@ function walkBlockElements(container, elements) {
       // Check for images inside the paragraph
       const imgs = child.querySelectorAll('img');
       const runs = extractRunsFromElement(child);
-      if (runs.length > 0) {
+      // Always create paragraph element — empty runs = blank line
+      {
         const para = { type: 'paragraph', runs };
         extractParagraphFormat(child, para);
 
@@ -2153,7 +2215,7 @@ function walkBlockElements(container, elements) {
           if (cls.includes('MsoSubtitle')) para.headingLevel = 2;
         }
 
-        if (runs.length > 0) elements.push(para);
+        elements.push(para);
       }
       // Add any images found inside the paragraph as separate elements
       imgs.forEach(img => {
@@ -2298,11 +2360,12 @@ function pasteStructuredContent(doc, info, parsed, page) {
           j++;
         }
         if (textParas.length > 0) {
-          // Filter runs: drop empty text runs, sanitize data
+          // Clean runs: drop empty text runs but PRESERVE empty paragraphs (blank lines)
           const cleanedParas = textParas.map(p => {
             const runs = (p.runs || []).filter(r => r.text && r.text.length > 0);
             return { ...p, runs };
-          }).filter(p => p.runs.length > 0);
+          });
+          // Don't filter out empty paragraphs — they represent blank lines
 
           if (cleanedParas.length > 0) {
             let richPasteOk = false;
@@ -2399,6 +2462,9 @@ function pasteStructuredContent(doc, info, parsed, page) {
                   }
                 } catch (_) {}
               }
+
+              // FS-26: Insert footnotes/endnotes detected from Word paste
+              _insertPastedFootnotes(doc, cleanedParas, info.startNodeId);
             }
           }
 
@@ -2428,10 +2494,11 @@ function pasteStructuredContent(doc, info, parsed, page) {
           }
 
           if (targetNodeId) {
+            // Clean runs but preserve empty paragraphs (blank lines)
             const cleanedParas = textParas.map(p => {
               const runs = (p.runs || []).filter(r => r.text && r.text.length > 0);
               return { ...p, runs };
-            }).filter(p => p.runs.length > 0);
+            });
 
             if (cleanedParas.length > 0) {
               const sanitizedParas = cleanedParas.map(p => {
@@ -2631,6 +2698,21 @@ function pasteStructuredContent(doc, info, parsed, page) {
       } catch (e) { console.warn('paste page break:', e); }
       continue;
     }
+
+    // FS-26: Handle footnotes/endnotes from pasted content
+    if (el.type === 'footnote' || el.type === 'endnote') {
+      try {
+        if (el.type === 'footnote' && typeof doc.insert_footnote === 'function') {
+          doc.insert_footnote(lastNodeId, el.text);
+          broadcastOp({ action: 'insertFootnote', nodeId: lastNodeId, text: el.text });
+        } else if (el.type === 'endnote' && typeof doc.insert_endnote === 'function') {
+          doc.insert_endnote(lastNodeId, el.text);
+          broadcastOp({ action: 'insertEndnote', nodeId: lastNodeId, text: el.text });
+        }
+        anyPasted = true;
+      } catch (e) { console.warn('paste footnote/endnote:', e); }
+      continue;
+    }
   }
 
   return anyPasted;
@@ -2769,6 +2851,147 @@ function findLastParagraphId(page) {
 }
 
 /** Extract paragraph-level formatting from a block element. */
+// ─── FS-26: Word Footnote/Endnote Detection on Paste ─────────────────────
+
+/**
+ * Extract Word footnote/endnote blocks from pasted HTML.
+ * Word uses <div id="ftn1">, <div id="ftn2">, etc. for footnotes,
+ * and <div id="edn1">, <div id="edn2">, etc. for endnotes.
+ * Returns a Map of footnote ID -> { type: 'footnote'|'endnote', text: string }
+ */
+function _extractWordFootnoteBlocks(root) {
+  const blocks = new Map();
+  // Match both footnote and endnote divs
+  const ftnDivs = root.querySelectorAll('div[id^="ftn"], div[id^="edn"]');
+  for (const div of ftnDivs) {
+    const id = div.id; // e.g. "ftn1", "edn2"
+    const isEndnote = id.startsWith('edn');
+    const numMatch = id.match(/^(?:ftn|edn)(\d+)$/);
+    if (!numMatch) continue;
+    const num = numMatch[1];
+    // Extract the text content, stripping the footnote number marker
+    let text = '';
+    const paras = div.querySelectorAll('p');
+    if (paras.length > 0) {
+      text = Array.from(paras).map(p => {
+        // Remove the leading footnote reference link (e.g. "[1]" or the anchor)
+        let pText = p.textContent || '';
+        // Strip leading reference markers like "[1] " or "1 "
+        pText = pText.replace(/^\s*\[?\d+\]?\s*/, '');
+        return pText;
+      }).join(' ').trim();
+    } else {
+      text = (div.textContent || '').replace(/^\s*\[?\d+\]?\s*/, '').trim();
+    }
+    if (text) {
+      blocks.set(num, {
+        type: isEndnote ? 'endnote' : 'footnote',
+        text,
+        refKey: isEndnote ? `_ednref${num}` : `_ftnref${num}`,
+        targetKey: isEndnote ? `_edn${num}` : `_ftn${num}`,
+      });
+    }
+    // Remove the div so it doesn't get parsed as a regular paragraph
+    div.remove();
+  }
+  return blocks;
+}
+
+/**
+ * Walk parsed elements and convert footnote/endnote anchor references
+ * into structured footnote entries. Modifies elements in place.
+ *
+ * In Word HTML, body text contains <a href="#_ftn1" name="_ftnref1">[1]</a>.
+ * We detect these and mark them as footnote references in the paragraph runs.
+ */
+function _resolveFootnoteReferences(elements, footnoteBlocks) {
+  for (const el of elements) {
+    if (el.type !== 'paragraph' || !el.runs) continue;
+    const newRuns = [];
+    for (const run of el.runs) {
+      // Check if this run's text looks like a footnote reference marker
+      // Word typically pastes "[1]" or just "1" as the anchor text
+      const refMatch = run.text.match(/^\[?(\d+)\]?$/);
+      if (refMatch && run.hyperlinkUrl) {
+        const href = run.hyperlinkUrl;
+        // Detect #_ftn1, #_ftnref1, #_edn1, #_ednref1 patterns
+        const ftnHrefMatch = href.match(/#_(?:ftn|edn)(\d+)$/);
+        if (ftnHrefMatch) {
+          const num = ftnHrefMatch[1];
+          const block = footnoteBlocks.get(num);
+          if (block) {
+            // Replace the anchor text with a footnote reference marker
+            newRuns.push({
+              text: run.text,
+              footnoteRef: true,
+              footnoteType: block.type,
+              footnoteNum: parseInt(num),
+              footnoteText: block.text,
+              // Preserve other formatting from the original run
+              ...(run.superscript ? { superscript: true } : {}),
+              ...(run.bold ? { bold: true } : {}),
+              ...(run.italic ? { italic: true } : {}),
+              ...(run.fontSize ? { fontSize: run.fontSize } : {}),
+            });
+            continue;
+          }
+        }
+      }
+      newRuns.push(run);
+    }
+    el.runs = newRuns;
+
+    // Also check if any run was marked with footnoteRef — if so, attach
+    // footnote metadata to the paragraph for downstream handling
+    const footnoteRuns = el.runs.filter(r => r.footnoteRef);
+    if (footnoteRuns.length > 0) {
+      if (!el.footnotes) el.footnotes = [];
+      for (const fr of footnoteRuns) {
+        el.footnotes.push({
+          type: fr.footnoteType,
+          num: fr.footnoteNum,
+          text: fr.footnoteText,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * FS-26: After pasting paragraphs that contain footnote references,
+ * insert actual footnotes/endnotes into the WASM document model.
+ */
+function _insertPastedFootnotes(doc, pastedParas, startNodeId) {
+  const hasFootnotes = pastedParas.some(p => p.footnotes && p.footnotes.length > 0);
+  if (!hasFootnotes) return;
+
+  try {
+    const allIds = JSON.parse(doc.paragraph_ids_json());
+    const startIdx = allIds.indexOf(startNodeId);
+    if (startIdx < 0) return;
+
+    for (let pi = 0; pi < pastedParas.length; pi++) {
+      const para = pastedParas[pi];
+      if (!para.footnotes || para.footnotes.length === 0) continue;
+      const paraIdx = startIdx + pi;
+      if (paraIdx >= allIds.length) continue;
+      const paraNodeId = allIds[paraIdx];
+
+      for (const fn of para.footnotes) {
+        try {
+          if (fn.type === 'endnote' && typeof doc.insert_endnote === 'function') {
+            doc.insert_endnote(paraNodeId, fn.text);
+          } else if (typeof doc.insert_footnote === 'function') {
+            doc.insert_footnote(paraNodeId, fn.text);
+          }
+        } catch (e) {
+          console.warn(`FS-26: Could not insert ${fn.type} #${fn.num}:`, e);
+        }
+      }
+    }
+  } catch (_) {}
+}
+
 function extractParagraphFormat(block, para) {
   const tag = block.tagName.toLowerCase();
   // Heading level
@@ -2866,6 +3089,11 @@ function walkInline(node, inherited, runs) {
     const href = node.getAttribute('href');
     if (href && !href.startsWith('javascript:') && !href.startsWith('#_mso')) {
       fmt.hyperlinkUrl = href;
+      // FS-26: Mark Word footnote/endnote reference anchors with superscript
+      // so they render distinctly and are detected by _resolveFootnoteReferences
+      if (/^#_(?:ftn|edn)\d+$/.test(href)) {
+        fmt.superscript = true;
+      }
     }
   }
   if (tag === 'br') {
@@ -3026,6 +3254,8 @@ function doUndo() {
   try {
     // E3.1: Batch undo — if we're in a typing session, undo all typing steps at once
     const batch = state._typingBatch;
+    // FS-37: Also check formatting batch — multiple rapid format ops undo together
+    const fmtBatch = state._formatBatch;
     if (batch && batch.count > 1) {
       const steps = batch.count;
       state._typingBatch = null;
@@ -3033,8 +3263,18 @@ function doUndo() {
         if (!state.doc.can_undo()) break;
         state.doc.undo();
       }
+    } else if (fmtBatch && fmtBatch.count > 1) {
+      // FS-37: Undo all formatting operations in the batch at once
+      const steps = fmtBatch.count;
+      state._formatBatch = null;
+      clearTimeout(fmtBatch.timer);
+      for (let i = 0; i < steps; i++) {
+        if (!state.doc.can_undo()) break;
+        state.doc.undo();
+      }
     } else {
       state._typingBatch = null;
+      if (fmtBatch) { clearTimeout(fmtBatch.timer); state._formatBatch = null; }
       state.doc.undo();
     }
     // E3.2: Advance undo history position

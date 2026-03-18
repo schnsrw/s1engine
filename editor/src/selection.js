@@ -338,3 +338,121 @@ export function getEditableText(el) {
 
 export function isCursorAtStart(el) { return getCursorOffset(el) === 0; }
 export function isCursorAtEnd(el) { return getCursorOffset(el) >= Array.from(getEditableText(el)).length; }
+
+// ─── FS-39: Multi-cursor support (stub foundation) ──────────────────────
+
+let _multiCursorIdCounter = 0;
+const _cursorElements = new Map(); // id -> DOM element
+
+/**
+ * Add a secondary cursor at the given position.
+ * Does not affect the primary browser selection.
+ * @param {string} nodeId - The paragraph node ID
+ * @param {number} offset - Character offset within the paragraph
+ * @returns {number} The cursor ID for later removal
+ */
+export function addSecondaryCursor(nodeId, offset) {
+  const id = ++_multiCursorIdCounter;
+  state.multiSelections.push({ nodeId, offset, id });
+  _renderSecondaryCursor({ nodeId, offset, id });
+  return id;
+}
+
+/**
+ * Remove a specific secondary cursor by ID.
+ */
+export function removeSecondaryCursor(id) {
+  state.multiSelections = state.multiSelections.filter(c => c.id !== id);
+  const el = _cursorElements.get(id);
+  if (el) { el.remove(); _cursorElements.delete(id); }
+}
+
+/**
+ * Clear all secondary cursors.
+ */
+export function clearSecondarySelections() {
+  state.multiSelections = [];
+  for (const [id, el] of _cursorElements) {
+    el.remove();
+  }
+  _cursorElements.clear();
+}
+
+/**
+ * Render a visual indicator for a secondary cursor.
+ * Creates a thin blinking line at the cursor position.
+ */
+function _renderSecondaryCursor(cursor) {
+  const container = $('pageContainer');
+  if (!container) return;
+
+  // Find the paragraph element
+  const paraEl = container.querySelector(`[data-node-id="${cursor.nodeId}"]`);
+  if (!paraEl) return;
+
+  // Resolve the character offset to a DOM position
+  const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
+  let counted = 0;
+  let targetNode = null;
+  let targetOffset = 0;
+
+  let node;
+  while ((node = walker.nextNode())) {
+    // Skip non-editable text (list markers)
+    let ne = node;
+    let skip = false;
+    while (ne && ne !== paraEl) {
+      if (ne.nodeType === 1 && ne.getAttribute?.('contenteditable') === 'false') { skip = true; break; }
+      ne = ne.parentElement;
+    }
+    if (skip) continue;
+
+    const chars = Array.from(node.textContent);
+    if (counted + chars.length >= cursor.offset) {
+      targetNode = node;
+      let strOff = 0;
+      for (let i = 0; i < cursor.offset - counted && i < chars.length; i++) {
+        strOff += chars[i].length;
+      }
+      targetOffset = strOff;
+      break;
+    }
+    counted += chars.length;
+  }
+
+  if (!targetNode) return;
+
+  // Create a range at the target position to get screen coordinates
+  const range = document.createRange();
+  range.setStart(targetNode, targetOffset);
+  range.collapse(true);
+  const rect = range.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+
+  // Remove previous element for this cursor if it exists
+  const prev = _cursorElements.get(cursor.id);
+  if (prev) prev.remove();
+
+  // Create the visual cursor element
+  const cursorEl = document.createElement('div');
+  cursorEl.className = 'secondary-cursor';
+  cursorEl.dataset.cursorId = cursor.id;
+  cursorEl.style.left = (rect.left - containerRect.left + container.scrollLeft) + 'px';
+  cursorEl.style.top = (rect.top - containerRect.top + container.scrollTop) + 'px';
+  cursorEl.style.height = rect.height + 'px';
+  container.appendChild(cursorEl);
+  _cursorElements.set(cursor.id, cursorEl);
+}
+
+/**
+ * Re-render all secondary cursors (call after document re-render).
+ */
+export function refreshSecondarySelections() {
+  for (const [id, el] of _cursorElements) {
+    el.remove();
+  }
+  _cursorElements.clear();
+  for (const cursor of state.multiSelections) {
+    _renderSecondaryCursor(cursor);
+  }
+}

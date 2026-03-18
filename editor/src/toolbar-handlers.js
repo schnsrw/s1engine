@@ -507,8 +507,17 @@ export function initToolbar() {
     const info = state._commentSelInfo;
     if (!info || !state.doc) return;
     try {
-      state.doc.insert_comment(info.startNodeId, info.endNodeId, author, text);
-      broadcastOp({ action: 'insertComment', startNodeId: info.startNodeId, endNodeId: info.endNodeId, author, text });
+      // Pass selection offsets so comment markers wrap the selected text range
+      if (typeof state.doc.insert_comment_at_range === 'function') {
+        state.doc.insert_comment_at_range(
+          info.startNodeId, info.startOffset,
+          info.endNodeId, info.endOffset,
+          author, text
+        );
+      } else {
+        state.doc.insert_comment(info.startNodeId, info.endNodeId, author, text);
+      }
+      broadcastOp({ action: 'insertComment', startNodeId: info.startNodeId, startOffset: info.startOffset, endNodeId: info.endNodeId, endOffset: info.endOffset, author, text });
       renderDocument();
       updateUndoRedo();
       refreshComments();
@@ -2355,6 +2364,11 @@ export function applyParagraphStyle(styleName) {
 
   syncAllText();
   try {
+    // FS-16/37: Batch all style operations into one undo step
+    if (typeof state.doc.begin_batch === 'function') {
+      state.doc.begin_batch('Apply style: ' + styleName);
+    }
+
     const paraIds = getSelectedParagraphIds(info);
     paraIds.forEach(nodeId => {
       // Set the style ID on the paragraph node (authoritative for model/export)
@@ -2388,7 +2402,14 @@ export function applyParagraphStyle(styleName) {
     renderDocument();
     updateToolbarState();
     updateUndoRedo();
-  } catch (e) { console.warn('applyParagraphStyle:', e); }
+  } catch (e) { console.warn('applyParagraphStyle:', e); } finally {
+    // FS-16/37: End batch — all ops become one undo step (always run, even on error)
+    try {
+      if (typeof state.doc?.end_batch === 'function' && state.doc.is_batching()) {
+        state.doc.end_batch();
+      }
+    } catch (_) {}
+  }
 }
 
 function initStyleGallery() {
@@ -2888,7 +2909,7 @@ function applyTableProps(tableId) {
 // When a modal is open, Tab/Shift+Tab cycle only within the modal.
 // Escape closes the modal. Focus returns to the element that opened it.
 // Selection is saved before open and restored after close.
-const MODAL_IDS = ['tableModal', 'commentModal', 'linkModal', 'altTextModal', 'tablePropsModal', 'headerFooterModal', 'templateModal', 'pageSetupModal', 'columnsModal', 'equationModal', 'bookmarkModal', 'dictModal', 'autoCorrectModal', 'shortcutsModal', 'usageStatsModal', 'errorDetailModal', 'whatsNewModal', 'welcomeModal'];
+const MODAL_IDS = ['tableModal', 'commentModal', 'linkModal', 'altTextModal', 'tablePropsModal', 'headerFooterModal', 'templateModal', 'pageSetupModal', 'columnsModal', 'equationModal', 'bookmarkModal', 'dictModal', 'autoCorrectModal', 'shortcutsModal', 'usageStatsModal', 'errorDetailModal', 'whatsNewModal', 'welcomeModal', 'specialCharsModal', 'bordersModal', 'captionModal'];
 const FOCUSABLE_SELECTOR = 'button, [href], input:not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function initModalFocusTrap() {
@@ -3276,7 +3297,7 @@ const _COLOR_PALETTE = [
 let _recentColors = [];
 
 function _applyColorFormat(hex, formatKey) {
-  saveSelection();
+  // Use saved selection info (captured before palette opened)
   const selInfo = state.lastSelInfo ? { ...state.lastSelInfo } : null;
   if (selInfo && !selInfo.collapsed && state.doc) {
     try {
@@ -3286,15 +3307,16 @@ function _applyColorFormat(hex, formatKey) {
         selInfo.endNodeId, selInfo.endOffset,
         formatKey, hex
       );
-      restoreSelectionForPickers();
-      restoreSelectionForPickers();
+      broadcastOp({ action: 'formatSelection', startNode: selInfo.startNodeId, startOffset: selInfo.startOffset, endNode: selInfo.endNodeId, endOffset: selInfo.endOffset, key: formatKey, value: hex });
       renderDocument();
+      // Restore the selection after render so user sees it
+      restoreSelectionForPickers();
       updateToolbarState();
       updateUndoRedo();
       markDirty();
-      broadcastOp({ action: 'formatSelection', startNode: selInfo.startNodeId, startOffset: selInfo.startOffset, endNode: selInfo.endNodeId, endOffset: selInfo.endOffset, key: formatKey, value: hex });
     } catch (err) { console.error(formatKey + ' apply:', err); }
-  } else {
+  } else if (selInfo) {
+    // Collapsed selection — apply as pending format for next typed text
     restoreSelectionForPickers();
     applyFormat(formatKey, hex);
   }

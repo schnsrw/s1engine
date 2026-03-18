@@ -1,0 +1,27 @@
+{
+  "name": "@s1engine/react",
+  "version": "1.0.1",
+  "description": "React component for the s1engine document editor",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schnsrw/s1engine",
+    "directory": "packages/react"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist/", "README.md"],
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "@s1engine/editor": "^1.0.0",
+    "@s1engine/wasm": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "react": "^18.0.0",
+    "@types/react": "^18.0.0"
+  },
+  "keywords": ["s1engine", "react", "editor", "document", "docx"]
+}

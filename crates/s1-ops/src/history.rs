@@ -117,6 +117,28 @@ impl History {
         self.max_undo
     }
 
+    /// Merge the last `count` undo entries into a single entry.
+    ///
+    /// This is used by the batch operation API: multiple individual operations
+    /// are applied normally, then merged into one undo step at the end.
+    /// The merged transaction gets the given label.
+    pub fn merge_undo_entries(&mut self, count: usize, label: &str) {
+        if count <= 1 || self.undo_stack.len() < count {
+            return;
+        }
+        // Pop the last `count` entries and merge their operations
+        let mut merged = Transaction::with_label(label);
+        let start = self.undo_stack.len() - count;
+        let entries: Vec<Transaction> = self.undo_stack.drain(start..).collect();
+        // Undo operations need to be in reverse order (last applied = first undone)
+        for entry in entries {
+            for op in entry.operations {
+                merged.push(op);
+            }
+        }
+        self.undo_stack.push(merged);
+    }
+
     /// Clear all history.
     pub fn clear(&mut self) {
         self.undo_stack.clear();

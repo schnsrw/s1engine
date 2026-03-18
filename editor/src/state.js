@@ -65,6 +65,11 @@ export const state = {
   _onTextChanged: null,
   // E3.1: Typing batch undo — tracks continuous typing in same paragraph
   _typingBatch: null, // { nodeId, count, timer }
+  // FS-37: Formatting batch undo — groups rapid format operations (within 500ms)
+  _formatBatch: null, // { count, timer, lastTime }
+  // FS-39: Multi-cursor positions (stub foundation)
+  // Each entry: { nodeId, offset, id } — secondary cursors beyond the primary
+  multiSelections: [],
   // E3.2: Undo history log (JS-side, for display only)
   undoHistory: [], // [{ label, timestamp }]  — most recent first
   undoHistoryPos: 0, // current position in undo history
