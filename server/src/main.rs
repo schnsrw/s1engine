@@ -14,6 +14,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod auth;
 mod collab;
 mod config;
 mod routes;
@@ -54,6 +55,10 @@ async fn main() {
     let webhook_registry = Arc::new(WebhookRegistry::new());
     let room_manager = Arc::new(RoomManager::new());
 
+    // Clone for background task before moving into state
+    let save_rooms = room_manager.clone();
+    let save_storage = storage.clone();
+
     let state = Arc::new(AppState {
         storage,
         webhooks: webhook_registry,
@@ -70,6 +75,15 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024));
+
+    // P4-08: Spawn background auto-save task for dirty rooms
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            save_rooms.save_dirty_rooms(save_storage.as_ref()).await;
+        }
+    });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("s1-server starting on http://{}", addr);
