@@ -181,6 +181,38 @@ export function initInput() {
         }
       }
     }
+    // FS-39: Multi-cursor typing — insert at all cursor positions
+    if (e.inputType === 'insertText' && e.data && state.multiSelections.length > 0 && state.doc) {
+      e.preventDefault();
+      try {
+        // Build cursors array: primary cursor + all secondary cursors
+        const primary = getSelectionInfo();
+        const cursors = [];
+        if (primary) {
+          cursors.push({ nodeId: primary.startNodeId, offset: primary.startOffset, text: e.data });
+        }
+        for (const sc of state.multiSelections) {
+          cursors.push({ nodeId: sc.nodeId, offset: sc.offset, text: e.data });
+        }
+        if (typeof state.doc.multi_cursor_insert === 'function') {
+          syncAllText();
+          state.doc.multi_cursor_insert(JSON.stringify(cursors));
+          // Update secondary cursor offsets (each shifted by inserted text length)
+          for (const sc of state.multiSelections) {
+            sc.offset += e.data.length;
+          }
+          renderDocument();
+          // Re-render secondary cursors at new positions
+          import('./selection.js').then(mod => mod.refreshSecondarySelections?.());
+          updateUndoRedo();
+          markDirty();
+        } else {
+          // Fallback: insert at primary only, clear secondary cursors
+          clearSecondarySelections();
+        }
+      } catch (err) { console.warn('multi-cursor insert:', err); }
+      return;
+    }
     if (e.inputType === 'insertText' && e.data) {
       // FS-24: Smart quotes replacement (skip in Code style blocks)
       if (state.smartQuotesEnabled && (e.data === '"' || e.data === "'")) {

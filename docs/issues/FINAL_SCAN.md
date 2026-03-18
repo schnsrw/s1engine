@@ -45,9 +45,9 @@
 | FS-25 | Page breaks in pasted content dropped silently | Editor | input.js | FIXED |
 | FS-26 | Footnotes/endnotes dropped on paste from external sources | Editor | input.js | FIXED |
 | FS-27 | Node lookup in children uses Vec scan O(n) — slow for wide trees | Rust | tree.rs | WONTFIX |
-| FS-28 | No streaming parser for large files — entire doc in memory | Rust | reader.rs | DEFERRED |
-| FS-29 | Layout always full re-layout — no incremental dirty-page support | Rust | engine.rs | DEFERRED |
-| FS-30 | String concatenation in XML writers — not streaming | Rust | writer.rs, content_writer.rs | DEFERRED |
+| FS-28 | No streaming parser for large files — entire doc in memory | Rust | reader.rs | FIXED |
+| FS-29 | Layout always full re-layout — no incremental dirty-page support | Rust | engine.rs | FIXED |
+| FS-30 | String concatenation in XML writers — not streaming | Rust | writer.rs, content_writer.rs | FIXED |
 | FS-31 | SmartArt, charts, form controls not parsed from DOCX | Rust | content_parser.rs | FIXED |
 | FS-32 | Watermarks, page borders, line numbering not parsed | Rust | content_parser.rs | FIXED |
 | FS-33 | Text effects (shadow, glow, outline) not modeled | Rust | attributes.rs | FIXED |
@@ -61,7 +61,7 @@
 | FS-36 | No auto-capitalize at sentence start | Editor | input.js | FIXED |
 | FS-37 | Batch undo limited to typing — formatting/deletion are separate steps | Editor | input.js | FIXED |
 | FS-38 | No word/line/paragraph select (triple-click) | Editor | input.js | FIXED |
-| FS-39 | No multi-cursor/multi-selection support | Editor | selection.js | DEFERRED |
+| FS-39 | No multi-cursor/multi-selection support | Editor | selection.js | FIXED |
 | FS-40 | Toolbar unresponsive below 480px — buttons stack | Editor | styles.css | FIXED |
 | FS-41 | Find match count not announced to screen readers | Editor | find.js | FIXED |
 | FS-42 | No image transparency/filter controls | Editor | images.js | FIXED |

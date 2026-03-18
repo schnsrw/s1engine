@@ -32,6 +32,7 @@ pub mod property_parser;
 pub mod reader;
 pub mod section_parser;
 pub mod section_writer;
+pub mod streaming;
 pub mod style_parser;
 pub mod style_writer;
 pub mod writer;
