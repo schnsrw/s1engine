@@ -186,19 +186,33 @@ function wireSignatureModalEvents() {
       if (!_sigCanvas) return;
       _sigImageData = _sigCanvas.toDataURL('image/png');
     } else if (activeTab === 'type') {
-      // Render typed text to canvas for capture
+      // Render typed text to canvas with signature-like styling
       const text = typeInput?.value || 'Signature';
-      const font = fontSelect?.value || 'cursive';
+      const font = fontSelect?.value || "'Brush Script MT', 'Segoe Script', 'Dancing Script', cursive";
       const canvas = document.createElement('canvas');
-      canvas.width = 400;
-      canvas.height = 120;
+      const dpr = window.devicePixelRatio || 2;
+      canvas.width = 500 * dpr;
+      canvas.height = 140 * dpr;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, 400, 120);
-      ctx.font = `36px ${font}`;
+      ctx.scale(dpr, dpr);
+      // Transparent background (no white box)
+      ctx.clearRect(0, 0, 500, 140);
+      ctx.font = `italic 44px ${font}`;
       ctx.fillStyle = _sigColor;
       ctx.textBaseline = 'middle';
-      ctx.fillText(text, 20, 60);
+      // Center the text
+      const measured = ctx.measureText(text);
+      const textX = Math.max(10, (500 - measured.width) / 2);
+      ctx.fillText(text, textX, 70);
+      // Add a subtle underline
+      ctx.strokeStyle = _sigColor;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.moveTo(textX, 95);
+      ctx.lineTo(textX + measured.width, 95);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
       _sigImageData = canvas.toDataURL('image/png');
     }
     // 'upload' tab already sets _sigImageData

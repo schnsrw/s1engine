@@ -26,6 +26,26 @@ let _drawColor = '#d93025';
 let _drawWidth = 2;
 let _drawingPageNum = 0;
 
+// ─── Annotation Undo Stack ──────────────────────────
+const _undoStack = []; // stores snapshots of pdfAnnotations array
+const MAX_UNDO = 30;
+
+function _saveUndoState() {
+  _undoStack.push(JSON.parse(JSON.stringify(state.pdfAnnotations)));
+  if (_undoStack.length > MAX_UNDO) _undoStack.shift();
+}
+
+export function undoAnnotation() {
+  if (_undoStack.length === 0) return;
+  state.pdfAnnotations = _undoStack.pop();
+  state.pdfModified = true;
+  // Re-render all pages
+  const pageCount = state.pdfViewer?.getPageCount() || 0;
+  for (let i = 1; i <= pageCount; i++) renderAnnotationsForPage(i);
+  refreshAnnotationsPanel();
+  showToast('Annotation undone');
+}
+
 // ─── Initialization ─────────────────────────────────
 
 export function initAnnotationTools() {
@@ -61,8 +81,12 @@ function getPageFromEvent(e) {
 
 function onMouseDown(e) {
   const tool = state.pdfTool;
+  if (!tool || tool === 'select') return; // No tool active or select mode
   const page = getPageFromEvent(e);
   if (!page) return;
+
+  // Don't create new annotations when clicking inside existing ones
+  if (e.target.closest('.pdf-comment-input, .pdf-text-box, .pdf-comment-marker')) return;
 
   if (tool === 'draw') startDrawing(page);
   else if (tool === 'comment') addComment(page);
@@ -77,8 +101,35 @@ function onMouseMove(e) {
 
 function onMouseUp(e) {
   if (state.pdfTool === 'draw' && _isDrawing) endDrawing(e);
-  else if (state.pdfTool === 'highlight') createHighlightFromSelection();
+  else if (state.pdfTool === 'highlight') {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      // No selection — show hint instead of doing nothing
+      showToast('Select text first, then release to highlight', 'info');
+      return;
+    }
+    createHighlightFromSelection();
+  }
   else if (state.pdfTool === 'redact' && _redactStart) endRedact(e);
+}
+
+// Escape key deselects the current PDF tool
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.pdfTool && state.pdfTool !== 'select' && state.currentView === 'pdf') {
+    state.pdfTool = 'select';
+    _updateToolbarActiveState();
+    const container = $('pdfCanvasContainer');
+    if (container) container.style.cursor = '';
+    showToast('Tool deselected');
+  }
+});
+
+/** Update active state on PDF toolbar buttons to reflect current tool */
+function _updateToolbarActiveState() {
+  const toolBtns = document.querySelectorAll('[data-pdf-tool]');
+  toolBtns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.pdfTool === state.pdfTool);
+  });
 }
 
 // ─── Highlight Tool ──────────────────────────────────
@@ -114,6 +165,7 @@ function createHighlightFromSelection() {
   }
   if (!quads.length) return;
 
+  _saveUndoState();
   const annotation = new PdfAnnotation('highlight', pageNum, {
     quads,
     selectedText: sel.toString(),
@@ -169,29 +221,37 @@ function addComment(page) {
     if (!overlayLayer.children.length) overlayLayer.style.pointerEvents = 'none';
   };
 
-  // Close on outside click
+  // Close on outside click (delay to avoid catching the same mousedown that opened the comment)
   const onOutsideClick = (ev) => {
     if (!inputWrap.contains(ev.target)) { cleanup(); document.removeEventListener('mousedown', onOutsideClick, true); }
   };
-  setTimeout(() => document.addEventListener('mousedown', onOutsideClick, true), 0);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', onOutsideClick, true);
+    });
+  });
 
   cancelBtn.addEventListener('click', () => { cleanup(); document.removeEventListener('mousedown', onOutsideClick, true); });
   addBtn.addEventListener('click', () => {
     const content = input.value.trim();
     document.removeEventListener('mousedown', onOutsideClick, true);
     if (!content) { cleanup(); return; }
-  const annotation = new PdfAnnotation('comment', page.pageNum, {
-    x: page.x, y: page.y, content, replies: [],
-    pageWidth: page.rect.width,
-    pageHeight: page.rect.height,
-  });
+    const annotation = new PdfAnnotation('comment', page.pageNum, {
+      x: page.x, y: page.y, content, replies: [],
+      pageWidth: page.rect.width,
+      pageHeight: page.rect.height,
+    });
     annotation.color = '#1a73e8';
+    _saveUndoState();
     state.pdfAnnotations.push(annotation);
     state.pdfModified = true;
     cleanup();
     renderAnnotationsForPage(page.pageNum);
     refreshAnnotationsPanel();
     $('pdfAnnotationsPanel')?.classList.add('show');
+    // Switch back to select mode after placing comment (single-shot)
+    state.pdfTool = 'select';
+    _updateToolbarActiveState();
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addBtn.click(); }
@@ -514,6 +574,7 @@ function selectAnnotation(id) {
 export function deleteAnnotation(id) {
   const idx = state.pdfAnnotations.findIndex(a => a.id === id);
   if (idx === -1) return;
+  _saveUndoState();
   const ann = state.pdfAnnotations[idx];
   state.pdfAnnotations.splice(idx, 1);
   state.pdfModified = true;
