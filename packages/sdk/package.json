@@ -1,0 +1,44 @@
+{
+  "name": "@s1engine/sdk",
+  "version": "1.0.1",
+  "description": "Headless JavaScript/TypeScript SDK for s1engine — document manipulation, format conversion, collaboration",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schnsrw/s1engine",
+    "directory": "packages/sdk"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "@s1engine/wasm": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "document",
+    "docx",
+    "odt",
+    "pdf",
+    "sdk",
+    "editor",
+    "wasm"
+  ]
+}

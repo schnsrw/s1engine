@@ -18,6 +18,7 @@ members = [
     "crates/s1engine",
     "ffi/wasm",
     "ffi/c",
+    "server",
 ]
 
 [workspace.package]
