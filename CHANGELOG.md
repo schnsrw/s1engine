@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Styles panel with set_paragraph_style_id WASM API (Title, Subtitle, Quote, Code)
+- Header/footer inline editing (double-click to edit, page number fields)
+- Track changes UI (Editing/Suggesting/Viewing modes, Review menu, TC panel)
+- Section breaks (next page, continuous, even, odd) with visual indicators
+- TOC generation with outline panel (Ctrl+Shift+O)
+- Format painter (single-click once, double-click sticky)
+- Print preview overlay with page navigation
+- Bookmarks & cross-references with visual markers
+- Image text wrapping (7 modes), crop tool, caption support, filters/opacity
+- Multi-column layout with CSS column rendering
+- Equation editor with KaTeX rendering
+- Special characters dialog (240 chars, 6 categories, search)
+- Borders & shading dialog
+- Contextual properties panel (paragraph/image/table/section)
+- Color palette dropdowns (40 swatches + highlight colors)
+- Read-only/viewer mode toggle
+- Find & Replace: regex, replace preview, find-in-selection
+- Document statistics WASM API (words, chars, paragraphs, pages)
+- RTL text direction (dir="rtl" on Arabic/Hebrew paragraphs)
+- Batch undo via begin_batch/end_batch WASM API
+- Comment placement at correct text range (insert_comment_at_range)
+- Smart quotes, auto-capitalize, triple-click paragraph select
+- Tab stops on ruler (click/drag/double-click to cycle type)
+- 13 new keyboard shortcuts (Ctrl+Shift+V, Ctrl+K, Ctrl+Shift+X, etc.)
+- PDF annotation undo (Ctrl+Z), draggable elements, Escape tool deselect
+- Skip-to-main-content accessibility link
+- Toast aria-live for screen readers
+
+### Fixed
+- 106 original tracked issues (100% resolved)
+- 31 editor deep scan issues (memory leaks, race conditions, event listener accumulation)
+- Paste: blank lines no longer dropped (removed 3 faulty filters)
+- Paste: MAX_PASTE_PARAGRAPHS raised 1K->10K with user feedback on failure
+- Paste: nested list depth recursively detected, table cell formatting preserved
+- Paste: Google Docs multi-paragraph wrapper splitting, footnote detection
+- PDF: text layer selection visibility (opacity 0.25->1)
+- PDF: comment tool single-shot mode, outside-click race condition fixed
+- PDF: signature typed tab renders with script font + subtle underline
+- DOCX: 24 per-element Vec allocations removed from hot parse loop
+- DOCX: 11 insert_node calls enriched with error context
+- DOCX: round-trip tests for nested tables, mixed lists, multi-section
+- ODT: auto-styles HashMap clone eliminated, column style names stored
+- Layout: widow/orphan control, character spacing for ligatures
+- WASM: builder depth/size limits, ConvertError preserves original error
+- CRDT: 3-way convergence test, 5 error path tests, state vector bounded
+
+### Changed
+- MSRV bumped 1.85 -> 1.88 (deps require it)
+- Analytics.js replaced with no-op stubs for open-source release
+- Highlight palette uses muted pastels for better contrast
+- Floating toolbar max-width respects viewport on mobile
+- Toolbar responsive: horizontal scroll on mobile (<480px)
+
 ## [1.0.1] - 2026-03-16
 
 ### Added

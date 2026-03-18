@@ -60,6 +60,20 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  wasm:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked || true
+      - name: Build WASM
+        run: wasm-pack build ffi/wasm --target web
+
   test-minimal-features:
     name: Test (minimal features)
     runs-on: ubuntu-latest

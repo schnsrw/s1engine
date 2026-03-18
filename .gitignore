@@ -14,8 +14,16 @@ Thumbs.db
 # Misc
 *.orig
 *.bak
-editor/dist
-editor/node_modules
+
+# Editor build artifacts
+editor/dist/
+editor/node_modules/
+editor/.vite/
 
 # Relay server data (persisted room state)
 data/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.production

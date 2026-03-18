@@ -82,3 +82,12 @@
 | ED2-25 | 2026-03-18 | Replaced .catch(() => {}) with console.warn + status bar "Autosave failed" message |
 | ED2-29 | 2026-03-18 | Added closeFindBar() calls in newDocument() and openFile() |
 | ED2-31 | 2026-03-18 | Added insert_tab WASM API (creates Tab node like insert_line_break); editor calls insert_tab instead of inserting \t text |
+| ED2-05 | 2026-03-18 | Added _handleDragSetup guard flag in touch.js; setupHandleDrag() runs once preventing listener accumulation |
+| ED2-15 | 2026-03-18 | Added title attributes to 18 elements in index.html: doc name, File/Insert menu items, find bar controls, history tabs |
+| ED2-16 | 2026-03-18 | Added _nodeMapDirty flag; populateNodeIdMap() skips querySelectorAll when map is still valid (incremental renders) |
+| ED2-20 | 2026-03-18 | Added pdfViewer.destroy() call in switchView() when leaving PDF view; removes scroll handler and resize observer |
+| ED2-24 | 2026-03-18 | teardownVirtualScroll() now removes remaining .vs-placeholder elements from page container |
+| ED2-26 | 2026-03-18 | Debounce callbacks in properties-panel.js check panel visibility before updating; skip if hidden |
+| ED2-27 | 2026-03-18 | Added one-time toast "Large document — some features may be slower" when document exceeds 500 paragraph threshold |
+| ED2-28 | 2026-03-18 | Added recordUndoAction('Move image') after drag-and-drop move operation in images.js |
+| ED2-30 | 2026-03-18 | Enhanced copyShareUrl(): shows green checkmark + "Copied!" text with green styling, reverts after 1.5s |

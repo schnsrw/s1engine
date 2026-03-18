@@ -1,0 +1,15 @@
+[book]
+title = "s1engine Documentation"
+description = "The open-source document engine — read, write, edit, and convert DOCX, ODT, PDF"
+authors = ["s1engine contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/schnsrw/s1engine"
+edit-url-template = "https://github.com/schnsrw/s1engine/edit/main/docs-site/{path}"
