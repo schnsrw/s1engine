@@ -1307,27 +1307,22 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .pdf-text-layer{
   position:absolute;top:0;left:0;
   overflow:hidden;
-  opacity:0.25;
+  opacity:1;
   line-height:1;
-  color:transparent;
   z-index:1;
 }
 .pdf-text-layer span{
   position:absolute;
   white-space:pre;
   color:transparent;
-}
-.pdf-text-layer span::selection{
-  background:rgba(26,115,232,.4);
-  color:transparent;
-}
-/* When highlight tool is active, boost text layer for selection */
-.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer{
-  opacity:0.5;
-  z-index:4;
   cursor:text;
 }
-.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer span{
+.pdf-text-layer span::selection{
+  background:rgba(26,115,232,.35);
+}
+/* When highlight tool is active, boost text layer above overlays */
+.pdf-canvas-container[data-tool="highlight"] .pdf-text-layer{
+  z-index:6;
   cursor:text;
 }
 .pdf-annotation-layer{
