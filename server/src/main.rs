@@ -18,6 +18,7 @@ mod auth;
 mod collab;
 mod config;
 mod hooks;
+mod plugins;
 mod routes;
 mod storage;
 mod webhooks;

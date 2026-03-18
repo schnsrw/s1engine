@@ -7,7 +7,7 @@
 
 | ID | Task | Status |
 |----|------|--------|
-| P9-01 | WASM bundle size optimization (wasm-opt) | READY |
+| P9-01 | WASM bundle size optimization (wasm-opt) | DONE |
 | P9-02 | Server load testing (concurrent WebSockets) | READY |
 | P9-03 | CDN configuration for static assets | READY |
 
@@ -16,7 +16,7 @@
 | ID | Task | Status |
 |----|------|--------|
 | P9-04 | Input validation review (all API endpoints) | DONE |
-| P9-05 | Dependency audit (cargo audit, npm audit) | READY |
+| P9-05 | Dependency audit (cargo audit, npm audit) | DONE |
 | P9-06 | CSP headers for editor embedding | DONE |
 
 ## Milestone 9.3 — Launch
