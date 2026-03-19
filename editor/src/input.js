@@ -3422,27 +3422,28 @@ function doCut() {
     text = window.getSelection()?.toString() || '';
   }
 
-  // Write to clipboard (with fallback for HTTP/non-secure contexts)
+  // Write to clipboard — use synchronous execCommand first (reliable on all contexts),
+  // then try async Clipboard API as upgrade for rich HTML copy.
+  // This ensures cut ALWAYS copies to clipboard before deleting.
   try {
+    // 1. Synchronous copy via hidden textarea (always works)
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+
+    // 2. Upgrade to rich HTML clipboard if available (async, best-effort)
     if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-      const blob = new Blob([html], { type: 'text/html' });
-      const textBlob = new Blob([text], { type: 'text/plain' });
-      navigator.clipboard.write([
-        new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
-      ]).catch(() => {
-        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
-      });
-    } else if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {});
-    } else {
-      // Fallback: execCommand for HTTP contexts
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.cssText = 'position:fixed;left:-9999px';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
+      try {
+        const blob = new Blob([html], { type: 'text/html' });
+        const textBlob = new Blob([text], { type: 'text/plain' });
+        navigator.clipboard.write([
+          new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
+        ]).catch(() => {});
+      } catch (_) {}
     }
   } catch (_) {}
 

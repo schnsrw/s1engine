@@ -95,20 +95,25 @@ async function boot() {
     if (!isSharedLink) try {
       const saved = await checkAutoRecover();
       if (saved && saved.bytes) {
-        const age = Date.now() - (saved.timestamp || 0);
-        // Only offer recovery for documents saved within the last 24 hours
-        if (age < 86400000) {
-          const name = saved.name || 'Untitled Document';
-          const mins = Math.round(age / 60000);
-          const timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-          // Check checksum integrity
-          const integrityOk = saved._checksumValid !== false;
-          const warning = integrityOk ? '' : '\n\nWarning: checksum mismatch detected — this file may be corrupted.';
-          if (confirm(`Recover unsaved document "${name}" (saved ${timeStr})?${warning}`)) {
-            openFile(new Uint8Array(saved.bytes), name + '.docx');
-            // Restore comment thread replies if they were persisted
-            if (saved.commentReplies) {
-              try { state.commentReplies = JSON.parse(saved.commentReplies); } catch (_) {}
+        // N2: Skip recovery for docs with no timestamp or older than 7 days
+        if (!saved.timestamp || saved.timestamp < Date.now() - 86400000 * 7) {
+          // No valid timestamp or too old — discard
+        } else {
+          const age = Date.now() - saved.timestamp;
+          // Only offer recovery for documents saved within the last 24 hours
+          if (age < 86400000) {
+            const name = saved.name || 'Untitled Document';
+            const mins = Math.round(age / 60000);
+            const timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+            // Check checksum integrity
+            const integrityOk = saved._checksumValid !== false;
+            const warning = integrityOk ? '' : '\n\nWarning: checksum mismatch detected — this file may be corrupted.';
+            if (confirm(`Recover unsaved document "${name}" (saved ${timeStr})?${warning}`)) {
+              openFile(new Uint8Array(saved.bytes), name + '.docx');
+              // Restore comment thread replies if they were persisted
+              if (saved.commentReplies) {
+                try { state.commentReplies = JSON.parse(saved.commentReplies); } catch (_) {}
+              }
             }
           }
         }

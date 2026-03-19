@@ -2624,7 +2624,7 @@ function initTableContextMenu() {
   });
   $('cmCellBgPicker').addEventListener('input', e => {
     $('tableContextMenu').style.display = 'none';
-    if (!state.doc || !state.ctxCell) return;
+    if (!state.ctxTable || !state.doc || !state.ctxCell) return;
     const hex = e.target.value.replace('#', '');
     try {
       state.doc.set_cell_background(state.ctxCell, hex);

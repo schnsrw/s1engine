@@ -2899,6 +2899,34 @@ impl WasmDocument {
             }
         }
 
+        // Also collect font, size, color, highlight from the first run
+        let mut font_family: Option<String> = None;
+        let mut font_size: Option<f64> = None;
+        let mut color_hex: Option<String> = None;
+        let mut highlight_hex: Option<String> = None;
+        let mut superscript = false;
+        let mut subscript = false;
+
+        if let Some(&first_rid) = run_ids.first() {
+            if let Some(run) = doc.node(first_rid) {
+                font_family = run
+                    .attributes
+                    .get_string(&AttributeKey::FontFamily)
+                    .map(|s| s.to_string());
+                font_size = run.attributes.get_f64(&AttributeKey::FontSize);
+                if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Color) {
+                    color_hex = Some(format!("#{}", c.to_hex()));
+                }
+                if let Some(AttributeValue::Color(c)) =
+                    run.attributes.get(&AttributeKey::HighlightColor)
+                {
+                    highlight_hex = Some(format!("#{}", c.to_hex()));
+                }
+                superscript = run.attributes.get_bool(&AttributeKey::Superscript) == Some(true);
+                subscript = run.attributes.get_bool(&AttributeKey::Subscript) == Some(true);
+            }
+        }
+
         fn fmt_val(mixed: bool, val: Option<bool>) -> String {
             if mixed {
                 "\"mixed\"".to_string()
@@ -2907,13 +2935,29 @@ impl WasmDocument {
             }
         }
 
-        Ok(format!(
-            "{{\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{}}}",
+        let mut json = format!(
+            "{{\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{},\"superscript\":{},\"subscript\":{}",
             fmt_val(mixed_bold, bold_state),
             fmt_val(mixed_italic, italic_state),
             fmt_val(mixed_underline, underline_state),
             fmt_val(mixed_strike, strike_state),
-        ))
+            superscript,
+            subscript,
+        );
+        if let Some(ref f) = font_family {
+            json.push_str(&format!(",\"fontFamily\":\"{}\"", escape_json(f)));
+        }
+        if let Some(s) = font_size {
+            json.push_str(&format!(",\"fontSize\":{s}"));
+        }
+        if let Some(ref c) = color_hex {
+            json.push_str(&format!(",\"color\":\"{}\"", c));
+        }
+        if let Some(ref h) = highlight_hex {
+            json.push_str(&format!(",\"highlightColor\":\"{}\"", h));
+        }
+        json.push('}');
+        Ok(json)
     }
 
     // ─── P.2: Table Operations API ──────────────────────────────
@@ -6823,6 +6867,53 @@ fn parse_format_kv(key: &str, value: &str) -> Result<s1_model::AttributeMap, JsE
                 AttributeValue::String(value.to_string()),
             );
         }
+        // Extended format keys (C1 fix)
+        "fontSpacing" => {
+            let v: f64 = value
+                .parse()
+                .map_err(|_| JsError::new("Invalid fontSpacing value"))?;
+            attrs.set(AttributeKey::FontSpacing, AttributeValue::Float(v));
+        }
+        "language" => {
+            attrs.set(
+                AttributeKey::Language,
+                AttributeValue::String(value.to_string()),
+            );
+        }
+        "textShadow" => {
+            attrs.set(
+                AttributeKey::TextShadow,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "textOutline" => {
+            attrs.set(
+                AttributeKey::TextOutline,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "backgroundColor" | "background" => {
+            let color = Color::from_hex(value).ok_or_else(|| JsError::new("Invalid color hex"))?;
+            attrs.set(AttributeKey::Background, AttributeValue::Color(color));
+        }
+        "pageBreakBefore" => {
+            attrs.set(
+                AttributeKey::PageBreakBefore,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "keepWithNext" => {
+            attrs.set(
+                AttributeKey::KeepWithNext,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "keepLinesTogether" => {
+            attrs.set(
+                AttributeKey::KeepLinesTogether,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
         _ => return Err(JsError::new(&format!("Unknown format key: {}", key))),
     }
     Ok(attrs)
@@ -7671,6 +7762,16 @@ fn render_paragraph(
         if !val.is_empty() {
             style.push_str(&format!("text-align:{val};"));
         }
+        if matches!(a, s1_model::Alignment::Justify) {
+            style.push_str("text-align-last:left;");
+        }
+    }
+    // Keep with next / keep lines together
+    if para.attributes.get_bool(&AttributeKey::KeepWithNext) == Some(true) {
+        style.push_str("break-after:avoid;");
+    }
+    if para.attributes.get_bool(&AttributeKey::KeepLinesTogether) == Some(true) {
+        style.push_str("break-inside:avoid;");
     }
 
     // Spacing
@@ -8121,10 +8222,19 @@ fn render_run(model: &DocumentModel, run_id: NodeId, html: &mut String) {
     } else if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Background) {
         style.push_str(&format!("background-color:#{};", c.to_hex()));
     }
+    // Text shadow
+    if run.attributes.get_bool(&AttributeKey::TextShadow) == Some(true) {
+        style.push_str("text-shadow:1px 1px 2px rgba(0,0,0,0.3);");
+    }
+    // Text outline
+    if run.attributes.get_bool(&AttributeKey::TextOutline) == Some(true) {
+        style.push_str("-webkit-text-stroke:1px currentColor;");
+    }
     // Character spacing
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {
-            style.push_str(&format!("letter-spacing:{sp}pt;"));
+            let sp_px = sp * 1.333;
+            style.push_str(&format!("letter-spacing:{:.2}px;", sp_px));
         }
     }
 
@@ -8519,7 +8629,8 @@ fn render_run_clean_partial(
     }
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {
-            style.push_str(&format!("letter-spacing:{sp}pt;"));
+            let sp_px = sp * 1.333;
+            style.push_str(&format!("letter-spacing:{:.2}px;", sp_px));
         }
     }
 
@@ -8657,8 +8768,8 @@ fn render_image_clean(model: &DocumentModel, img_id: NodeId, html: &mut String) 
                 _ => {}
             }
             html.push_str(&format!(
-                "<img src=\"data:{mime};base64,{b64}\" style=\"{img_style}\" alt=\"{}\"/>",
-                escape_html(alt)
+                "<img data-media-id=\"{}\" data-alt-text=\"{}\" data-wrap-type=\"{}\" src=\"data:{mime};base64,{b64}\" style=\"{img_style}\" alt=\"{}\"/>",
+                media_id.0, escape_html(alt), escape_html(wrap_mode), escape_html(alt)
             ));
             return;
         }
@@ -8804,8 +8915,8 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
                 String::new()
             };
             html.push_str(&format!(
-                "<img data-node-id=\"{}:{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"{wrap_attr}/>",
-                img_id.replica, img_id.counter, escape_html(alt)
+                "<img data-node-id=\"{}:{}\" data-media-id=\"{}\" data-alt-text=\"{}\" data-wrap-type=\"{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"{wrap_attr}/>",
+                img_id.replica, img_id.counter, media_id.0, escape_html(alt), escape_html(wrap_mode), escape_html(alt)
             ));
             return;
         }

@@ -478,6 +478,14 @@ fn write_table_grid(doc: &DocumentModel, table: &s1_model::Node, xml: &mut Strin
 fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
     let mut tpr = String::new();
 
+    // Table style reference
+    if let Some(style_id) = attrs.get_string(&AttributeKey::StyleId) {
+        tpr.push_str(&format!(
+            r#"<w:tblStyle w:val="{}"/>"#,
+            escape_xml(style_id)
+        ));
+    }
+
     // Table width
     if let Some(AttributeValue::TableWidth(tw)) = attrs.get(&AttributeKey::TableWidth) {
         match tw {
@@ -1003,6 +1011,12 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
     if attrs.get_bool(&AttributeKey::SuppressAutoHyphens) == Some(true) {
         ppr.push_str("<w:suppressAutoHyphens/>");
     }
+    if attrs.get_bool(&AttributeKey::ContextualSpacing) == Some(true) {
+        ppr.push_str("<w:contextualSpacing/>");
+    }
+    if attrs.get_bool(&AttributeKey::WordWrap) == Some(false) {
+        ppr.push_str(r#"<w:wordWrap w:val="false"/>"#);
+    }
 
     // Tab stops
     if let Some(AttributeValue::TabStops(tab_stops)) = attrs.get(&AttributeKey::TabStops) {
@@ -1294,6 +1308,16 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
     if let Some(pts) = attrs.get_f64(&AttributeKey::FontSpacing) {
         let twips = points_to_twips(pts);
         rpr.push_str(&format!(r#"<w:spacing w:val="{twips}"/>"#));
+    }
+
+    // Text shadow
+    if attrs.get_bool(&AttributeKey::TextShadow) == Some(true) {
+        rpr.push_str("<w:shadow/>");
+    }
+
+    // Text outline
+    if attrs.get_bool(&AttributeKey::TextOutline) == Some(true) {
+        rpr.push_str("<w:outline/>");
     }
 
     // Language

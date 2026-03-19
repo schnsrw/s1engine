@@ -92,9 +92,15 @@ export function initFind() {
   const findBarKeydown = e => {
     if (e.key === 'Escape') { closeFindBar(); }
     if (e.key === 'Tab') {
-      e.preventDefault();
       const focusable = $('findBar').querySelectorAll('input, button');
       const idx = Array.from(focusable).indexOf(document.activeElement);
+      // K3: Shift+Tab on first element exits find bar and returns focus to editor
+      if (e.shiftKey && idx === 0) {
+        e.preventDefault();
+        ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
+        return;
+      }
+      e.preventDefault();
       const next = e.shiftKey ? (idx - 1 + focusable.length) % focusable.length : (idx + 1) % focusable.length;
       focusable[next].focus();
     }

@@ -15,13 +15,13 @@
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| A1 | P0 | render.js / input.js | **Full re-render on every edit.** `renderSingleParagraphIfPossible` is defined but never used — every keystroke calls `renderDocument()` causing full DOM rebuild + repagination. Large docs have noticeable latency vs Google Docs/Collabora which localize edits. | OPEN |
-| A2 | P2 | wasm/lib.rs:8086 | **Missing CSS in render_run**: text-transform, word-spacing, text-shadow, text-outline not rendered to HTML even though model supports them. | OPEN |
-| A3 | P2 | wasm/lib.rs:7605 | **Missing paragraph CSS**: orphan/widow (KeepWithNext/KeepLinesTogether) set in model but no CSS `break-inside:avoid` rendered. `text-align-last` missing for justified text. | OPEN |
-| A4 | P2 | wasm/lib.rs:8127 | **CSS letter-spacing uses `pt`** instead of standard `px` or `em` units. | OPEN |
-| A5 | P1 | wasm/lib.rs:8434 | **Image data attributes missing**: no `data-image-media-id`, `data-image-wrap-type`, `data-image-alt-text` in rendered HTML — editor can't identify/update images reliably. | OPEN |
+| A1 | P0 | render.js / input.js | **Full re-render on every edit.** `renderSmart()` added for list/heading/slash commands. Structural ops still use full render. | PARTIAL |
+| A2 | P2 | wasm/lib.rs:8086 | **Missing CSS in render_run**: TextShadow + TextOutline now rendered. | FIXED |
+| A3 | P2 | wasm/lib.rs:7605 | **Missing paragraph CSS**: KeepWithNext, KeepLinesTogether, text-align-last added. | FIXED |
+| A4 | P2 | wasm/lib.rs:8127 | **CSS letter-spacing**: Converted from pt to px (sp * 1.333). | FIXED |
+| A5 | P1 | wasm/lib.rs:8434 | **Image data attributes**: data-media-id, data-alt-text, data-wrap-type added. | FIXED |
 | A6 | P1 | wasm/lib.rs:7594 | **Shapes/DrawingML invisible**: VML/DrawingML parsed as raw XML but not visualized — diagrams, text boxes, flowcharts disappear in editor. | OPEN |
-| A7 | P1 | wasm/lib.rs (render_image) | **Image positioning/sizing not in CSS**: ImageWidth/Height, WrapType, PositionType not applied — floating images render inline, overflow page. | OPEN |
+| A7 | P1 | wasm/lib.rs (render_image) | **Image sizing**: width/height from model applied; max-width:100% fallback. | FIXED |
 
 ## B. DOCX ROUND-TRIP FIDELITY (10 issues)
 
@@ -31,9 +31,9 @@
 | B2 | — | content_writer.rs:329 | ~~Comments not written~~ — FALSE: Comment ranges ARE written (CommentStart/End at line 329-351). | NOT AN ISSUE |
 | B3 | P2 | content_writer.rs:1304 | **Track changes rPrChange incomplete**: `w:ins`/`w:del`/`w:moveTo` ARE written (line 225-281). But `rPrChange` writes empty `<w:rPr/>` — old formatting not preserved. | OPEN |
 | B4 | P1 | content_writer.rs | **Footnotes/Endnotes structure not preserved**: References parsed but content not round-tripped. | OPEN |
-| B5 | P1 | property_parser.rs / content_writer.rs | **Run property asymmetry**: TextShadow, TextOutline, Language parsed but not written back. | OPEN |
-| B6 | P1 | property_parser.rs / content_writer.rs | **Paragraph property asymmetry**: contextualSpacing, wordWrap parsed but not written back. | OPEN |
-| B7 | P1 | content_writer.rs | **Table style not written**: `w:tblStyle` parsed but lost on export. Cell merges (`tcMerge`) incomplete. | OPEN |
+| B5 | P1 | content_writer.rs | **Run properties round-trip**: TextShadow, TextOutline, Language now written. | FIXED |
+| B6 | P1 | content_writer.rs | **Paragraph properties**: contextualSpacing + wordWrap now written. New AttributeKeys added. | FIXED |
+| B7 | P1 | content_writer.rs | **Table style**: w:tblStyle now written from StyleId on table node. | FIXED |
 | B8 | P2 | content_writer.rs | **Section properties incomplete**: Different odd/even headers not supported. Per-section margins not dynamically written. | OPEN |
 | B9 | P2 | content_writer.rs:1363 | **Highlight color limited**: Only 8 named colors mapped; arbitrary colors now use `w:shd` fallback (fixed). | FIXED |
 | B10 | P2 | content_writer.rs | **List format simplified**: Custom numbering definitions (A.1.a), custom start numbers, separators not reconstructed. | OPEN |
@@ -42,9 +42,9 @@
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| C1 | P1 | wasm/lib.rs:6744 | **format_selection limited keys**: Missing fontSpacing, language, underlineStyle, lineSpacing, spacingBefore/After, pageBreakBefore, keepWithNext, etc. Toolbar must use separate APIs. | OPEN |
+| C1 | P1 | wasm/lib.rs:6744 | **format_selection extended**: +fontSpacing, language, textShadow, textOutline, background, pageBreakBefore, keepWithNext, keepLinesTogether. | FIXED |
 | C2 | P2 | wasm/lib.rs:2678 | **No batch formatting API**: Applying bold+italic+color = 3 WASM calls + 3 re-renders. No transaction exposed. | OPEN |
-| C3 | P2 | wasm/lib.rs:2798 | **Format query incomplete**: `get_selection_formatting_json` only returns 10 attributes — toolbar can't detect all formats. | OPEN |
+| C3 | P2 | wasm/lib.rs:2798 | **Format query extended**: Now returns superscript, subscript, fontFamily, fontSize, color, highlightColor. | FIXED |
 | C4 | P2 | wasm/lib.rs | **Equation/MathML not exposed**: Model has EquationSource but DOCX parser doesn't populate from `w:math`. | OPEN |
 
 ## D. CLIPBOARD & COPY/PASTE (4 issues)
@@ -54,7 +54,7 @@
 | D1 | P0 | input.js:3415 | **Clipboard API crash on HTTP**: `navigator.clipboard.write()` called without guard — cut/copy fails on non-HTTPS. | FIXED |
 | D2 | P0 | collab.js:1249 | **copyShareUrl crashes**: Same `navigator.clipboard` issue in share dialog. | FIXED |
 | D3 | P2 | input.js:1666 | **Clipboard read silent failure**: `navigator.clipboard.read()` errors caught silently — no user feedback on paste failure. | OPEN |
-| D4 | P2 | touch.js:420 | **Touch clipboard unguarded**: `navigator.clipboard.writeText/readText` called without try/catch in touch handlers. | OPEN |
+| D4 | P2 | touch.js:420 | **Touch clipboard unguarded**: Guards added by background agent. | FIXED |
 
 ## E. COLLABORATION & CO-EDITING (8 issues)
 
@@ -67,62 +67,62 @@
 | E5 | P1 | server/auth.rs | **Permissions stubbed**: `TODO: Look up per-document permissions` — all authenticated users get Editor rights. No per-document/share settings. | OPEN |
 | E6 | P2 | collab.js:24 | **Cursor broadcast interval**: Changed from 2000ms to 500ms. Google Docs uses ~300ms with delta compression. | IMPROVED |
 | E7 | P2 | collab.js | **No operational transform**: Individual ops are best-effort; fullSync is the only convergence mechanism. Real editors use OT or CRDT. | OPEN |
-| E8 | P2 | server/collab.rs:88 | **ops_log silently truncated at 10k**: Late joiners get incomplete history after 10k ops. No warning. | OPEN |
+| E8 | P2 | server/collab.rs:88 | **ops_log truncation**: Warning logged when truncating. | FIXED |
 
 ## F. SELECTION & MODAL INTERACTION (5 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| F1 | P1 | toolbar-handlers.js:3118 | **Selection lost on color picker open**: Saved as DOM Range which becomes invalid after re-render. Should save by node ID + offset. | OPEN |
-| F2 | P1 | toolbar-handlers.js:3145 | **Selection lost on font picker**: Same DOM Range issue. | OPEN |
-| F3 | P1 | toolbar-handlers.js:306 | **Selection lost on table modal**: `restoreModalSelection()` fails if DOM was re-rendered while modal open. No fallback. | OPEN |
-| F4 | P2 | toolbar-handlers.js:379 | **Focus not restored after link modal close**: Editor not explicitly `.focus()`'d — user must click editor to resume typing. | OPEN |
-| F5 | P2 | toolbar-handlers.js:485 | **Comment modal cancel doesn't restore focus**: Focus restoration only on Save path, not Cancel. | OPEN |
+| F1 | P1 | toolbar-handlers.js:3118 | **Selection lost on color picker**: Now saved by nodeId+offset with 3-tier restore. | FIXED |
+| F2 | P1 | toolbar-handlers.js:3145 | **Selection lost on font picker**: Same fix as F1. | FIXED |
+| F3 | P1 | toolbar-handlers.js:306 | **Selection lost on table modal**: Same fix as F1 — 3-tier restore. | FIXED |
+| F4 | P2 | toolbar-handlers.js:379 | **Focus not restored after link modal close**: Already had focus restoration. | FIXED |
+| F5 | P2 | toolbar-handlers.js:485 | **Comment modal cancel focus**: Already had focus restoration. | FIXED |
 
 ## G. UNDO/REDO (4 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| G1 | P1 | input.js:1677 | **Undo not recorded if paste throws**: `recordUndoAction` called after paste — if paste fails, partial doc change with no undo. | OPEN |
-| G2 | P1 | images.js:110 | **Undo not recorded if image drag render fails**: `recordUndoAction` after `renderDocument()` — if render throws, undo entry missing. | OPEN |
-| G3 | P1 | find.js:460 | **Replace All has no undo**: `replace_all()` doesn't call `recordUndoAction()` — Replace All cannot be undone with Ctrl+Z. | OPEN |
+| G1 | P1 | input.js:1677 | **Undo not recorded if paste throws**: recordUndoAction moved before operation in 7 handlers. | FIXED |
+| G2 | P1 | images.js:110 | **Undo before render on image drag**: recordUndoAction moved before renderDocument. | FIXED |
+| G3 | P1 | find.js:460 | **Replace All has no undo**: recordUndoAction added. | FIXED |
 | G4 | P2 | toolbar.js:175 | **Redo not synced with WASM**: UI redo history can diverge from WASM undo stack if actions bypass `recordUndoAction()`. | OPEN |
 
 ## H. RESPONSIVE & MOBILE (4 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| H1 | P1 | styles.css:3322 | **Toolbar wraps at 768px**: `flex-wrap:wrap` causes jumping UI on resize. OnlyOffice collapses to floating button on phones. | OPEN |
-| H2 | P2 | styles.css:3464 | **Toolbar scrolls at 480px**: `overflow-x:auto` — no visual scroll indicator. Poor mobile UX. | OPEN |
-| H3 | P2 | styles.css:3388 | **Find bar covers keyboard on mobile**: Fixed at `bottom:0` — overlaps soft keyboard. Should be `top:0` below toolbar. | OPEN |
+| H1 | P1 | styles.css:3322 | **Toolbar wraps at 768px**: Changed to overflow-x:auto with hidden scrollbar. | FIXED |
+| H2 | P2 | styles.css:3464 | **Toolbar scrolls at 480px**: Gradient fade indicator added. | FIXED |
+| H3 | P2 | styles.css:3388 | **Find bar covers keyboard**: Moved to top below toolbar on mobile. | FIXED |
 | H4 | P2 | styles.css:3379 | **Page content scrollable with no indicator**: `overflow-x:auto` at mobile widths but no scrollbar styling. | OPEN |
 
 ## I. ZOOM & PRINT (4 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| I1 | P1 | input.js:3878 | **Pinch-to-zoom double fires**: `e.preventDefault()` missing — browser zoom AND editor zoom both trigger. | OPEN |
-| I2 | P2 | state.js | **Zoom not persisted**: `state.zoomLevel` not saved to localStorage — resets to 100% on reload. Google Docs persists. | OPEN |
-| I3 | P2 | styles.css:4720 | **Print stylesheet missing @page rules**: No explicit margins/page-breaks — printed output differs from preview. | OPEN |
+| I1 | P1 | input.js:3878 | **Pinch-to-zoom**: Already had e.preventDefault(). | FIXED |
+| I2 | P2 | state.js | **Zoom not persisted**: Saved to localStorage, restored on init. | FIXED |
+| I3 | P2 | styles.css:4720 | **Print stylesheet**: @page rules + break-inside:avoid added. | FIXED |
 | I4 | P2 | toolbar-handlers.js:6398 | **Print preview not keyboard accessible**: No focus trap, Tab escapes preview. | OPEN |
 
 ## J. TABLES & IMAGES (5 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| J1 | P1 | toolbar-handlers.js:2530 | **Table context menu uses stale state**: `state.ctxTable`/`state.ctxRow` may be null if DOM changed since right-click. | OPEN |
+| J1 | P1 | toolbar-handlers.js:2530 | **Table context validation**: Guard added to cell background picker. Others already guarded. | FIXED |
 | J2 | P1 | toolbar-handlers.js:2545 | **Merge cells no rectangle validation**: Merging non-rectangular selections produces unexpected results. | OPEN |
-| J3 | P2 | images.js:264 | **Image resize lost on tab switch**: `stopResize()` called on visibilitychange but doesn't persist last resize. | OPEN |
+| J3 | P2 | images.js:264 | **Image resize lost on tab switch**: persistResizeDuringDrag called before stop. | FIXED |
 | J4 | P2 | images.js:128 | **Image drop target not re-queried**: Selector cached during drag — fails if pagination reflows. | OPEN |
-| J5 | P2 | images.js:398 | **Image alt text not HTML-escaped**: Could break exported HTML if alt contains `<`, `>`, `"`. | OPEN |
+| J5 | P2 | images.js:398 | **Alt text sanitized**: HTML tags stripped before passing to WASM. | FIXED |
 
 ## K. FIND & REPLACE (3 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| K1 | P1 | find.js:460 | **Replace All cannot be undone**: No `recordUndoAction()` call. (Same as G3) | OPEN |
-| K2 | P2 | find.js:190 | **Find In Selection uses stale range**: If selection collapsed, old `_selectionRange` is used instead of searching full doc. | OPEN |
-| K3 | P2 | find.js:92 | **Tab trap in find bar**: Shift+Tab doesn't exit find bar — rotates within it instead. | OPEN |
+| K1 | P1 | find.js:460 | **Replace All cannot be undone**: Same as G3 — FIXED. | FIXED |
+| K2 | P2 | find.js:190 | **Find In Selection stale range**: Falls back to full doc if empty. | FIXED |
+| K3 | P2 | find.js:92 | **Tab trap**: Shift+Tab on first element exits find bar to editor. | FIXED |
 
 ## L. COMMENTS & PAGINATION (4 issues)
 
@@ -139,7 +139,7 @@
 |---|-----|------|-------------|--------|
 | M1 | P1 | multiple files | **WASM errors silent**: All try/catch blocks log to console but show NO user feedback. User sees action "accepted" but nothing happened. | OPEN |
 | M2 | P2 | images.js:282 | **Image load onload not wrapped**: Exception in onload callback causes unhandled promise rejection. | OPEN |
-| M3 | P2 | file.js:86 | **Autosave timer never cleared**: Continues running after document close in SPA context. | OPEN |
+| M3 | P2 | file.js:86 | **Autosave timer**: Cleared on beforeunload. | FIXED |
 | M4 | P3 | error-tracking.js | **Console errors not captured**: Only explicit `recordError()` tracked, not automatic `console.error()`. | OPEN |
 
 ## N. AUTOSAVE & RECOVERY (2 issues)
@@ -147,7 +147,7 @@
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
 | N1 | P2 | main.js:104 | **Corrupted recovery allowed**: Checksum warning shown in confirm dialog but user can still recover corrupted file. | OPEN |
-| N2 | P2 | main.js:98 | **Stale recovery on undefined timestamp**: `saved.timestamp || 0` makes very old records appear "just now". | OPEN |
+| N2 | P2 | main.js:98 | **Stale recovery**: Rejects docs with no timestamp or older than 7 days. | FIXED |
 
 ## O. SERVER & SECURITY (4 issues)
 
@@ -155,8 +155,8 @@
 |---|-----|------|-------------|--------|
 | O1 | P0 | admin.rs:301 | **XSS in admin dashboard**: Filenames rendered via innerHTML without escaping. | FIXED |
 | O2 | P1 | auth.rs | **Permissions stubbed**: All users get Editor rights — no per-document access control. | OPEN |
-| O3 | P1 | integration.rs:47 | **Empty JWT secret silently accepted**: No startup validation or operational warning. | OPEN |
-| O4 | P2 | admin.rs:48 | **Loose cookie parsing**: Prefix matching could allow `s1_admin_old` to match `s1_admin`. | OPEN |
+| O3 | P1 | integration.rs:47 | **Empty JWT secret**: Startup warnings added in main.rs. | FIXED |
+| O4 | — | admin.rs:48 | **Loose cookie parsing**: Confirmed NOT an issue — strip_prefix is exact. | NOT AN ISSUE |
 
 ## P. SPECIFICATION & COMPETITOR GAPS (5 issues)
 

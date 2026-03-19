@@ -350,6 +350,12 @@ pub enum AttributeKey {
     /// Scope of the TOC index (ODF: text:index-scope, e.g. "document" or "chapter").
     TocIndexScope,
 
+    // Additional paragraph attributes (round-trip preservation)
+    /// Contextual spacing: suppress extra space between paragraphs of the same style.
+    ContextualSpacing,
+    /// Word wrap: controls whether East Asian text wraps at arbitrary positions.
+    WordWrap,
+
     // Hyphenation attributes
     /// Suppress automatic hyphenation for this paragraph.
     SuppressAutoHyphens,

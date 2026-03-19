@@ -170,6 +170,18 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                             attrs.set(AttributeKey::Language, AttributeValue::String(lang));
                         }
                     }
+                    b"shadow" => {
+                        attrs.set(
+                            AttributeKey::TextShadow,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"outline" => {
+                        attrs.set(
+                            AttributeKey::TextOutline,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -349,6 +361,19 @@ pub fn parse_paragraph_properties(reader: &mut Reader<&[u8]>) -> Result<Attribut
                             AttributeValue::Bool(is_toggle_on(&e)),
                         );
                     }
+                    b"contextualSpacing" => {
+                        attrs.set(
+                            AttributeKey::ContextualSpacing,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"wordWrap" => {
+                        // wordWrap defaults to true; only explicit val="false"/val="0" disables
+                        attrs.set(
+                            AttributeKey::WordWrap,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
                     b"shd" => {
                         // Paragraph shading/background color
                         if let Some(fill) = get_attr(&e, b"fill") {
@@ -419,6 +444,11 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                     b"tblW" => {
                         if let Some(w) = parse_width(&e) {
                             attrs.set(AttributeKey::TableWidth, AttributeValue::TableWidth(w));
+                        }
+                    }
+                    b"tblStyle" => {
+                        if let Some(style_id) = get_val(&e) {
+                            attrs.set(AttributeKey::StyleId, AttributeValue::String(style_id));
                         }
                     }
                     b"jc" => {

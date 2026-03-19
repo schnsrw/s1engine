@@ -99,7 +99,12 @@ impl RoomManager {
         if let Some(room) = rooms.get_mut(room_id) {
             room.ops_log.push(op.to_string());
             room.dirty = true;
-            if room.ops_log.len() > 10_000 {
+            if room.ops_log.len() > 10000 {
+                tracing::warn!(
+                    "Room {} ops_log at {} entries — truncating oldest 5000. Late joiners may miss history.",
+                    room_id,
+                    room.ops_log.len()
+                );
                 room.ops_log.drain(..5_000);
             }
         }
