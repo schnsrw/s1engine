@@ -107,8 +107,10 @@ async function boot() {
             const timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
             // Check checksum integrity
             const integrityOk = saved._checksumValid !== false;
-            const warning = integrityOk ? '' : '\n\nWarning: checksum mismatch detected — this file may be corrupted.';
-            if (confirm(`Recover unsaved document "${name}" (saved ${timeStr})?${warning}`)) {
+            if (!integrityOk) {
+              console.warn('Auto-recover skipped: checksum mismatch for', name);
+              // Don't offer corrupted files
+            } else if (confirm(`Recover unsaved document "${name}" (saved ${timeStr})?`)) {
               openFile(new Uint8Array(saved.bytes), name + '.docx');
               // Restore comment thread replies if they were persisted
               if (saved.commentReplies) {

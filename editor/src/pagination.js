@@ -60,6 +60,12 @@ export function repaginate() {
     try { pageMap = JSON.parse(pageMapJson); } catch (_) {}
   }
 
+  // L3: If layout is dirty (e.g. font change), force cache invalidation
+  if (state._layoutDirty) {
+    state._lastPageMapHash = null; // Force re-render
+    state._layoutDirty = false;
+  }
+
   // Fast-path: if the page map hasn't changed and DOM pages exist, skip reconciliation.
   // E8.3: Also skip when layout is not dirty (text-only edits within paragraphs).
   if (pageMap && state._lastPageMapHash === pageMapJson && state.pageElements.length > 0) {

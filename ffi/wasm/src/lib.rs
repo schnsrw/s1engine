@@ -8928,7 +8928,7 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
     ));
 }
 
-/// Render a Drawing/VML node as a placeholder div showing the shape dimensions.
+/// Render a Drawing/VML node as a visible placeholder with content if available.
 fn render_drawing(model: &DocumentModel, drawing_id: NodeId, html: &mut String) {
     let node = match model.node(drawing_id) {
         Some(n) => n,
@@ -8938,25 +8938,50 @@ fn render_drawing(model: &DocumentModel, drawing_id: NodeId, html: &mut String) 
     let width = node
         .attributes
         .get_f64(&AttributeKey::ShapeWidth)
-        .unwrap_or(100.0);
+        .unwrap_or(200.0);
     let height = node
         .attributes
         .get_f64(&AttributeKey::ShapeHeight)
-        .unwrap_or(100.0);
+        .unwrap_or(60.0);
     let shape_type = node
         .attributes
         .get_string(&AttributeKey::ShapeType)
         .unwrap_or("shape");
-    let title = format!("VML Shape: {}", shape_type);
 
-    let escaped_title = escape_html(&title);
+    // Try to extract text content from child nodes (text boxes have paragraph children)
+    let mut inner_html = String::new();
+    let mut has_content = false;
+    for &child_id in &node.children {
+        if let Some(child) = model.node(child_id) {
+            if child.node_type == NodeType::Paragraph {
+                render_node(model, child_id, &mut inner_html);
+                has_content = true;
+            }
+        }
+    }
+
+    let label = if has_content {
+        String::new()
+    } else {
+        format!(
+            "<span style=\"color:#999;font-size:11px;font-style:italic\">{}</span>",
+            escape_html(shape_type)
+        )
+    };
+
     html.push_str(&format!(
-        "<div class=\"vml-shape\" data-node-id=\"{r}:{c}\" style=\"width:{w}pt;height:{h}pt;border:1px solid #999;background:#f0f0f0\" title=\"{t}\"></div>",
+        "<div class=\"vml-shape\" data-node-id=\"{r}:{c}\" \
+         style=\"display:inline-block;width:{w}pt;min-height:{h}pt;\
+         border:1px solid #c4c7cc;border-radius:4px;background:#fafbfc;\
+         padding:8px;margin:4px 0;box-sizing:border-box;overflow:hidden\" \
+         title=\"Shape: {t}\">{label}{content}</div>",
         r = drawing_id.replica,
         c = drawing_id.counter,
         w = width,
         h = height,
-        t = escaped_title
+        t = escape_html(shape_type),
+        label = label,
+        content = inner_html
     ));
 }
 

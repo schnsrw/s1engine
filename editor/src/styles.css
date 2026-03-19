@@ -3393,6 +3393,8 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
     border-radius:0 !important;
   }
   .page-content{padding:16px !important;box-sizing:border-box;overflow-x:auto}
+  .page-content::-webkit-scrollbar{height:4px}
+  .page-content::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.2);border-radius:2px}
   .page-content img{max-width:100%;height:auto}
   .page-content table{max-width:100%}
   .page-header,.page-footer{

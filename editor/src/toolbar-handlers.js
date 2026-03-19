@@ -1659,6 +1659,7 @@ function initAppMenubar() {
 // ─── Comment Replies (in-memory store) ────────────
 // Replies stored in-memory keyed by parent comment ID.
 // Each reply: { id, parentId, author, text, timestamp }
+try { state.commentReplies = JSON.parse(localStorage.getItem('s1_commentReplies') || '[]'); } catch(_) { state.commentReplies = []; }
 if (!state.commentReplies) state.commentReplies = [];
 let _replyCounter = 0;
 
@@ -1724,6 +1725,7 @@ function refreshComments() {
           broadcastOp({ action: 'deleteComment', commentId: id });
           // Also remove any replies to this comment
           state.commentReplies = (state.commentReplies || []).filter(r => r.parentId !== id);
+          try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
           // Also remove from resolved set
           if (state.resolvedComments) state.resolvedComments.delete(id);
           renderDocument();
@@ -1764,6 +1766,7 @@ function refreshComments() {
       btn.addEventListener('click', () => {
         const replyId = btn.dataset.replyId;
         state.commentReplies = (state.commentReplies || []).filter(r => r.id !== replyId);
+        try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
         refreshComments();
       });
     });
@@ -1950,6 +1953,7 @@ function submitReply(parentId, text) {
   };
   if (!state.commentReplies) state.commentReplies = [];
   state.commentReplies.push(reply);
+  try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
   refreshComments();
 }
 
@@ -6535,7 +6539,13 @@ function openPrintPreview() {
   // Prevent body scroll when overlay is open
   document.body.style.overflow = 'hidden';
 
-  // Keyboard handler: Escape to close, Ctrl+P to print
+  // Focus management: make overlay focusable and focus it
+  overlay.tabIndex = -1;
+  overlay.focus();
+
+  // Keyboard handler: Escape to close, Ctrl+P to print, Tab trap
+  const closeBtn = $('printPreviewClose');
+  const printBtn = $('printPreviewPrint');
   _printPreviewKeyHandler = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -6546,12 +6556,31 @@ function openPrintPreview() {
       e.stopPropagation();
       closePrintPreview();
       setTimeout(() => window.print(), 120);
+    } else if (e.key === 'Tab') {
+      // Tab trap: keep focus within the print preview overlay
+      const focusable = overlay.querySelectorAll('button, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first || document.activeElement === overlay) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || document.activeElement === overlay) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
   };
   document.addEventListener('keydown', _printPreviewKeyHandler, true);
 
   // Focus the close button for accessibility
-  const closeBtn = $('printPreviewClose');
   if (closeBtn) closeBtn.focus();
 
   trackEvent('view', 'print-preview-open');

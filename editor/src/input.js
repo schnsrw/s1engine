@@ -13,7 +13,7 @@ import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
 import { updatePageBreaks } from './pagination.js';
 import { markDirty, saveVersion, updateDirtyIndicator, updateStatusBar, openAutosaveDB } from './file.js';
 import { broadcastOp } from './collab.js';
-import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode } from './toolbar-handlers.js';
+import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode, showToast } from './toolbar-handlers.js';
 import { closeFindBar } from './find.js';
 
 /**
@@ -1352,6 +1352,7 @@ export function initInput() {
         markDirty();
       } catch (err) {
         console.error('paste multi-line:', err);
+        showToast('Operation failed', 'error');
         // Fallback: insert as single line via WASM
         try {
           const flatText = text.replace(/\n/g, ' ');
@@ -1359,7 +1360,7 @@ export function initInput() {
           broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text: flatText });
           renderDocument();
           updateUndoRedo();
-        } catch (e2) { console.error('paste fallback:', e2); }
+        } catch (e2) { console.error('paste fallback:', e2); showToast('Operation failed', 'error'); }
       }
     } else {
       try {
@@ -1722,7 +1723,9 @@ export function initInput() {
             updateUndoRedo();
             markDirty();
           }
-        } catch (_2) {}
+        } catch (_2) {
+          showToast('Paste failed — try Ctrl+V instead', 'error');
+        }
       }
     });
 
@@ -3476,7 +3479,7 @@ function doCut() {
     }
     recordUndoAction('Cut text');
     updateUndoRedo();
-  } catch (e) { console.error('cut:', e); }
+  } catch (e) { console.error('cut:', e); showToast('Operation failed', 'error'); }
 }
 
 function saveToLocal() {

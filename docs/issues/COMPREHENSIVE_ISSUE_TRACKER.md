@@ -20,7 +20,7 @@
 | A3 | P2 | wasm/lib.rs:7605 | **Missing paragraph CSS**: KeepWithNext, KeepLinesTogether, text-align-last added. | FIXED |
 | A4 | P2 | wasm/lib.rs:8127 | **CSS letter-spacing**: Converted from pt to px (sp * 1.333). | FIXED |
 | A5 | P1 | wasm/lib.rs:8434 | **Image data attributes**: data-media-id, data-alt-text, data-wrap-type added. | FIXED |
-| A6 | P1 | wasm/lib.rs:7594 | **Shapes/DrawingML invisible**: VML/DrawingML parsed as raw XML but not visualized — diagrams, text boxes, flowcharts disappear in editor. | OPEN |
+| A6 | P1 | wasm/lib.rs:7594 | **Shapes/DrawingML**: Placeholder improved — shows text box content, styled borders, proper sizing. Still not editable. | IMPROVED |
 | A7 | P1 | wasm/lib.rs (render_image) | **Image sizing**: width/height from model applied; max-width:100% fallback. | FIXED |
 
 ## B. DOCX ROUND-TRIP FIDELITY (10 issues)
@@ -30,7 +30,7 @@
 | B1 | — | content_writer.rs:316 | ~~Bookmarks not written~~ — FALSE: Bookmarks ARE written (BookmarkStart/End at line 316-328). | NOT AN ISSUE |
 | B2 | — | content_writer.rs:329 | ~~Comments not written~~ — FALSE: Comment ranges ARE written (CommentStart/End at line 329-351). | NOT AN ISSUE |
 | B3 | P2 | content_writer.rs:1304 | **Track changes rPrChange incomplete**: `w:ins`/`w:del`/`w:moveTo` ARE written (line 225-281). But `rPrChange` writes empty `<w:rPr/>` — old formatting not preserved. | OPEN |
-| B4 | P1 | content_writer.rs | **Footnotes/Endnotes structure not preserved**: References parsed but content not round-tripped. | OPEN |
+| B4 | — | content_writer.rs | ~~Footnotes/Endnotes not preserved~~ — FALSE: Full parser + writer exists (footnotes_writer.rs, endnotes_writer.rs). | NOT AN ISSUE |
 | B5 | P1 | content_writer.rs | **Run properties round-trip**: TextShadow, TextOutline, Language now written. | FIXED |
 | B6 | P1 | content_writer.rs | **Paragraph properties**: contextualSpacing + wordWrap now written. New AttributeKeys added. | FIXED |
 | B7 | P1 | content_writer.rs | **Table style**: w:tblStyle now written from StyleId on table node. | FIXED |
@@ -53,7 +53,7 @@
 |---|-----|------|-------------|--------|
 | D1 | P0 | input.js:3415 | **Clipboard API crash on HTTP**: `navigator.clipboard.write()` called without guard — cut/copy fails on non-HTTPS. | FIXED |
 | D2 | P0 | collab.js:1249 | **copyShareUrl crashes**: Same `navigator.clipboard` issue in share dialog. | FIXED |
-| D3 | P2 | input.js:1666 | **Clipboard read silent failure**: `navigator.clipboard.read()` errors caught silently — no user feedback on paste failure. | OPEN |
+| D3 | P2 | input.js:1666 | **Clipboard read feedback**: Toast shown on paste failure. | FIXED |
 | D4 | P2 | touch.js:420 | **Touch clipboard unguarded**: Guards added by background agent. | FIXED |
 
 ## E. COLLABORATION & CO-EDITING (8 issues)
@@ -64,7 +64,7 @@
 | E2 | P0 | collab.js | **Peer cursor in contenteditable**: Cursor label text was appended inside paragraphs — picked up as document content. | FIXED |
 | E3 | P1 | collab.js | **fullSync is expensive**: Entire doc exported as DOCX + base64 every 1.5s — not scalable for large docs. Need CRDT or OT. | OPEN |
 | E4 | P1 | collab.js | **No conflict resolution**: Two peers editing same paragraph simultaneously — last fullSync wins, other's changes lost. | OPEN |
-| E5 | P1 | server/auth.rs | **Permissions stubbed**: `TODO: Look up per-document permissions` — all authenticated users get Editor rights. No per-document/share settings. | OPEN |
+| E5 | P1 | server/auth.rs | **Permissions**: Same as O2 — implemented but not wired into all routes yet. | PARTIAL |
 | E6 | P2 | collab.js:24 | **Cursor broadcast interval**: Changed from 2000ms to 500ms. Google Docs uses ~300ms with delta compression. | IMPROVED |
 | E7 | P2 | collab.js | **No operational transform**: Individual ops are best-effort; fullSync is the only convergence mechanism. Real editors use OT or CRDT. | OPEN |
 | E8 | P2 | server/collab.rs:88 | **ops_log truncation**: Warning logged when truncating. | FIXED |
@@ -95,7 +95,7 @@
 | H1 | P1 | styles.css:3322 | **Toolbar wraps at 768px**: Changed to overflow-x:auto with hidden scrollbar. | FIXED |
 | H2 | P2 | styles.css:3464 | **Toolbar scrolls at 480px**: Gradient fade indicator added. | FIXED |
 | H3 | P2 | styles.css:3388 | **Find bar covers keyboard**: Moved to top below toolbar on mobile. | FIXED |
-| H4 | P2 | styles.css:3379 | **Page content scrollable with no indicator**: `overflow-x:auto` at mobile widths but no scrollbar styling. | OPEN |
+| H4 | P2 | styles.css:3379 | **Page content scroll indicator**: Thin scrollbar styled on mobile. | FIXED |
 
 ## I. ZOOM & PRINT (4 issues)
 
@@ -104,7 +104,7 @@
 | I1 | P1 | input.js:3878 | **Pinch-to-zoom**: Already had e.preventDefault(). | FIXED |
 | I2 | P2 | state.js | **Zoom not persisted**: Saved to localStorage, restored on init. | FIXED |
 | I3 | P2 | styles.css:4720 | **Print stylesheet**: @page rules + break-inside:avoid added. | FIXED |
-| I4 | P2 | toolbar-handlers.js:6398 | **Print preview not keyboard accessible**: No focus trap, Tab escapes preview. | OPEN |
+| I4 | P2 | toolbar-handlers.js:6398 | **Print preview keyboard**: Focus management + Tab trap added. | FIXED |
 
 ## J. TABLES & IMAGES (5 issues)
 
@@ -113,7 +113,7 @@
 | J1 | P1 | toolbar-handlers.js:2530 | **Table context validation**: Guard added to cell background picker. Others already guarded. | FIXED |
 | J2 | P1 | toolbar-handlers.js:2545 | **Merge cells no rectangle validation**: Merging non-rectangular selections produces unexpected results. | OPEN |
 | J3 | P2 | images.js:264 | **Image resize lost on tab switch**: persistResizeDuringDrag called before stop. | FIXED |
-| J4 | P2 | images.js:128 | **Image drop target not re-queried**: Selector cached during drag — fails if pagination reflows. | OPEN |
+| J4 | P2 | images.js:128 | **Image drop target**: Fresh DOM query on each call (already correct). | FIXED |
 | J5 | P2 | images.js:398 | **Alt text sanitized**: HTML tags stripped before passing to WASM. | FIXED |
 
 ## K. FIND & REPLACE (3 issues)
@@ -128,17 +128,17 @@
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| L1 | P1 | toolbar-handlers.js:1614 | **Comment replies in-memory only**: Lost on save/reload. Not persisted to DOCX or storage. | OPEN |
-| L2 | P1 | (B2 duplicate) | **Comments not exported to DOCX**: Comment ranges not written by DOCX writer. | OPEN |
-| L3 | P2 | pagination.js:63 | **Pagination cache not invalidated on font change**: Same page count + different fonts = stale layout. | OPEN |
-| L4 | P2 | pagination.js:84 | **Different first page header logic unclear**: Empty `firstPageHeaderHtml` treated as "no different first page" even when `hasDifferentFirstPage=true`. | OPEN |
+| L1 | P1 | toolbar-handlers.js:1614 | **Comment replies persisted**: Saved to localStorage, restored on load. | FIXED |
+| L2 | — | (B2 duplicate) | ~~Comments not exported~~ — FALSE: Comment ranges ARE written (confirmed line 329-351). | NOT AN ISSUE |
+| L3 | P2 | pagination.js:63 | **Pagination cache**: Invalidated when _layoutDirty is true. | FIXED |
+| L4 | — | pagination.js:84 | ~~First page header logic unclear~~ — Behavior is correct: empty first-page header with hasDifferentFirst=true shows no header on page 1 (matches Word). | NOT AN ISSUE |
 
 ## M. ERROR HANDLING (4 issues)
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| M1 | P1 | multiple files | **WASM errors silent**: All try/catch blocks log to console but show NO user feedback. User sees action "accepted" but nothing happened. | OPEN |
-| M2 | P2 | images.js:282 | **Image load onload not wrapped**: Exception in onload callback causes unhandled promise rejection. | OPEN |
+| M1 | P1 | multiple files | **WASM error toasts**: showToast added to paste, cut, and key operation catch blocks. | FIXED |
+| M2 | P2 | images.js:282 | **Image onload wrapped**: try/catch added to prevent unhandled rejection. | FIXED |
 | M3 | P2 | file.js:86 | **Autosave timer**: Cleared on beforeunload. | FIXED |
 | M4 | P3 | error-tracking.js | **Console errors not captured**: Only explicit `recordError()` tracked, not automatic `console.error()`. | OPEN |
 
@@ -146,7 +146,7 @@
 
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
-| N1 | P2 | main.js:104 | **Corrupted recovery allowed**: Checksum warning shown in confirm dialog but user can still recover corrupted file. | OPEN |
+| N1 | P2 | main.js:104 | **Corrupted recovery**: Skipped instead of offered when checksum fails. | FIXED |
 | N2 | P2 | main.js:98 | **Stale recovery**: Rejects docs with no timestamp or older than 7 days. | FIXED |
 
 ## O. SERVER & SECURITY (4 issues)
@@ -154,7 +154,7 @@
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
 | O1 | P0 | admin.rs:301 | **XSS in admin dashboard**: Filenames rendered via innerHTML without escaping. | FIXED |
-| O2 | P1 | auth.rs | **Permissions stubbed**: All users get Editor rights — no per-document access control. | OPEN |
+| O2 | P1 | auth.rs | **Permissions**: check_permission_with_session() added with owner/mode ACL. Needs wiring into routes. | PARTIAL |
 | O3 | P1 | integration.rs:47 | **Empty JWT secret**: Startup warnings added in main.rs. | FIXED |
 | O4 | — | admin.rs:48 | **Loose cookie parsing**: Confirmed NOT an issue — strip_prefix is exact. | NOT AN ISSUE |
 

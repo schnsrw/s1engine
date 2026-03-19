@@ -283,13 +283,17 @@ export function insertImage(file) {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      // Convert pixels to points (1pt = 1/72in, 1px = 1/96in at standard DPI)
-      const pxToPt = 72 / 96;
-      let w = img.naturalWidth * pxToPt, h = img.naturalHeight * pxToPt;
-      // Cap at 468pt (6.5in) page content width
-      if (w > 468) { h *= 468 / w; w = 468; }
-      try { doc.insert_image(nodeId, bytes, type, w, h); broadcastOp({ action: 'insertImage', afterNodeId: nodeId }); renderDocument(); updateUndoRedo(); }
-      catch (e) { console.error('insert image:', e); }
+      try {
+        // Convert pixels to points (1pt = 1/72in, 1px = 1/96in at standard DPI)
+        const pxToPt = 72 / 96;
+        let w = img.naturalWidth * pxToPt, h = img.naturalHeight * pxToPt;
+        // Cap at 468pt (6.5in) page content width
+        if (w > 468) { h *= 468 / w; w = 468; }
+        try { doc.insert_image(nodeId, bytes, type, w, h); broadcastOp({ action: 'insertImage', afterNodeId: nodeId }); renderDocument(); updateUndoRedo(); }
+        catch (e) { console.error('insert image:', e); }
+      } catch(e) {
+        console.error('Image load processing error:', e);
+      }
       URL.revokeObjectURL(url);
     };
     img.onerror = () => {
