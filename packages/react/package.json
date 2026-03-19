@@ -2,7 +2,7 @@
   "name": "@s1engine/react",
   "version": "1.0.1",
   "description": "React component for the s1engine document editor",
-  "license": "MIT OR Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/schnsrw/s1engine",

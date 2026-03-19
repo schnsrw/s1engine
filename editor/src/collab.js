@@ -15,10 +15,13 @@ import { renderDocument, renderNodeById } from './render.js';
 
 // ─── Configuration ────────────────────────────────────
 
-const DEFAULT_RELAY_URL = 'ws://localhost:8787';
+// Default WebSocket URL — points to s1-server (not the static file server).
+// Override via URL param ?relay=ws://... or via share dialog.
+const DEFAULT_RELAY_URL = window.S1_CONFIG?.relayUrl
+  || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':8080/ws/collab';
 const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000];
 const MAX_RECONNECT_ATTEMPTS = 5;
-const CURSOR_BROADCAST_INTERVAL = 2000;
+const CURSOR_BROADCAST_INTERVAL = 500;
 const PEER_COLORS = [
   '#4285f4', '#ea4335', '#34a853', '#fbbc04', '#9c27b0',
   '#00bcd4', '#ff5722', '#607d8b', '#e91e63', '#3f51b5',
@@ -37,6 +40,7 @@ let cursorTimer = null;
 let offlineBuffer = [];
 let connected = false;
 let applyingRemote = false; // flag to prevent echo
+let lastRelayUrl = null; // stored for reconnection
 
 // ─── Public API ───────────────────────────────────────
 
@@ -48,6 +52,7 @@ export function startCollab(room, name, relayUrl) {
 
   roomId = room;
   userName = name || 'Anonymous';
+  peerId = peerId || ('u-' + Math.random().toString(36).slice(2, 10));
   userColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
 
   connect(relayUrl || DEFAULT_RELAY_URL);
@@ -112,9 +117,25 @@ export function getCollabRoom() {
 
 function connect(url) {
   if (ws) { try { ws.close(); } catch (_) {} }
+  lastRelayUrl = url;
+
+  // Append room ID to URL path for s1-server WebSocket endpoints.
+  // Server expects: /ws/collab/{file_id}?user=Name&uid=id&mode=edit
+  let wsUrl = url;
+  if (roomId && (url.includes('/ws/collab') || url.includes('/ws/edit'))) {
+    const pathPattern = /\/ws\/(collab|edit)\/?$/;
+    if (pathPattern.test(url)) {
+      wsUrl = url.replace(/\/?$/, '/') + encodeURIComponent(roomId);
+    } else if (!url.includes('/ws/collab/') && !url.includes('/ws/edit/')) {
+      wsUrl = url.replace(/\/?$/, '/') + encodeURIComponent(roomId);
+    }
+    // Add user info as query params for the server
+    const sep = wsUrl.includes('?') ? '&' : '?';
+    wsUrl += `${sep}user=${encodeURIComponent(userName)}&uid=${encodeURIComponent(peerId || 'u-' + Math.random().toString(36).slice(2,8))}`;
+  }
 
   try {
-    ws = new WebSocket(url);
+    ws = new WebSocket(wsUrl);
   } catch (_) {
     scheduleReconnect(url);
     return;
@@ -236,15 +257,69 @@ function updateSyncStatus(status) {
 
 function handleMessage(msg) {
   switch (msg.type) {
+    case 'welcome':
+      // Server welcome message with session info.
+      // Use this as the 'joined' equivalent when connecting to s1-server.
+      peerId = msg.user || peerId || ('peer-' + Math.random().toString(36).slice(2, 8));
+      tracing('Welcome to room', msg.fileId, '— ops:', msg.opsCount);
+      updateCollabUI();
+      break;
+
+    case 'snapshot': {
+      // Server sends latest document snapshot (base64) to new joiners.
+      // Only apply if we don't already have a document loaded
+      // (the sharer already has the doc; joiners get it from checkAutoJoin).
+      // Skip if doc is already open to avoid overwriting local edits.
+      if (msg.data && state.engine && !state.doc) {
+        try {
+          const binary = atob(msg.data);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          if (bytes.length > 0) {
+            state.doc = state.engine.open(bytes);
+            renderDocument();
+            tracing('Applied server snapshot:', msg.size, 'bytes');
+          }
+        } catch (e) {
+          console.warn('Failed to apply server snapshot:', e);
+        }
+      }
+      break;
+    }
+
+    case 'catchUp': {
+      // Server sends catch-up ops that were recorded while this peer was absent.
+      // These ops were sent by other peers and recorded in the room's ops log.
+      if (msg.op) {
+        try {
+          const opStr = typeof msg.op === 'string' ? msg.op : JSON.stringify(msg.op);
+          // Parse the relay message envelope to get the inner op data
+          const envelope = JSON.parse(opStr);
+          if (envelope.data) {
+            applyRemoteOp(envelope.data, null);
+          } else if (envelope.action) {
+            // Direct op format
+            applyRemoteOp(opStr, null);
+          }
+        } catch (e) {
+          console.warn('Failed to apply catch-up op:', e);
+        }
+      }
+      break;
+    }
+
     case 'joined':
       peerId = msg.peerId;
       updatePeerList(msg.peers || []);
-      // Send full document state for sync
-      sendFullSync();
+      // Don't send fullSync on join — existing peers will send it via peer-join.
       break;
 
     case 'peer-join':
+      // Only handle if it's a different peer (not self)
+      if (msg.peerId === peerId) break;
       addPeer(msg.peerId, msg.userName, msg.userColor);
+      // Existing peer sends full document state so the new joiner gets latest version
+      sendFullSync();
       break;
 
     case 'peer-leave':
@@ -267,6 +342,29 @@ function handleMessage(msg) {
       console.error('Relay error:', msg.message);
       break;
   }
+}
+
+function tracing(...args) {
+  if (console.debug) console.debug('[collab]', ...args);
+}
+
+/**
+ * Calculate character offset from the start of a paragraph element.
+ * sel.anchorOffset is relative to sel.anchorNode (a text node inside a span),
+ * so we need to walk text nodes to find the paragraph-level offset.
+ */
+function getParaOffset(paraEl, targetNode, nodeOffset) {
+  let offset = 0;
+  const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
+  let textNode;
+  while ((textNode = walker.nextNode())) {
+    if (textNode === targetNode) {
+      return offset + nodeOffset;
+    }
+    offset += textNode.textContent.length;
+  }
+  // Fallback: if targetNode is an element, estimate from child index
+  return offset + nodeOffset;
 }
 
 function sendFullSync() {
@@ -626,15 +724,18 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'fullSync': {
-        // Full document sync — only apply if we have no content yet
-        // (first joiner gets the doc from the host)
+        // Full document sync from an existing peer.
+        // This is sent when we join — the existing peer has the latest state.
         try {
-          if (op.docBase64) {
+          if (op.docBase64 && state.engine) {
             const binary = atob(op.docBase64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            state.doc = state.engine.open(bytes);
-            renderDocument();
+            if (bytes.length > 0) {
+              state.doc = state.engine.open(bytes);
+              renderDocument();
+              tracing('Applied fullSync from peer:', bytes.length, 'bytes');
+            }
           }
         } catch (e) { console.error('remote fullSync:', e); }
         break;
@@ -666,40 +767,49 @@ function startCursorBroadcast() {
 
 function broadcastCursor() {
   if (!connected || !ws || !roomId) return;
+
+  // Use cursor broadcast as a heartbeat — if WebSocket is dead, detect and reconnect
+  if (ws.readyState !== WebSocket.OPEN) {
+    connected = false;
+    updateConnectionStatus('disconnected');
+    scheduleReconnect(lastRelayUrl || DEFAULT_RELAY_URL);
+    return;
+  }
+
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
 
-  let node = sel.anchorNode;
-  while (node && node !== document && !node.dataset?.nodeId) {
-    node = node.parentElement;
+  // Find the paragraph element containing the cursor
+  let paraEl = sel.anchorNode;
+  while (paraEl && paraEl !== document && !paraEl.dataset?.nodeId) {
+    paraEl = paraEl.parentElement;
   }
-  if (!node || !node.dataset?.nodeId) return;
+  if (!paraEl || !paraEl.dataset?.nodeId) return;
 
-  // Build awareness payload including selection range when present
+  // Calculate paragraph-relative offset by walking text nodes
+  // (sel.anchorOffset is relative to sel.anchorNode which may be a span's text node)
+  const offset = getParaOffset(paraEl, sel.anchorNode, sel.anchorOffset);
+
   const payload = {
     peerId,
-    nodeId: node.dataset.nodeId,
-    offset: sel.anchorOffset,
+    nodeId: paraEl.dataset.nodeId,
+    offset,
     userName,
     userColor,
   };
 
-  // Include selection range if the user has a non-collapsed selection
+  // Include selection range if non-collapsed
   if (!sel.isCollapsed && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0);
-    let startNode = range.startContainer;
-    while (startNode && startNode !== document && !startNode.dataset?.nodeId) {
-      startNode = startNode.parentElement;
-    }
-    let endNode = range.endContainer;
-    while (endNode && endNode !== document && !endNode.dataset?.nodeId) {
-      endNode = endNode.parentElement;
-    }
-    if (startNode?.dataset?.nodeId && endNode?.dataset?.nodeId) {
-      payload.selStartNodeId = startNode.dataset.nodeId;
-      payload.selStartOffset = range.startOffset;
-      payload.selEndNodeId = endNode.dataset.nodeId;
-      payload.selEndOffset = range.endOffset;
+    let startPara = range.startContainer;
+    while (startPara && startPara !== document && !startPara.dataset?.nodeId) startPara = startPara.parentElement;
+    let endPara = range.endContainer;
+    while (endPara && endPara !== document && !endPara.dataset?.nodeId) endPara = endPara.parentElement;
+    if (startPara?.dataset?.nodeId && endPara?.dataset?.nodeId) {
+      payload.selStartNodeId = startPara.dataset.nodeId;
+      payload.selStartOffset = getParaOffset(startPara, range.startContainer, range.startOffset);
+      payload.selEndNodeId = endPara.dataset.nodeId;
+      payload.selEndOffset = getParaOffset(endPara, range.endContainer, range.endOffset);
     }
   }
 
@@ -715,7 +825,9 @@ function broadcastCursor() {
 function applyRemoteAwareness(dataStr, fromPeerId) {
   if (!dataStr) return;
   try {
-    const cursor = JSON.parse(dataStr);
+    const cursor = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
+    // Never render our own cursor as a peer cursor
+    if (cursor.peerId === peerId) return;
     renderPeerCursor(cursor);
   } catch (_) {}
 }
@@ -727,33 +839,33 @@ const peers = new Map();
 function updatePeerList(peerList) {
   peers.clear();
   for (const p of peerList) {
+    // Never add self to the peer list
+    if (p.peerId === peerId) continue;
     peers.set(p.peerId, { userName: p.userName, userColor: p.userColor });
   }
   updatePeerCount();
 }
 
 function addPeer(pid, name, color) {
+  // Never add self to the peer list
+  if (pid === peerId) return;
   peers.set(pid, { userName: name, userColor: color });
   updatePeerCount();
 }
 
 function removePeer(pid) {
   peers.delete(pid);
-  const el = document.getElementById(`peer-cursor-${pid}`);
-  if (el) el.remove();
-  clearPeerSelection(pid);
+  removePeerCursor(pid);
   updatePeerCount();
 }
 
+// Track last known cursor state per peer to avoid unnecessary DOM updates
+const peerCursorState = new Map();
+
 function renderPeerCursor(cursor) {
   if (!cursor || !cursor.nodeId) return;
-
-  // Remove old cursor for this peer
-  const oldEl = document.getElementById(`peer-cursor-${cursor.peerId}`);
-  if (oldEl) oldEl.remove();
-
-  // Remove old selection highlights for this peer
-  clearPeerSelection(cursor.peerId);
+  // Never render own cursor
+  if (cursor.peerId === peerId) return;
 
   const page = $('pageContainer');
   if (!page) return;
@@ -761,59 +873,94 @@ function renderPeerCursor(cursor) {
   const paraEl = page.querySelector(`[data-node-id="${cursor.nodeId}"]`);
   if (!paraEl) return;
 
-  // Create cursor line
-  const cursorEl = document.createElement('div');
-  cursorEl.className = 'peer-cursor';
-  cursorEl.id = `peer-cursor-${cursor.peerId}`;
-  cursorEl.style.borderLeftColor = cursor.userColor || '#999';
+  // Check if cursor position actually changed — skip DOM update if identical
+  const prev = peerCursorState.get(cursor.peerId);
+  const posKey = `${cursor.nodeId}:${cursor.offset}`;
+  if (prev && prev.posKey === posKey) {
+    // Position unchanged — just keep the existing element alive
+    return;
+  }
 
-  // Name label
-  const label = document.createElement('span');
-  label.className = 'peer-cursor-label';
-  label.textContent = cursor.userName || 'Peer';
-  label.style.backgroundColor = cursor.userColor || '#999';
-  cursorEl.appendChild(label);
-
-  // Try to position at the correct character offset
-  // cursor.offset is in codepoints; DOM TextNode offsets are UTF-16 code units.
-  // Convert codepoint offset to UTF-16 offset for range positioning.
+  // Compute new position before touching DOM
+  let leftPx = 0;
+  let topPx = 0;
   try {
-    const range = document.createRange();
-    const textNode = paraEl.firstChild;
-    if (textNode && textNode.nodeType === 3) {
-      const cpOffset = cursor.offset || 0;
-      const chars = [...textNode.textContent];
-      const clampedCp = Math.min(cpOffset, chars.length);
-      // Convert codepoint offset to UTF-16 string offset
-      let utf16Off = 0;
-      for (let i = 0; i < clampedCp; i++) utf16Off += chars[i].length;
-      range.setStart(textNode, Math.min(utf16Off, textNode.length));
-      range.collapse(true);
-      const rect = range.getBoundingClientRect();
-      const paraRect = paraEl.getBoundingClientRect();
-      cursorEl.style.left = (rect.left - paraRect.left) + 'px';
+    const targetOffset = cursor.offset || 0;
+    let remaining = targetOffset;
+    const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const len = textNode.textContent.length;
+      if (remaining <= len) {
+        const range = document.createRange();
+        range.setStart(textNode, Math.min(remaining, len));
+        range.collapse(true);
+        const rect = range.getBoundingClientRect();
+        const paraRect = paraEl.getBoundingClientRect();
+        leftPx = rect.left - paraRect.left;
+        topPx = rect.top - paraRect.top;
+        break;
+      }
+      remaining -= len;
     }
-  } catch (_) {
-    cursorEl.style.left = '0px';
+  } catch (_) {}
+
+  // Reuse existing cursor element if it exists, otherwise create
+  let cursorEl = document.getElementById(`peer-cursor-${cursor.peerId}`);
+  if (cursorEl) {
+    // Move to new paragraph if needed
+    if (cursorEl.parentElement !== paraEl) {
+      cursorEl.remove();
+      paraEl.style.position = 'relative';
+      paraEl.appendChild(cursorEl);
+    }
+    // Update position
+    cursorEl.style.left = leftPx + 'px';
+    cursorEl.style.top = topPx + 'px';
+  } else {
+    // Create new cursor element
+    cursorEl = document.createElement('div');
+    cursorEl.className = 'peer-cursor';
+    cursorEl.id = `peer-cursor-${cursor.peerId}`;
+    cursorEl.style.borderLeftColor = cursor.userColor || '#999';
+    cursorEl.style.left = leftPx + 'px';
+    cursorEl.style.top = topPx + 'px';
+
+    // Name label
+    const label = document.createElement('span');
+    label.className = 'peer-cursor-label';
+    label.textContent = cursor.userName || 'Peer';
+    label.style.backgroundColor = cursor.userColor || '#999';
+    cursorEl.appendChild(label);
+
+    paraEl.style.position = 'relative';
+    paraEl.appendChild(cursorEl);
   }
 
-  paraEl.style.position = 'relative';
-  paraEl.appendChild(cursorEl);
-
-  // Render peer selection highlights if selection data is present
-  if (cursor.selStartNodeId && cursor.selEndNodeId) {
-    renderPeerSelection(cursor);
-  }
-
-  // Auto-remove after 30s if no update (FS-35: increased from 5s)
-  // Peer cursors should persist as long as the peer is connected;
-  // they only disappear on timeout if the peer stops sending awareness.
-  const PEER_CURSOR_TIMEOUT = 30000;
-  setTimeout(() => {
-    const el = document.getElementById(`peer-cursor-${cursor.peerId}`);
-    if (el) el.remove();
+  // Update selection highlights only if selection data changed
+  const selKey = cursor.selStartNodeId
+    ? `${cursor.selStartNodeId}:${cursor.selStartOffset}-${cursor.selEndNodeId}:${cursor.selEndOffset}`
+    : '';
+  if (!prev || prev.selKey !== selKey) {
     clearPeerSelection(cursor.peerId);
-  }, PEER_CURSOR_TIMEOUT);
+    if (cursor.selStartNodeId && cursor.selEndNodeId) {
+      renderPeerSelection(cursor);
+    }
+  }
+
+  // Save state for next comparison
+  peerCursorState.set(cursor.peerId, { posKey, selKey });
+}
+
+/**
+ * Remove a peer's cursor element and tracked state.
+ * Called only on peer-leave — cursors persist as long as the peer is connected.
+ */
+function removePeerCursor(pid) {
+  const el = document.getElementById(`peer-cursor-${pid}`);
+  if (el) el.remove();
+  clearPeerSelection(pid);
+  peerCursorState.delete(pid);
 }
 
 /**
@@ -875,6 +1022,7 @@ function clearPeerCursors() {
   document.querySelectorAll('.peer-cursor').forEach(el => el.remove());
   document.querySelectorAll('.peer-selection-highlight').forEach(el => el.remove());
   peers.clear();
+  peerCursorState.clear();
   updatePeerCount();
 }
 
@@ -946,8 +1094,8 @@ function updateConnectionStatus(status) {
 function updatePeerCount() {
   const el = $('collabPeerCount');
   if (el) {
-    const count = peers.size;
-    el.textContent = count > 0 ? `${count + 1} users` : '';
+    const count = peers.size; // peers map does NOT include self
+    el.textContent = count > 0 ? `${count + 1} users` : '1 user';
   }
 
   // Sync to state
@@ -988,7 +1136,7 @@ function renderStatusBarPeers() {
 
 // ─── Share Dialog ─────────────────────────────────────
 
-export function showShareDialog() {
+export async function showShareDialog() {
   if (roomId) {
     // Already in a session — confirm disconnect
     const modal = $('shareModal');
@@ -1010,15 +1158,17 @@ export function showShareDialog() {
     return;
   }
 
-  // Generate a room ID and shareable URL with permission level
-  const generatedRoom = Math.random().toString(36).substring(2, 10);
   const permSelect = $('sharePermission');
   const access = permSelect ? permSelect.value : 'edit';
-  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
+  const docName = $('docName')?.value?.trim() || 'Untitled';
 
-  // Populate modal fields
+  // Upload the current document to the server to create a file session.
+  // The server returns a fileId that becomes the shareable link.
   const urlInput = $('shareUrlInput');
-  if (urlInput) urlInput.value = shareUrl;
+  if (urlInput) urlInput.value = 'Creating session...';
+
+  const modal = $('shareModal');
+  if (modal) modal.classList.add('show');
 
   const nameInput = $('shareNameInput');
   if (nameInput) nameInput.value = 'User ' + Math.floor(Math.random() * 100);
@@ -1026,15 +1176,43 @@ export function showShareDialog() {
   const relayInput = $('shareRelayInput');
   if (relayInput) relayInput.value = DEFAULT_RELAY_URL;
 
-  // Update peer list display
+  // Upload document to server
+  try {
+    const bytes = state.doc.export('docx');
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const formData = new FormData();
+    formData.append('file', blob, docName + '.docx');
+
+    const apiBase = window.S1_CONFIG?.apiUrl || '/api/v1';
+    const resp = await fetch(`${apiBase}/files`, { method: 'POST', body: formData });
+
+    if (resp.ok) {
+      const result = await resp.json();
+      const fileId = result.fileId;
+      const shareUrl = `${window.location.origin}/?file=${fileId}&access=${access}`;
+
+      if (urlInput) urlInput.value = shareUrl;
+      if (modal) modal.dataset.room = fileId;
+
+      // Also start collab session with the fileId as the room
+      state._pendingShareFileId = fileId;
+    } else {
+      // Fallback to client-side room (no server)
+      const generatedRoom = `room-${Math.random().toString(36).substring(2, 10)}`;
+      const shareUrl = `${window.location.origin}/?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
+      if (urlInput) urlInput.value = shareUrl;
+      if (modal) modal.dataset.room = generatedRoom;
+    }
+  } catch (e) {
+    // Server unavailable — fallback to client-side room
+    console.warn('File upload for sharing failed:', e);
+    const generatedRoom = `room-${Math.random().toString(36).substring(2, 10)}`;
+    const shareUrl = `${window.location.origin}/?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
+    if (urlInput) urlInput.value = shareUrl;
+    if (modal) modal.dataset.room = generatedRoom;
+  }
+
   updateSharePeerList();
-
-  // Show modal
-  const modal = $('shareModal');
-  if (modal) modal.classList.add('show');
-
-  // Store generated room for the Start button
-  if (modal) modal.dataset.room = generatedRoom;
 }
 
 /**
@@ -1193,20 +1371,66 @@ export function initCollabUI() {
 }
 
 /**
- * Auto-join if URL has ?room= parameter.
+ * Auto-join if URL has ?file= or ?room= parameter.
+ *
+ * ?file={fileId} — download document from server, open it, connect to WebSocket.
+ * ?room={roomId} — join existing relay room (legacy/fallback).
  */
-export function checkAutoJoin() {
+export async function checkAutoJoin() {
   const params = new URLSearchParams(window.location.search);
+  const fileId = params.get('file');
   const room = params.get('room');
-  if (!room) return;
 
-  const relay = params.get('relay') || DEFAULT_RELAY_URL;
-  const name = 'User ' + Math.floor(Math.random() * 100);
+  if (fileId) {
+    // Server-based share: fetch document from server, open it, then join collab
+    try {
+      const apiBase = window.S1_CONFIG?.apiUrl || '/api/v1';
+      const resp = await fetch(`${apiBase}/files/${encodeURIComponent(fileId)}/download`);
+      if (!resp.ok) {
+        console.error(`Failed to fetch shared file ${fileId}: HTTP ${resp.status}`);
+        showCollabToast('Shared document not found or session expired');
+        return false;
+      }
+      const bytes = new Uint8Array(await resp.arrayBuffer());
 
-  // Wait for document to be ready
-  setTimeout(() => {
-    if (state.engine && state.doc) {
-      startCollab(room, name, relay);
+      // Get session info for filename
+      let filename = 'Shared Document.docx';
+      try {
+        const infoResp = await fetch(`${apiBase}/files/${encodeURIComponent(fileId)}`);
+        if (infoResp.ok) {
+          const info = await infoResp.json();
+          filename = info.filename || filename;
+        }
+      } catch (_) {}
+
+      // Open the document in the editor (dynamic import to avoid circular dep)
+      const { openFile } = await import('./file.js');
+      await openFile(bytes, filename);
+
+      // Connect to WebSocket for co-editing using fileId as room
+      const name = 'User ' + Math.floor(Math.random() * 100);
+      const relay = params.get('relay') || DEFAULT_RELAY_URL;
+      startCollab(fileId, name, relay);
+
+      return true;
+    } catch (e) {
+      console.error('Failed to open shared document:', e);
+      showCollabToast('Failed to open shared document');
+      return false;
     }
-  }, 1000);
+  }
+
+  if (room) {
+    // Legacy relay-only mode
+    const relay = params.get('relay') || DEFAULT_RELAY_URL;
+    const name = 'User ' + Math.floor(Math.random() * 100);
+    setTimeout(() => {
+      if (state.engine && state.doc) {
+        startCollab(room, name, relay);
+      }
+    }, 1000);
+    return true;
+  }
+
+  return false;
 }

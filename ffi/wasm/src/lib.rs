@@ -1856,6 +1856,110 @@ impl WasmDocument {
         Ok(())
     }
 
+    // ─── Multi-Cursor Operations ─────────────────────────────────
+
+    /// Insert text at multiple cursor positions simultaneously.
+    ///
+    /// Takes a JSON array of `[{"nodeId":"0:5","offset":3,"text":"x"}, ...]`.
+    /// Positions are sorted in reverse document order and applied back-to-front
+    /// so that earlier insertions don't shift later offsets.
+    ///
+    /// All insertions form a single undo step via merge_undo_entries.
+    pub fn multi_cursor_insert(&mut self, cursors_json: &str) -> Result<(), JsError> {
+        let cursors: Vec<serde_json::Value> = serde_json::from_str(cursors_json)
+            .map_err(|e| JsError::new(&format!("Invalid JSON: {e}")))?;
+
+        if cursors.is_empty() {
+            return Ok(());
+        }
+
+        // Parse and sort cursors in reverse order (last position first)
+        // so insertions don't shift earlier offsets
+        let mut positions: Vec<(String, usize, String)> = Vec::new();
+        for c in &cursors {
+            let node_id = c["nodeId"]
+                .as_str()
+                .ok_or_else(|| JsError::new("Missing nodeId"))?
+                .to_string();
+            let offset = c["offset"]
+                .as_u64()
+                .ok_or_else(|| JsError::new("Missing offset"))? as usize;
+            let text = c["text"]
+                .as_str()
+                .ok_or_else(|| JsError::new("Missing text"))?
+                .to_string();
+            positions.push((node_id, offset, text));
+        }
+
+        // Sort by nodeId descending, then offset descending
+        positions.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+        // Record undo count before batch
+        let start_undo = self.doc()?.undo_count();
+
+        // Apply each insertion
+        for (node_id, offset, text) in &positions {
+            self.insert_text_in_paragraph(node_id, *offset, text)?;
+        }
+
+        // Merge all insertions into single undo step
+        let end_undo = self.doc()?.undo_count();
+        let delta = end_undo.saturating_sub(start_undo);
+        if delta > 1 {
+            self.doc_mut()?
+                .merge_undo_entries(delta, "Multi-cursor insert")
+                .map_err(|e| JsError::new(&e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    /// Delete text at multiple cursor positions simultaneously.
+    ///
+    /// Takes a JSON array of `[{"nodeId":"0:5","offset":3,"length":1}, ...]`.
+    /// Applied in reverse order to preserve offsets.
+    pub fn multi_cursor_delete(&mut self, cursors_json: &str) -> Result<(), JsError> {
+        let cursors: Vec<serde_json::Value> = serde_json::from_str(cursors_json)
+            .map_err(|e| JsError::new(&format!("Invalid JSON: {e}")))?;
+
+        if cursors.is_empty() {
+            return Ok(());
+        }
+
+        let mut positions: Vec<(String, usize, usize)> = Vec::new();
+        for c in &cursors {
+            let node_id = c["nodeId"]
+                .as_str()
+                .ok_or_else(|| JsError::new("Missing nodeId"))?
+                .to_string();
+            let offset = c["offset"]
+                .as_u64()
+                .ok_or_else(|| JsError::new("Missing offset"))? as usize;
+            let length = c["length"]
+                .as_u64()
+                .ok_or_else(|| JsError::new("Missing length"))? as usize;
+            positions.push((node_id, offset, length));
+        }
+
+        positions.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+
+        let start_undo = self.doc()?.undo_count();
+
+        for (node_id, offset, length) in &positions {
+            self.delete_text_in_paragraph(node_id, *offset, *length)?;
+        }
+
+        let end_undo = self.doc()?.undo_count();
+        let delta = end_undo.saturating_sub(start_undo);
+        if delta > 1 {
+            self.doc_mut()?
+                .merge_undo_entries(delta, "Multi-cursor delete")
+                .map_err(|e| JsError::new(&e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
     // ─── Undo / Redo ──────────────────────────────────────────────
 
     /// Undo the last editing operation. Returns true if something was undone.

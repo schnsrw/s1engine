@@ -2184,6 +2184,7 @@ dependencies = [
  "s1-ops",
  "s1-text",
  "s1engine",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

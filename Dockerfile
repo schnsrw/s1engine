@@ -43,6 +43,7 @@ COPY crates/s1-crdt/Cargo.toml crates/s1-crdt/Cargo.toml
 COPY crates/s1engine/Cargo.toml crates/s1engine/Cargo.toml
 COPY ffi/wasm/Cargo.toml ffi/wasm/Cargo.toml
 COPY ffi/c/Cargo.toml ffi/c/Cargo.toml
+COPY server/Cargo.toml server/Cargo.toml
 
 # Create dummy source files so cargo can resolve the workspace and fetch deps
 RUN for dir in \
@@ -62,6 +63,7 @@ RUN for dir in \
       ffi/c/src; do \
     mkdir -p "$dir" && echo "" > "$dir/lib.rs"; \
     done && \
+    mkdir -p server/src && echo "fn main() {}" > server/src/main.rs && \
     mkdir -p crates/s1engine/benches && \
     echo "fn main() {}" > crates/s1engine/benches/engine_bench.rs
 
@@ -71,6 +73,7 @@ RUN cargo fetch
 # Now copy the real source code
 COPY crates/ crates/
 COPY ffi/ ffi/
+COPY server/ server/
 
 # Build WASM (release mode)
 # Output goes to /app/wasm-pkg so the next stage can pick it up

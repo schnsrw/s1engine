@@ -821,7 +821,7 @@ export function initToolbar() {
   // About dialog — simple alert
   if ($('menuAbout')) $('menuAbout').addEventListener('click', () => {
     closeAllMenus();
-    showToast('s1engine Editor v1.0 — WASM-powered document editor. MIT License.', 'info', 6000);
+    showToast('s1engine Editor v1.0 — WASM-powered document editor. AGPL-3.0 License.', 'info', 6000);
   });
 
   // E10.5: Usage Statistics modal
@@ -3493,6 +3493,11 @@ function initHighlightPaletteDropdown(pickerInput) {
     dd.classList.remove('show');
   }
 
+  // Save selection on mousedown (before focus shifts away from editor)
+  hlBtn.addEventListener('mousedown', e => {
+    e.preventDefault();
+    saveSelection();
+  });
   hlBtn.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();

@@ -7,6 +7,25 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#1a73e8">
   <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
+  <!-- s1engine Configuration — override these for integration -->
+  <script>
+    window.S1_CONFIG = window.S1_CONFIG || {
+      // Server API URL (for document CRUD, conversion)
+      apiUrl: '',  // e.g., 'http://localhost:8080/api/v1'
+      // WebSocket URL (for collaboration). Empty = no auto-connect.
+      relayUrl: '', // e.g., 'ws://localhost:8080/ws/collab'
+      // Editor mode: 'standalone' (default) or 'integrated'
+      mode: 'standalone',
+      // Auto-connect to collaboration on load (requires relayUrl + room in URL)
+      autoCollab: true,
+      // Branding
+      productName: 's1 editor',
+      // Feature flags
+      enableCollab: true,
+      enablePdfViewer: true,
+      enableTemplates: true,
+    };
+  </script>
   <link rel="stylesheet" href="/src/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto+Mono:wght@400&display=swap" rel="stylesheet">
@@ -1602,12 +1621,14 @@
 <div class="modal-overlay" id="pdfDigitalSignModal" role="dialog" aria-modal="true" aria-label="Digital Signature">
   <div class="modal">
     <h3><span class="msi modal-icon">verified_user</span> Sign Document</h3>
+    <form onsubmit="return false" autocomplete="off">
     <label>Certificate file (.p12/.pfx)
       <input type="file" id="digSignCertInput" accept=".p12,.pfx">
     </label>
     <label>Certificate password
-      <input type="password" class="dig-sign-password" id="digSignPassword" placeholder="Enter password">
+      <input type="password" class="dig-sign-password" id="digSignPassword" placeholder="Enter password" autocomplete="new-password">
     </label>
+    </form>
     <div class="dig-sign-cert-info" id="digSignCertInfo" style="display:none"></div>
     <label>Reason for signing
       <select class="dig-sign-reason" id="digSignReason">

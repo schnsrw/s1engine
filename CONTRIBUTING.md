@@ -139,7 +139,7 @@ crates/
 ffi/
   wasm/              WASM bindings
   c/                 C FFI bindings
-editor/              Folio web editor
+editor/              S1 editor web editor
 scripts/             Build and utility scripts
 docs/                Technical documentation
 ```
@@ -153,4 +153,4 @@ docs/                Technical documentation
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same dual MIT/Apache-2.0 license as the project.
+By contributing, you agree that your contributions will be licensed under the same AGPL-3.0-or-later license as the project.

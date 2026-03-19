@@ -234,7 +234,7 @@ s1engine (facade)
 
 ## License Compatibility
 
-All dependencies use MIT, Apache-2.0, or MIT/Apache-2.0 dual license, which are compatible with s1engine's MIT/Apache-2.0 dual license.
+All dependencies use MIT, Apache-2.0, or MIT/Apache-2.0 dual license, which are compatible with s1engine's AGPL-3.0-or-later license.
 
 ---
 

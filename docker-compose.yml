@@ -1,27 +1,32 @@
-version: '3.8'
-
 services:
-  s1-editor:
+  # Unified s1-server: serves editor UI + REST API + WebSocket collab
+  # Single container, single port, single binary
+  s1-server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.unified
     ports:
-      - "${PORT:-8787}:8787"
+      - "${S1_PORT:-8080}:8080"
     environment:
-      - PORT=8787
-      - PUBLIC_DIR=/app/public
-      - DATA_DIR=/app/data
-      - JWT_SECRET=${JWT_SECRET:-}
-      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - S1_PORT=8080
+      - S1_STORAGE=${S1_STORAGE:-local}
+      - S1_DATA_DIR=/data
+      - S1_STATIC_DIR=/app/public
+      - S1_AUTH_ENABLED=${S1_AUTH_ENABLED:-false}
+      - S1_JWT_SECRET=${S1_JWT_SECRET:-}
+      - S1_ALLOW_ANONYMOUS=${S1_ALLOW_ANONYMOUS:-true}
+      - S1_ADMIN_USER=${S1_ADMIN_USER:-admin}
+      - S1_ADMIN_PASS=${S1_ADMIN_PASS:-admin}
+      - RUST_LOG=${RUST_LOG:-s1_server=info,tower_http=info}
     volumes:
-      - s1-editor-data:/app/data
+      - s1-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 15s
 
 volumes:
-  s1-editor-data:
+  s1-data:

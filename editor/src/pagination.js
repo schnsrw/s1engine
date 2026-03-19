@@ -555,6 +555,7 @@ function syncAllTextInline() {
  * Replace page number / page count field placeholders in header/footer HTML.
  */
 function substitutePageNumbers(container, pageNum, totalPages) {
+  // Only substitute in data-field elements (not in document content text)
   container.querySelectorAll('[data-field]').forEach(el => {
     const field = (el.dataset.field || '').toUpperCase();
     if (field === 'PAGENUMBER' || field === 'PAGE') {
@@ -563,17 +564,6 @@ function substitutePageNumbers(container, pageNum, totalPages) {
       el.textContent = String(totalPages);
     }
   });
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-  let node;
-  while ((node = walker.nextNode())) {
-    const t = node.textContent;
-    const upper = t.toUpperCase();
-    if (upper.includes('PAGE') || upper.includes('NUMPAGES')) {
-      node.textContent = t
-        .replace(/\bNUMPAGES\b/gi, String(totalPages))
-        .replace(/\bPAGE\b/gi, String(pageNum));
-    }
-  }
 }
 
 /**

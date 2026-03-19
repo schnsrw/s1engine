@@ -22,7 +22,7 @@ The document editing space has several categories of solutions. s1engine compete
 - **Strengths**: Good format support, collaboration, familiar UI
 - **Weaknesses**: AGPL license is toxic for commercial products, heavy JS client (~5MB), tightly coupled architecture, must run their document server
 - **Integration model**: iFrame embed with WOPI or their JS API
-- **s1engine advantage**: Permissive license (MIT/Apache), lightweight WASM (~2MB), embeddable as component (not iFrame), no document server required for basic editing
+- **s1engine advantage**: AGPL-3.0 with commercial dual-license (same model as OnlyOffice), lightweight WASM (~2MB), embeddable as component (not iFrame), no document server required for basic editing
 
 #### Google Docs
 - **What**: Proprietary cloud document editor
@@ -109,7 +109,7 @@ The document editing space has several categories of solutions. s1engine compete
 | Self-hostable | Yes | Yes | Yes (AGPL) | Partial | No (collab) | No |
 | Embeddable (component) | Yes | No (iFrame) | No (iFrame) | Yes | Yes | No |
 | White-labelable | Yes | Limited | Yes (paid) | Yes | Yes (paid) | No |
-| Open-source license | MIT/Apache | MPL/paid | AGPL/paid | MIT/paid | GPL/paid | Proprietary |
+| Open-source license | AGPL/commercial | MPL/paid | AGPL/paid | MIT/paid | GPL/paid | Proprietary |
 | WASM support | Yes | No | No | N/A | N/A | No |
 | Pure Rust (no C deps) | Yes | No (C++) | No (C++) | N/A | N/A | N/A |
 | Bundle size (editor) | ~2MB WASM | N/A (server) | ~5MB JS | ~500KB | ~1MB | N/A |

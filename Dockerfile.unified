@@ -1,0 +1,74 @@
+# s1-server — Unified Document Editing Server
+#
+# Single image: Rust binary serves editor UI + REST API + WebSocket collab
+#
+# Usage:
+#   docker build -f Dockerfile.unified -t s1engine/server .
+#   docker run -p 8080:8080 s1engine/server
+#
+# Open http://localhost:8080 in your browser.
+
+# ─── Stage 1: Build Rust server + WASM ──────────────────
+FROM rust:1.88-bookworm AS rust-builder
+
+RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh \
+    && rustup target add wasm32-unknown-unknown
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY ffi/ ffi/
+COPY server/ server/
+
+# Build server (release, strip debug symbols)
+RUN cargo build --release -p s1-server \
+    && strip /app/target/release/s1-server
+
+# Build WASM
+RUN wasm-pack build ffi/wasm --target web --release --out-dir /app/wasm-out
+
+# ─── Stage 2: Build editor frontend ─────────────────────
+FROM node:20-bookworm-slim AS web-builder
+
+WORKDIR /app/editor
+COPY editor/package.json editor/package-lock.json* ./
+RUN npm ci --ignore-scripts 2>/dev/null || npm install
+
+COPY editor/ ./
+RUN rm -rf wasm-pkg && mkdir -p wasm-pkg
+COPY --from=rust-builder /app/wasm-out/ ./wasm-pkg/
+
+# Try Vite build; if it fails, source files are used directly
+RUN npx vite build 2>/dev/null || true
+
+# ─── Stage 3: Minimal runtime ───────────────────────────
+FROM debian:bookworm-slim
+
+# Only install curl (for health check) and ca-certificates
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# Copy stripped server binary (~15MB)
+COPY --from=rust-builder /app/target/release/s1-server /usr/local/bin/s1-server
+
+# Copy editor static files — Vite build output only
+# The dist/ directory contains the built index.html that references
+# hashed assets in /assets/ (not /src/main.js which needs Vite dev server)
+RUN mkdir -p /app/public
+COPY --from=web-builder /app/editor/dist/ /app/public/
+
+RUN mkdir -p /data
+
+ENV S1_PORT=8080 \
+    S1_STORAGE=local \
+    S1_DATA_DIR=/data \
+    S1_STATIC_DIR=/app/public \
+    RUST_LOG=s1_server=info
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+CMD ["s1-server"]

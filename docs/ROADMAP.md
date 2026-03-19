@@ -787,7 +787,7 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 
 **Completed**: 2026-03-16
 
-**Goal**: Full PDF viewing and annotation experience in the Folio editor.
+**Goal**: Full PDF viewing and annotation experience in the S1 editor.
 
 ### Phase 10.1: PDF Viewer (COMPLETE)
 - [x] PDF.js integration with `standardFontDataUrl` configuration

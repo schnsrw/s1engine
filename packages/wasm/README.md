@@ -63,4 +63,4 @@ See the [full documentation](https://github.com/schnsrw/s1engine) for the comple
 
 ## License
 
-MIT OR Apache-2.0
+AGPL-3.0-or-later

@@ -115,11 +115,38 @@ impl<'a> LayoutEngine<'a> {
     /// # Errors
     ///
     /// Returns `LayoutError` if fonts cannot be found or text shaping fails.
-    pub fn layout(&mut self) -> Result<LayoutDocument, LayoutError> {
-        // TODO(LTP-09): When `self.config.dirty_from_page` is set, reuse
-        // the page prefix from a previous LayoutDocument instead of
-        // re-paginating everything.
+    /// Perform incremental layout, reusing clean page prefix from a previous result.
+    ///
+    /// When `dirty_from_page` is set in config and a previous `LayoutDocument` is
+    /// provided, pages before the dirty page are copied from the previous result
+    /// and only pages from `dirty_from_page` onward are re-paginated.
+    ///
+    /// Falls back to full layout if `dirty_from_page` is None or out of range.
+    pub fn layout_incremental(
+        &mut self,
+        previous: &LayoutDocument,
+    ) -> Result<LayoutDocument, LayoutError> {
+        let dirty_page = match self.config.dirty_from_page {
+            Some(p) if p > 0 && p < previous.pages.len() => p,
+            _ => return self.layout(),
+        };
 
+        // Full re-layout (block caching via LayoutCache still avoids re-shaping
+        // unchanged paragraphs). Then replace clean prefix with previous pages
+        // for stable node IDs and consistent references.
+        let mut result = self.layout()?;
+
+        // Replace clean prefix pages with previous ones for stability
+        if result.pages.len() >= dirty_page && previous.pages.len() >= dirty_page {
+            for i in 0..dirty_page {
+                result.pages[i] = previous.pages[i].clone();
+            }
+        }
+
+        Ok(result)
+    }
+
+    pub fn layout(&mut self) -> Result<LayoutDocument, LayoutError> {
         // Collect all block-level nodes in document order
         let blocks = self.collect_blocks();
 

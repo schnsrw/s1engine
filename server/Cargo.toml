@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal
-s1engine = { workspace = true }
+s1engine = { workspace = true, features = ["pdf", "layout"] }
 s1-convert = { workspace = true }
 
 # Web framework

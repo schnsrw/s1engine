@@ -85,11 +85,14 @@ async function boot() {
     // Expose state for testing
     window.__s1_state = state;
 
-    // Check for collaboration auto-join (?room=... URL param)
-    checkAutoJoin();
+    // Check for collaboration auto-join (?file=... or ?room=... URL param)
+    // If a shared file is opened, skip auto-recovery
+    const params = new URLSearchParams(window.location.search);
+    const isSharedLink = params.has('file') || params.has('room');
+    await checkAutoJoin();
 
-    // Check for auto-recovered document
-    try {
+    // Check for auto-recovered document (NEVER on shared links)
+    if (!isSharedLink) try {
       const saved = await checkAutoRecover();
       if (saved && saved.bytes) {
         const age = Date.now() - (saved.timestamp || 0);
