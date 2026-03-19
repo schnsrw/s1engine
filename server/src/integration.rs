@@ -35,7 +35,7 @@ pub struct EditQuery {
     pub token: Option<String>,
 }
 
-/// Handle /edit?token=<jwt>
+/// Handle `/edit?token=JWT`
 pub async fn handle_edit(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EditQuery>,

@@ -298,17 +298,18 @@ async function r(){
   <div class="card"><div class="card-label">Editors</div><div class="card-value">${s.total_editors}</div></div>
   <div class="card"><div class="card-label">Memory</div><div class="card-value">${s.memory_mb.toFixed(1)}MB</div></div>`;
  const tb=document.getElementById('sessions');
+ function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
  tb.innerHTML=ss.sessions.length?ss.sessions.map(s=>`<tr>
-  <td style="font-family:monospace;font-size:10px">${s.file_id.substring(0,8)}</td>
-  <td>${s.filename}</td><td>${s.format}</td><td>${fs(s.size)}</td>
+  <td style="font-family:monospace;font-size:10px">${esc(s.file_id.substring(0,8))}</td>
+  <td>${esc(s.filename)}</td><td>${esc(s.format)}</td><td>${fs(s.size)}</td>
   <td>${s.editor_count}</td>
-  <td><span class="badge badge-${s.status}">${s.status}</span></td>
+  <td><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></td>
   <td>${fu(s.created_at_secs_ago)}</td>
-  <td><button class="btn-sm" onclick="cl('${s.file_id}')">Close</button></td></tr>`).join('')
+  <td><button class="btn-sm" onclick="cl('${esc(s.file_id)}')">Close</button></td></tr>`).join('')
   :'<tr><td colspan="8" style="text-align:center;color:#ccc;padding:16px">No active sessions</td></tr>';
  document.getElementById('config').textContent=JSON.stringify(c,null,2);
 }
-async function cl(id){if(!confirm('Close session?'))return;await fetch('/admin/api/sessions/'+id,{method:'DELETE'});r()}
+async function cl(id){if(!confirm('Close session?'))return;await fetch('/admin/api/sessions/'+encodeURIComponent(id),{method:'DELETE'});r()}
 function fu(s){return s<60?s+'s':s<3600?Math.floor(s/60)+'m':Math.floor(s/3600)+'h'}
 function fs(b){return b<1024?b+'B':b<1048576?(b/1024).toFixed(1)+'KB':(b/1048576).toFixed(1)+'MB'}
 r();setInterval(r,10000);

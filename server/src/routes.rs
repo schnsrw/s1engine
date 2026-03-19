@@ -2,7 +2,8 @@
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use serde::Deserialize;
@@ -143,12 +144,12 @@ pub async fn list_documents(
     })))
 }
 
-/// Get a document by ID (returns bytes).
+/// Get a document by ID (returns bytes with proper Content-Type).
 pub async fn get_document(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Vec<u8>, (StatusCode, String)> {
-    state.storage.get(&id).map_err(|e| match e {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let meta = state.storage.get_meta(&id).map_err(|e| match e {
         crate::storage::StorageError::NotFound(_) => {
             (StatusCode::NOT_FOUND, format!("Document not found: {id}"))
         }
@@ -156,7 +157,31 @@ pub async fn get_document(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Storage error: {other}"),
         ),
-    })
+    })?;
+    let data = state.storage.get(&id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Storage error: {e}"),
+        )
+    })?;
+    let content_type = format_to_content_type(&meta.format);
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(content_type),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_str(&format!(
+                    "attachment; filename=\"{}\"",
+                    meta.filename
+                ))
+                .unwrap_or_else(|_| header::HeaderValue::from_static("attachment")),
+            ),
+        ],
+        data,
+    ))
 }
 
 /// Get document metadata by ID.
@@ -196,7 +221,9 @@ pub async fn delete_document(
 }
 
 /// Stateless format conversion.
-pub async fn convert_document(mut multipart: Multipart) -> Result<Vec<u8>, (StatusCode, String)> {
+pub async fn convert_document(
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut file_data: Option<Vec<u8>> = None;
     let mut target_format = String::from("pdf");
 
@@ -243,12 +270,32 @@ pub async fn convert_document(mut multipart: Multipart) -> Result<Vec<u8>, (Stat
         }
     };
 
-    doc.export(format).map_err(|e| {
+    let bytes = doc.export(format).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Export failed: {e}"),
         )
-    })
+    })?;
+    let content_type = format_to_content_type(&target_format);
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static(content_type),
+        )],
+        bytes,
+    ))
+}
+
+/// Map format string to MIME content type.
+fn format_to_content_type(format: &str) -> &'static str {
+    match format {
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "pdf" => "application/pdf",
+        "txt" => "text/plain; charset=utf-8",
+        "md" => "text/markdown; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
 
 // ─── Thumbnail ──────────────────────────────────────
@@ -422,10 +469,32 @@ pub async fn get_file_info(
 pub async fn download_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Vec<u8>, (StatusCode, String)> {
-    state.sessions.get_data(&id).await.ok_or((
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let info = state.sessions.get_info(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("File session not found: {id}"),
+    ))?;
+    let data = state.sessions.get_data(&id).await.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("File session not found: {id}"),
+    ))?;
+    let content_type = format_to_content_type(&info.format);
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(content_type),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_str(&format!(
+                    "attachment; filename=\"{}\"",
+                    info.filename
+                ))
+                .unwrap_or_else(|_| header::HeaderValue::from_static("attachment")),
+            ),
+        ],
+        data,
     ))
 }
 

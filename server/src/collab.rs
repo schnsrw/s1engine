@@ -85,6 +85,15 @@ impl RoomManager {
         }
     }
 
+    async fn update_peer_color(&self, room_id: &str, peer_id: &str, color: &str) {
+        let mut rooms = self.rooms.lock().await;
+        if let Some(room) = rooms.get_mut(room_id) {
+            if let Some(peer) = room.peers.iter_mut().find(|p| p.peer_id == peer_id) {
+                peer.user_color = color.to_string();
+            }
+        }
+    }
+
     async fn record_op(&self, room_id: &str, op: &str) {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
@@ -186,12 +195,7 @@ pub async fn ws_collab_handler(
 }
 
 /// Handle a WebSocket connection for collaborative editing.
-async fn handle_socket(
-    socket: WebSocket,
-    file_id: String,
-    params: WsParams,
-    state: Arc<AppState>,
-) {
+async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, state: Arc<AppState>) {
     let has_session = state.sessions.exists(&file_id).await;
     let peer_id = params.uid.clone();
     let user_name = params.user.clone();
@@ -334,16 +338,16 @@ async fn handle_socket(
                         Err(_) => continue,
                     };
 
-                    let msg_type = parsed
-                        .get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("");
+                    let msg_type = parsed.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                     match msg_type {
                         "join" => {
-                            // Client join message — update peer color if provided
-                            // Already handled by the room join above; just extract color
-                            // for future peer-join broadcasts
+                            // Extract peer color from join message and update room state
+                            if let Some(color) = parsed.get("userColor").and_then(|c| c.as_str()) {
+                                rooms
+                                    .update_peer_color(&file_id_recv, &sender_peer_id, color)
+                                    .await;
+                            }
                             continue;
                         }
                         "op" => {

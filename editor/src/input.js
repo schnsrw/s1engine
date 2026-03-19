@@ -202,6 +202,10 @@ export function initInput() {
             sc.offset += e.data.length;
           }
           renderDocument();
+          // Broadcast multi-cursor insert to peers
+          for (const c of cursors) {
+            broadcastOp({ action: 'insertText', nodeId: c.nodeId, offset: c.offset, text: e.data });
+          }
           // Re-render secondary cursors at new positions
           import('./selection.js').then(mod => mod.refreshSecondarySelections?.());
           updateUndoRedo();
@@ -1888,12 +1892,15 @@ function tryAutoCorrect(el, triggerChar) {
     // Using WASM for model consistency
     if (typeof state.doc.replace_text_range === 'function') {
       state.doc.replace_text_range(nodeId, startIdx, endIdx, replacement);
+      broadcastOp({ action: 'replaceText', nodeId, offset: startIdx, length: endIdx - startIdx, replacement });
     } else {
       // Fallback: reconstruct the paragraph text
       const fullText = getEditableText(el);
       const cp = [...fullText];
       const newCp = [...cp.slice(0, startIdx), ...replacement, ...cp.slice(endIdx)];
-      state.doc.set_paragraph_text(nodeId, newCp.join(''));
+      const newText = newCp.join('');
+      state.doc.set_paragraph_text(nodeId, newText);
+      broadcastOp({ action: 'setText', nodeId, text: newText });
     }
     // Calculate new cursor offset: startIdx + replacement length + 1 (for the trigger char)
     const newCursorOff = startIdx + [...replacement].length + 1;
