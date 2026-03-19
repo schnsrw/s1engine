@@ -8115,6 +8115,12 @@ fn render_run(model: &DocumentModel, run_id: NodeId, html: &mut String) {
     if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Color) {
         style.push_str(&format!("color:#{};", c.to_hex()));
     }
+    // Highlight / background color
+    if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::HighlightColor) {
+        style.push_str(&format!("background-color:#{};", c.to_hex()));
+    } else if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Background) {
+        style.push_str(&format!("background-color:#{};", c.to_hex()));
+    }
     // Character spacing
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {

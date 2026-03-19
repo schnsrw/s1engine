@@ -14,7 +14,9 @@ import { getLastError, clearErrors } from './error-tracking.js';
 
 // ── Selection save/restore for modal dialogs ─────
 // Saves the current DOM selection before a modal opens, restores it after close.
+// We store both the DOM Range (fast path) and node ID + offset info (survives re-renders).
 let _savedModalSelection = null;
+let _savedModalSelInfo = null;
 
 function saveModalSelection() {
   try {
@@ -27,20 +29,47 @@ function saveModalSelection() {
   } catch (_) {
     _savedModalSelection = null;
   }
+  // Also save node ID + offset info which survives DOM re-renders
+  try {
+    _savedModalSelInfo = getSelectionInfo();
+  } catch (_) {
+    _savedModalSelInfo = null;
+  }
 }
 
 function restoreModalSelection() {
-  if (!_savedModalSelection) return;
+  if (!_savedModalSelection && !_savedModalSelInfo) return;
   try {
     // ED2-18: Verify saved range nodes are still in the DOM after re-render
-    const startOk = _savedModalSelection.startContainer && _savedModalSelection.startContainer.isConnected;
-    const endOk = _savedModalSelection.endContainer && _savedModalSelection.endContainer.isConnected;
+    const startOk = _savedModalSelection && _savedModalSelection.startContainer && _savedModalSelection.startContainer.isConnected;
+    const endOk = _savedModalSelection && _savedModalSelection.endContainer && _savedModalSelection.endContainer.isConnected;
     if (startOk && endOk) {
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(_savedModalSelection);
+    } else if (_savedModalSelInfo && _savedModalSelInfo.startNodeId) {
+      // DOM Range is invalid (nodes disconnected after re-render).
+      // Fall back to restoring via node ID + offset which survives re-renders.
+      const page = $('pageContainer');
+      if (page) {
+        const startEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.startNodeId}"]`);
+        if (startEl) {
+          const content = startEl.closest('.page-content');
+          if (content) content.focus();
+          if (_savedModalSelInfo.collapsed) {
+            setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+          } else {
+            const endEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.endNodeId}"]`);
+            if (endEl) {
+              setSelectionRange(startEl, _savedModalSelInfo.startOffset, endEl, _savedModalSelInfo.endOffset);
+            } else {
+              setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+            }
+          }
+        }
+      }
     } else {
-      // Fall back: place cursor at start of first paragraph
+      // Last resort: place cursor at start of first paragraph
       const firstPara = $('pageContainer')?.querySelector('.page-content p[data-node-id], .page-content h1[data-node-id]');
       if (firstPara) {
         const content = firstPara.closest('.page-content');
@@ -54,9 +83,23 @@ function restoreModalSelection() {
       }
     }
   } catch (_) {
-    // Range may be invalid if DOM changed; fall back to focusing editor
+    // Range may be invalid if DOM changed; try node-ID fallback
+    try {
+      if (_savedModalSelInfo && _savedModalSelInfo.startNodeId) {
+        const page = $('pageContainer');
+        if (page) {
+          const startEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.startNodeId}"]`);
+          if (startEl) {
+            const content = startEl.closest('.page-content');
+            if (content) content.focus();
+            setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+          }
+        }
+      }
+    } catch (_2) { /* give up */ }
   }
   _savedModalSelection = null;
+  _savedModalSelInfo = null;
 }
 
 // E7.2: Screen reader announcement — briefly sets the aria-live region text
@@ -1252,6 +1295,8 @@ export function setZoomLevel(level) {
   level = Math.max(50, Math.min(200, Math.round(level)));
   const changed = state.zoomLevel !== level;
   state.zoomLevel = level;
+  // Persist zoom across sessions
+  try { localStorage.setItem('s1_zoom', String(level)); } catch (_) {}
   const label = level + '%';
   if ($('zoomValue')) $('zoomValue').textContent = label;
   if ($('tbZoomValue')) $('tbZoomValue').textContent = label;
@@ -1308,7 +1353,7 @@ function initZoomDropdown() {
 
   // Restore saved zoom level
   try {
-    const saved = localStorage.getItem('s1-zoom');
+    const saved = localStorage.getItem('s1_zoom');
     if (saved) {
       const parsed = parseInt(saved);
       if (!isNaN(parsed) && parsed >= 50 && parsed <= 200) {

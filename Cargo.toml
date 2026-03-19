@@ -28,8 +28,8 @@ rust-version = "1.88"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/schnsrw/s1engine"
 homepage = "https://github.com/schnsrw/s1engine"
-keywords = ["document", "docx", "odt", "pdf", "editor"]
-categories = ["parsing", "text-processing"]
+keywords = ["document", "docx", "odt", "collaborative-editing", "wasm"]
+categories = ["parsing", "text-processing", "web-programming"]
 
 [workspace.dependencies]
 # Internal crates (path for local dev, version for crates.io publish)

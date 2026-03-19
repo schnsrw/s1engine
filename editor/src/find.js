@@ -1,7 +1,7 @@
 // Find & Replace
 import { state, $ } from './state.js';
 import { renderDocument, syncAllText } from './render.js';
-import { updateUndoRedo } from './toolbar.js';
+import { updateUndoRedo, recordUndoAction } from './toolbar.js';
 import { broadcastOp } from './collab.js';
 
 let _findRefreshTimer = null;
@@ -195,6 +195,10 @@ function doFind() {
     if (freshRange) _selectionRange = freshRange;
     if (_selectionRange) {
       selectionNodeIds = getNodeIdsBetween(_selectionRange.startNodeId, _selectionRange.endNodeId);
+    }
+    // If no valid selection range, search entire document instead of using stale range
+    if (!selectionNodeIds || selectionNodeIds.length === 0) {
+      selectionNodeIds = null;
     }
   }
 
@@ -464,6 +468,7 @@ function doReplaceAll() {
   if (!query) return;
   syncAllText();
   try {
+    recordUndoAction('Replace all');
     const count = state.doc.replace_all(query, replacement, _matchCase);
     broadcastOp({ action: 'replaceAll', query, replacement, caseSensitive: _matchCase });
     renderDocument();

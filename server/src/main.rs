@@ -86,6 +86,24 @@ async fn main() {
     // Initialize admin start time
     admin::init_start_time();
 
+    // Startup warnings
+    if std::env::var("S1_JWT_SECRET")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        tracing::warn!(
+            "S1_JWT_SECRET not set — /edit?token= integration mode will reject all tokens"
+        );
+    }
+    let auth_enabled = std::env::var("S1_AUTH_ENABLED")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("true");
+    if !auth_enabled {
+        tracing::warn!(
+            "Authentication disabled (S1_AUTH_ENABLED=false) — all endpoints are public"
+        );
+    }
+
     let app = Router::new()
         // Health
         .route("/health", get(routes::health))

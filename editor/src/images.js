@@ -264,6 +264,9 @@ function stopResize() {
 // ED2-14: Clean up resize listeners when tab loses visibility (prevents leaks on tab switch)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && state.resizing) {
+    // Persist the current resize state before stopping
+    const img = state.resizing;
+    if (img) persistResizeDuringDrag(img);
     stopResize();
   }
 });

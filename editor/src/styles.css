@@ -2921,6 +2921,17 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
   .props-panel{display:none !important}
   /* Hide comment markers */
   .comment-marker{background:transparent !important}
+
+  /* Page margins for printing */
+  @page{margin:0.75in}
+
+  /* Avoid breaking inside paragraphs and table rows */
+  .page-content p,.page-content li{
+    break-inside:avoid;page-break-inside:avoid;
+  }
+  .page-content tr{
+    break-inside:avoid;page-break-inside:avoid;
+  }
 }
 
 /* ═══════════════════════════════════════════════════
@@ -3320,12 +3331,17 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
   .tb-more-btn{display:inline-flex}
 
   .toolbar{
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none; /* Firefox */
     height:auto;
     min-height:40px;
     gap:2px;
     padding:4px 8px;
   }
+  .toolbar::-webkit-scrollbar{display:none}
   .tb-sep{display:none}
   .sep{display:none}
 
@@ -3385,17 +3401,21 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
   }
   .ruler{display:none}
 
-  /* ── Find bar fills viewport width on mobile ── */
+  /* ── Find bar fills viewport width on mobile, positioned below toolbar ── */
   .find-bar{
     position:fixed;
-    top:auto;
+    bottom:auto;
+    /* Place below menubar + toolbar area instead of overlapping keyboard */
+    top:calc(var(--menubar-height, 48px) + var(--toolbar-height, 50px));
     left:0;right:0;
     min-width:auto;
     width:100%;
     border-radius:0;
     border-left:none;border-right:none;
+    border-top:1px solid var(--border-light);
     padding:12px 12px;
     box-sizing:border-box;
+    z-index:60;
   }
 
   /* ── Side panels slide up from bottom on mobile ── */
@@ -3464,11 +3484,19 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
     overflow-x:auto;
     overflow-y:hidden;
     -webkit-overflow-scrolling:touch;
-    scrollbar-width:thin;
+    scrollbar-width:none;
   }
-  .toolbar::-webkit-scrollbar{height:3px}
-  .toolbar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-  .toolbar::-webkit-scrollbar-track{background:transparent}
+  .toolbar::-webkit-scrollbar{display:none}
+  /* Subtle right-edge fade to indicate more items are scrollable */
+  .toolbar::after{
+    content:'';
+    position:sticky;
+    right:0;
+    min-width:24px;
+    flex-shrink:0;
+    background:linear-gradient(to right, transparent, var(--bg-toolbar));
+    pointer-events:none;
+  }
 
   /* Statusbar — hide views, keep essential */
   .status-views{display:none}
@@ -3535,12 +3563,10 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
 /* Peer cursors */
 .peer-cursor {
   position: absolute;
-  top: 0;
   width: 2px;
-  height: 100%;
   border-left: 2px solid #e06c75;
   pointer-events: none;
-  z-index: 5;
+  z-index: 50;
 }
 
 .peer-cursor-label {

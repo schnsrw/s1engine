@@ -18,7 +18,7 @@ import { renderDocument, renderNodeById } from './render.js';
 // Default WebSocket URL — points to s1-server (not the static file server).
 // Override via URL param ?relay=ws://... or via share dialog.
 const DEFAULT_RELAY_URL = window.S1_CONFIG?.relayUrl
-  || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.hostname + ':8080/ws/collab';
+  || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/ws/collab';
 const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000];
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CURSOR_BROADCAST_INTERVAL = 500;
@@ -88,6 +88,7 @@ export function stopCollab() {
 export function broadcastTextSync(nodeId, text) {
   if (!roomId || applyingRemote) return;
   sendOp({ action: 'setText', nodeId, text });
+  scheduleDebouncedFullSync();
 }
 
 /**
@@ -97,6 +98,22 @@ export function broadcastTextSync(nodeId, text) {
 export function broadcastOp(opData) {
   if (!roomId || applyingRemote) return;
   sendOp(opData);
+  scheduleDebouncedFullSync();
+}
+
+// ─── Debounced Full Sync ─────────────────────────────
+// After any local edit, schedule a full document sync.
+// This ensures the receiver always converges to the correct state
+// even if individual ops fail due to node ID mismatch.
+let _fullSyncTimer = null;
+const FULL_SYNC_DEBOUNCE_MS = 1500;
+
+function scheduleDebouncedFullSync() {
+  if (_fullSyncTimer) clearTimeout(_fullSyncTimer);
+  _fullSyncTimer = setTimeout(() => {
+    _fullSyncTimer = null;
+    sendFullSync();
+  }, FULL_SYNC_DEBOUNCE_MS);
 }
 
 /**
@@ -171,7 +188,9 @@ function connect(url) {
     try {
       const msg = JSON.parse(event.data);
       handleMessage(msg);
-    } catch (_) {}
+    } catch (e) {
+      console.error('[collab] Message handling error:', e, 'raw:', event.data?.substring?.(0, 200));
+    }
   };
 
   ws.onclose = () => {
@@ -257,14 +276,6 @@ function updateSyncStatus(status) {
 
 function handleMessage(msg) {
   switch (msg.type) {
-    case 'welcome':
-      // Server welcome message with session info.
-      // Use this as the 'joined' equivalent when connecting to s1-server.
-      peerId = msg.user || peerId || ('peer-' + Math.random().toString(36).slice(2, 8));
-      tracing('Welcome to room', msg.fileId, '— ops:', msg.opsCount);
-      updateCollabUI();
-      break;
-
     case 'snapshot': {
       // Server sends latest document snapshot (base64) to new joiners.
       // Only apply if we don't already have a document loaded
@@ -311,7 +322,8 @@ function handleMessage(msg) {
     case 'joined':
       peerId = msg.peerId;
       updatePeerList(msg.peers || []);
-      // Don't send fullSync on join — existing peers will send it via peer-join.
+      updateCollabUI();
+      tracing('Joined room, peerId:', peerId, 'peers:', (msg.peers || []).length);
       break;
 
     case 'peer-join':
@@ -384,13 +396,8 @@ function applyRemoteOp(dataStr, fromPeerId) {
     const op = JSON.parse(dataStr);
     applyingRemote = true;
 
-    // Show toast for remote changes (throttled)
+    // Flash the affected paragraph for visual feedback (no toast — too noisy)
     if (fromPeerId && fromPeerId !== peerId) {
-      const peer = peers.get(fromPeerId);
-      const peerName = peer ? peer.userName : 'A peer';
-      showCollabToast(`Changes from ${peerName} applied`);
-
-      // Flash the affected paragraph if possible
       const affectedNodeId = op.nodeId || op.startNode;
       if (affectedNodeId) {
         flashParagraph(affectedNodeId);
@@ -864,7 +871,6 @@ const peerCursorState = new Map();
 
 function renderPeerCursor(cursor) {
   if (!cursor || !cursor.nodeId) return;
-  // Never render own cursor
   if (cursor.peerId === peerId) return;
 
   const page = $('pageContainer');
@@ -873,71 +879,70 @@ function renderPeerCursor(cursor) {
   const paraEl = page.querySelector(`[data-node-id="${cursor.nodeId}"]`);
   if (!paraEl) return;
 
-  // Check if cursor position actually changed — skip DOM update if identical
+  // Check if cursor position actually changed
   const prev = peerCursorState.get(cursor.peerId);
   const posKey = `${cursor.nodeId}:${cursor.offset}`;
-  if (prev && prev.posKey === posKey) {
-    // Position unchanged — just keep the existing element alive
-    return;
-  }
+  if (prev && prev.posKey === posKey) return;
 
-  // Compute new position before touching DOM
+  // Compute position relative to pageContainer (not paragraph)
+  // This avoids putting elements inside contenteditable paragraphs
   let leftPx = 0;
   let topPx = 0;
+  let height = 18;
   try {
     const targetOffset = cursor.offset || 0;
     let remaining = targetOffset;
     const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
     let textNode;
     while ((textNode = walker.nextNode())) {
+      // Skip text inside peer-cursor labels
+      if (textNode.parentElement?.closest('.peer-cursor')) continue;
       const len = textNode.textContent.length;
       if (remaining <= len) {
         const range = document.createRange();
         range.setStart(textNode, Math.min(remaining, len));
         range.collapse(true);
         const rect = range.getBoundingClientRect();
-        const paraRect = paraEl.getBoundingClientRect();
-        leftPx = rect.left - paraRect.left;
-        topPx = rect.top - paraRect.top;
+        const pageRect = page.getBoundingClientRect();
+        leftPx = rect.left - pageRect.left + page.scrollLeft;
+        topPx = rect.top - pageRect.top + page.scrollTop;
+        height = rect.height || 18;
         break;
       }
       remaining -= len;
     }
-  } catch (_) {}
+  } catch (_) {
+    // Fallback: position at paragraph start
+    const paraRect = paraEl.getBoundingClientRect();
+    const pageRect = page.getBoundingClientRect();
+    leftPx = paraRect.left - pageRect.left + page.scrollLeft;
+    topPx = paraRect.top - pageRect.top + page.scrollTop;
+  }
 
-  // Reuse existing cursor element if it exists, otherwise create
+  // Reuse existing cursor element or create new
   let cursorEl = document.getElementById(`peer-cursor-${cursor.peerId}`);
-  if (cursorEl) {
-    // Move to new paragraph if needed
-    if (cursorEl.parentElement !== paraEl) {
-      cursorEl.remove();
-      paraEl.style.position = 'relative';
-      paraEl.appendChild(cursorEl);
-    }
-    // Update position
-    cursorEl.style.left = leftPx + 'px';
-    cursorEl.style.top = topPx + 'px';
-  } else {
-    // Create new cursor element
+  if (!cursorEl) {
     cursorEl = document.createElement('div');
     cursorEl.className = 'peer-cursor';
     cursorEl.id = `peer-cursor-${cursor.peerId}`;
     cursorEl.style.borderLeftColor = cursor.userColor || '#999';
-    cursorEl.style.left = leftPx + 'px';
-    cursorEl.style.top = topPx + 'px';
 
-    // Name label
     const label = document.createElement('span');
     label.className = 'peer-cursor-label';
     label.textContent = cursor.userName || 'Peer';
     label.style.backgroundColor = cursor.userColor || '#999';
     cursorEl.appendChild(label);
 
-    paraEl.style.position = 'relative';
-    paraEl.appendChild(cursorEl);
+    // Append to pageContainer (NOT inside contenteditable paragraph)
+    page.style.position = 'relative';
+    page.appendChild(cursorEl);
   }
 
-  // Update selection highlights only if selection data changed
+  cursorEl.style.left = leftPx + 'px';
+  cursorEl.style.top = topPx + 'px';
+  cursorEl.style.height = height + 'px';
+
+  // Update selection highlights
   const selKey = cursor.selStartNodeId
     ? `${cursor.selStartNodeId}:${cursor.selStartOffset}-${cursor.selEndNodeId}:${cursor.selEndOffset}`
     : '';
@@ -948,7 +953,6 @@ function renderPeerCursor(cursor) {
     }
   }
 
-  // Save state for next comparison
   peerCursorState.set(cursor.peerId, { posKey, selKey });
 }
 
@@ -1239,25 +1243,32 @@ export function startShareSession() {
 export function copyShareUrl() {
   const urlInput = $('shareUrlInput');
   if (!urlInput) return;
-  navigator.clipboard.writeText(urlInput.value).then(() => {
+
+  const showCopied = () => {
     const btn = $('shareCopyBtn');
     if (btn) {
       const origHTML = btn.innerHTML;
-      // ED2-30: Show green "Copied!" feedback with checkmark, then revert
       btn.innerHTML = '<span class="msi" style="font-size:16px;vertical-align:middle">check</span> Copied!';
       btn.style.color = '#1e8e3e';
       btn.style.borderColor = '#1e8e3e';
-      setTimeout(() => {
-        btn.innerHTML = origHTML;
-        btn.style.color = '';
-        btn.style.borderColor = '';
-      }, 1500);
+      setTimeout(() => { btn.innerHTML = origHTML; btn.style.color = ''; btn.style.borderColor = ''; }, 1500);
     }
-  }).catch(() => {
-    // Fallback: select the text so the user can manually Ctrl+C
+  };
+
+  // Try modern clipboard API (requires HTTPS or localhost)
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(urlInput.value).then(showCopied).catch(() => {
+      // Fallback: execCommand
+      urlInput.select();
+      document.execCommand('copy');
+      showCopied();
+    });
+  } else {
+    // Fallback for HTTP: select + execCommand
     urlInput.select();
-    urlInput.focus();
-  });
+    document.execCommand('copy');
+    showCopied();
+  }
 }
 
 /**

@@ -667,6 +667,9 @@ export function updateTrackChanges() {
 export function initFileHandlers() {
   // Warn before closing with unsaved changes
   window.addEventListener('beforeunload', e => {
+    // Clear timers on unload to prevent leaks in SPA contexts
+    clearInterval(state.autosaveTimer);
+    clearInterval(state.versionTimer);
     if (state.dirty && state.doc) {
       e.preventDefault();
       e.returnValue = '';

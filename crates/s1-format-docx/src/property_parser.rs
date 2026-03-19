@@ -123,6 +123,19 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                             }
                         }
                     }
+                    b"shd" => {
+                        // Run-level shading (arbitrary highlight color)
+                        if let Some(fill) = get_attr(&e, b"fill") {
+                            if fill != "auto" {
+                                if let Some(color) = Color::from_hex(&fill) {
+                                    attrs.set(
+                                        AttributeKey::HighlightColor,
+                                        AttributeValue::Color(color),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     b"rFonts" => {
                         if let Some(font) = get_attr(&e, b"ascii")
                             .or_else(|| get_attr(&e, b"hAnsi"))

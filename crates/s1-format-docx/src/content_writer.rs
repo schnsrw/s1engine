@@ -1268,10 +1268,19 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         rpr.push_str(&format!(r#"<w:color w:val="{}"/>"#, color.to_hex()));
     }
 
-    // Highlight color
+    // Highlight color — use w:highlight for standard colors, w:shd for arbitrary
     if let Some(color) = attrs.get_color(&AttributeKey::HighlightColor) {
         let name = color_to_highlight_name(color);
-        rpr.push_str(&format!(r#"<w:highlight w:val="{name}"/>"#));
+        if name != "yellow" || (color.r == 255 && color.g == 255 && color.b == 0) {
+            // Known named color
+            rpr.push_str(&format!(r#"<w:highlight w:val="{name}"/>"#));
+        } else {
+            // Arbitrary color — use shading
+            rpr.push_str(&format!(
+                r#"<w:shd w:val="clear" w:color="auto" w:fill="{}"/>"#,
+                color.to_hex()
+            ));
+        }
     }
 
     // Superscript / Subscript

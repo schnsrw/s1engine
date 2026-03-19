@@ -16,6 +16,16 @@ import { broadcastOp } from './collab.js';
 import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode } from './toolbar-handlers.js';
 import { closeFindBar } from './find.js';
 
+/**
+ * Try incremental render for a single paragraph; fall back to full renderDocument.
+ * Use this for operations that change one paragraph (formatting, list toggle, heading).
+ * Do NOT use for structural operations (split, merge, table, paste multi-paragraph).
+ */
+function renderSmart(nodeId) {
+  if (nodeId && renderSingleParagraphIfPossible(nodeId)) return;
+  renderDocument();
+}
+
 export function initInput() {
   const page = $('pageContainer');
 
@@ -666,6 +676,7 @@ export function initInput() {
             navigator.clipboard.readText().then(text => {
               if (!text) return;
               try {
+                recordUndoAction('Paste without formatting');
                 if (text.includes('\n')) {
                   state.doc.paste_plain_text(pasteInfo.startNodeId, pasteInfo.startOffset, text);
                 } else {
@@ -676,7 +687,6 @@ export function initInput() {
                 const container = $('pageContainer');
                 const updated = container?.querySelector(`[data-node-id="${pasteInfo.startNodeId}"]`);
                 if (updated) setCursorAtOffset(updated, pasteInfo.startOffset + Array.from(text.replace(/\n/g, '')).length);
-                recordUndoAction('Paste without formatting');
                 updateUndoRedo();
                 markDirty();
               } catch (err) { console.error('paste plain text:', err); }
@@ -803,7 +813,7 @@ export function initInput() {
               const applyFmt = toggleOff ? 'none' : 'decimal';
               state.doc.set_list_format(listInfo.startNodeId, applyFmt, 0);
               broadcastOp({ action: 'setListFormat', nodeId: listInfo.startNodeId, format: applyFmt, level: 0 });
-              renderDocument();
+              renderSmart(listInfo.startNodeId);
               const container = $('pageContainer');
               const restored = container?.querySelector(`[data-node-id="${listInfo.startNodeId}"]`);
               if (restored) setCursorAtOffset(restored, listInfo.startOffset);
@@ -832,7 +842,7 @@ export function initInput() {
               const applyFmt = toggleOff ? 'none' : 'bullet';
               state.doc.set_list_format(listInfo.startNodeId, applyFmt, 0);
               broadcastOp({ action: 'setListFormat', nodeId: listInfo.startNodeId, format: applyFmt, level: 0 });
-              renderDocument();
+              renderSmart(listInfo.startNodeId);
               const container = $('pageContainer');
               const restored = container?.querySelector(`[data-node-id="${listInfo.startNodeId}"]`);
               if (restored) setCursorAtOffset(restored, listInfo.startOffset);
@@ -1315,11 +1325,11 @@ export function initInput() {
     if (html) {
       const parsed = parseClipboardHtml(html);
       if (parsed && parsed.elements.length > 0) {
+        recordUndoAction('Paste formatted content');
         const ok = pasteStructuredContent(doc, info, parsed, page);
         if (ok) {
           renderDocument();
           placeCursorAfterPaste(page, text || '', info.startNodeId, info.startOffset);
-          recordUndoAction('Paste formatted content');
           updateUndoRedo();
           markDirty();
           return;
@@ -1333,11 +1343,11 @@ export function initInput() {
 
     if (text.includes('\n')) {
       try {
+        recordUndoAction('Paste text');
         doc.paste_plain_text(info.startNodeId, info.startOffset, text);
         broadcastOp({ action: 'pasteText', nodeId: info.startNodeId, offset: info.startOffset, text });
         renderDocument();
         placeCursorAfterPaste(page, text, info.startNodeId, info.startOffset);
-        recordUndoAction('Paste text');
         updateUndoRedo();
         markDirty();
       } catch (err) {
@@ -1353,13 +1363,13 @@ export function initInput() {
       }
     } else {
       try {
+        recordUndoAction('Paste text');
         doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
         broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text });
         renderDocument();
         const container = $('pageContainer');
         const updated = container?.querySelector(`[data-node-id="${info.startNodeId}"]`);
         if (updated) setCursorAtOffset(updated, info.startOffset + Array.from(text).length);
-        recordUndoAction('Paste text');
         updateUndoRedo();
         markDirty();
       } catch (err) {
@@ -1645,14 +1655,18 @@ export function initInput() {
           // Get plain text: extract from HTML for cross-page, else from selection
           const isCrossPage = info.startEl?.closest?.('.page-content') !== info.endEl?.closest?.('.page-content');
           const selText = (isCrossPage && html) ? htmlToPlainText(html) : (window.getSelection()?.toString() || '');
-          if (html) {
+          if (html && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
             const htmlBlob = new Blob([html], { type: 'text/html' });
             const textBlob = new Blob([selText], { type: 'text/plain' });
             navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })]).catch(() => {
-              navigator.clipboard.writeText(selText).catch(() => {});
+              if (navigator.clipboard?.writeText) navigator.clipboard.writeText(selText).catch(() => {});
             });
-          } else {
+          } else if (navigator.clipboard?.writeText) {
             navigator.clipboard.writeText(selText).catch(() => {});
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = selText; ta.style.cssText = 'position:fixed;left:-9999px';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
           }
         } catch (_) {}
       }
@@ -1672,9 +1686,9 @@ export function initInput() {
             if (parsed && parsed.elements.length > 0) {
               const freshInfo = getSelectionInfo();
               if (freshInfo && state.doc) {
+                recordUndoAction('Paste');
                 pasteStructuredContent(state.doc, freshInfo, parsed, page);
                 renderDocument();
-                recordUndoAction('Paste');
                 updateUndoRedo();
                 markDirty();
               }
@@ -1687,9 +1701,9 @@ export function initInput() {
             const text = await blob.text();
             const freshInfo = getSelectionInfo();
             if (text && freshInfo && state.doc) {
+              recordUndoAction('Paste');
               state.doc.paste_plain_text(freshInfo.startNodeId, freshInfo.startOffset, text);
               renderDocument();
-              recordUndoAction('Paste');
               updateUndoRedo();
               markDirty();
             }
@@ -1702,9 +1716,9 @@ export function initInput() {
           const text = await navigator.clipboard.readText();
           const freshInfo = getSelectionInfo();
           if (text && freshInfo && state.doc) {
+            recordUndoAction('Paste');
             state.doc.paste_plain_text(freshInfo.startNodeId, freshInfo.startOffset, text);
             renderDocument();
-            recordUndoAction('Paste');
             updateUndoRedo();
             markDirty();
           }
@@ -3408,18 +3422,29 @@ function doCut() {
     text = window.getSelection()?.toString() || '';
   }
 
-  // Write to clipboard
+  // Write to clipboard (with fallback for HTTP/non-secure contexts)
   try {
-    const blob = new Blob([html], { type: 'text/html' });
-    const textBlob = new Blob([text], { type: 'text/plain' });
-    navigator.clipboard.write([
-      new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
-    ]).catch(() => {
+    if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+      const blob = new Blob([html], { type: 'text/html' });
+      const textBlob = new Blob([text], { type: 'text/plain' });
+      navigator.clipboard.write([
+        new ClipboardItem({ 'text/html': blob, 'text/plain': textBlob })
+      ]).catch(() => {
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
+      });
+    } else if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
-    });
-  } catch (_) {
-    navigator.clipboard.writeText(text).catch(() => {});
-  }
+    } else {
+      // Fallback: execCommand for HTTP contexts
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  } catch (_) {}
 
   // Delete the selection
   try {
@@ -3642,11 +3667,11 @@ function executeSlashCommand(cmdId) {
       broadcastOp({ action: 'formatSelection', startNode: nodeId, startOffset: 0, endNode: nodeId, endOffset: len, key, value });
     };
     switch (cmdId) {
-      case 'heading1': doc.set_heading_level(nodeId, 1); broadcastOp({ action: 'setHeading', nodeId, level: 1 }); renderDocument(); restoreCursorAfterRender(nodeId); break;
-      case 'heading2': doc.set_heading_level(nodeId, 2); broadcastOp({ action: 'setHeading', nodeId, level: 2 }); renderDocument(); restoreCursorAfterRender(nodeId); break;
-      case 'heading3': doc.set_heading_level(nodeId, 3); broadcastOp({ action: 'setHeading', nodeId, level: 3 }); renderDocument(); restoreCursorAfterRender(nodeId); break;
-      case 'bullet':   doc.set_list_format(nodeId, 'bullet', 0); broadcastOp({ action: 'setListFormat', nodeId, format: 'bullet', level: 0 }); renderDocument(); restoreCursorAfterRender(nodeId); break;
-      case 'numbered': doc.set_list_format(nodeId, 'decimal', 0); broadcastOp({ action: 'setListFormat', nodeId, format: 'decimal', level: 0 }); renderDocument(); restoreCursorAfterRender(nodeId); break;
+      case 'heading1': doc.set_heading_level(nodeId, 1); broadcastOp({ action: 'setHeading', nodeId, level: 1 }); renderSmart(nodeId); restoreCursorAfterRender(nodeId); break;
+      case 'heading2': doc.set_heading_level(nodeId, 2); broadcastOp({ action: 'setHeading', nodeId, level: 2 }); renderSmart(nodeId); restoreCursorAfterRender(nodeId); break;
+      case 'heading3': doc.set_heading_level(nodeId, 3); broadcastOp({ action: 'setHeading', nodeId, level: 3 }); renderSmart(nodeId); restoreCursorAfterRender(nodeId); break;
+      case 'bullet':   doc.set_list_format(nodeId, 'bullet', 0); broadcastOp({ action: 'setListFormat', nodeId, format: 'bullet', level: 0 }); renderSmart(nodeId); restoreCursorAfterRender(nodeId); break;
+      case 'numbered': doc.set_list_format(nodeId, 'decimal', 0); broadcastOp({ action: 'setListFormat', nodeId, format: 'decimal', level: 0 }); renderSmart(nodeId); restoreCursorAfterRender(nodeId); break;
       case 'table':
         doc.insert_table(nodeId, 3, 3);
         broadcastOp({ action: 'insertTable', afterNodeId: nodeId, rows: 3, cols: 3 });
