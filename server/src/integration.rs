@@ -1,17 +1,5 @@
 //! Integration mode — JWT-based file editing for embedding in other products.
-//!
-//! Host product generates a JWT containing:
-//! - fileId: document identifier
-//! - userId, userName: editor identity
-//! - permissions: "edit" | "view" | "comment"
-//! - downloadUrl: where to fetch the document
-//! - callbackUrl: where to POST modifications
-//!
-//! Flow:
-//! 1. Host sends user to: /edit?token=<jwt>
-//! 2. Server validates JWT, fetches file from downloadUrl
-//! 3. Creates editing session, redirects to editor with ?file=<fileId>
-//! 4. On save/close, server POSTs modified file to callbackUrl
+#![allow(dead_code)]
 
 use axum::{
     extract::{Query, State},
@@ -25,23 +13,15 @@ use std::sync::Arc;
 
 use crate::routes::AppState;
 
-/// JWT claims for integration mode.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IntegrationClaims {
-    /// Document identifier in the host system.
     pub file_id: String,
-    /// User ID.
     pub user_id: String,
-    /// User display name.
     pub user_name: String,
-    /// Permission level: "edit", "view", "comment".
     #[serde(default = "default_permissions")]
     pub permissions: String,
-    /// URL to download the document from.
     pub download_url: Option<String>,
-    /// URL to POST modifications to.
     pub callback_url: Option<String>,
-    /// Expiry timestamp (Unix seconds).
     #[serde(default)]
     pub exp: u64,
 }
@@ -50,16 +30,12 @@ fn default_permissions() -> String {
     "edit".to_string()
 }
 
-/// Query params for /edit endpoint.
 #[derive(Debug, Deserialize)]
 pub struct EditQuery {
     pub token: Option<String>,
 }
 
-/// Handle /edit?token=<jwt> — entry point for integrated editing.
-///
-/// Validates the JWT, fetches the document, creates a session,
-/// and redirects to the editor with ?file=<fileId>.
+/// Handle /edit?token=<jwt>
 pub async fn handle_edit(
     State(state): State<Arc<AppState>>,
     Query(query): Query<EditQuery>,
@@ -68,14 +44,11 @@ pub async fn handle_edit(
         .token
         .ok_or((StatusCode::BAD_REQUEST, "Missing token parameter".into()))?;
 
-    // Validate JWT
     let jwt_secret = std::env::var("S1_JWT_SECRET").unwrap_or_default();
     let claims = validate_integration_jwt(&token, &jwt_secret)
         .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid token: {e}")))?;
 
-    // Check if session already exists for this fileId
     if state.sessions.exists(&claims.file_id).await {
-        // Session exists — redirect directly
         return Ok(Redirect::to(&format!(
             "/?file={}&mode={}",
             claims.file_id, claims.permissions
@@ -83,7 +56,6 @@ pub async fn handle_edit(
         .into_response());
     }
 
-    // Fetch document from downloadUrl
     let data = if let Some(url) = &claims.download_url {
         fetch_document(url).await.map_err(|e| {
             (
@@ -92,11 +64,9 @@ pub async fn handle_edit(
             )
         })?
     } else {
-        // No download URL — create empty session
         Vec::new()
     };
 
-    // Detect format from URL or default
     let format = claims
         .download_url
         .as_deref()
@@ -106,7 +76,6 @@ pub async fn handle_edit(
 
     let filename = format!("{}.{}", claims.file_id, format);
 
-    // Create session
     state
         .sessions
         .create(
@@ -119,7 +88,6 @@ pub async fn handle_edit(
         )
         .await;
 
-    // Redirect to editor
     Ok(Redirect::to(&format!(
         "/?file={}&mode={}",
         claims.file_id, claims.permissions
@@ -127,54 +95,51 @@ pub async fn handle_edit(
     .into_response())
 }
 
-/// Get integration session info.
-#[allow(dead_code)]
-pub async fn get_integration_info(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path(id): axum::extract::Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let info = state
-        .sessions
-        .get_info(&id)
-        .await
-        .ok_or((StatusCode::NOT_FOUND, format!("Session not found: {id}")))?;
-
-    Ok(Json(json!({
-        "fileId": info.file_id,
-        "filename": info.filename,
-        "format": info.format,
-        "size": info.size,
-        "editorCount": info.editor_count,
-        "editors": info.editors,
-        "mode": info.mode,
-        "status": info.status,
-        "durationSecs": info.created_at_secs_ago,
-    })))
-}
-
-/// Trigger a save callback — POST current document to callbackUrl.
+/// POST /api/v1/files/{id}/save — trigger save callback to host.
 pub async fn trigger_save_callback(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let data = state
         .sessions
         .get_data(&id)
         .await
         .ok_or((StatusCode::NOT_FOUND, "Session not found".into()))?;
 
-    // Get callback URL from session
-    let _info = state.sessions.get_info(&id).await;
-    // For now, the callback_url is stored on the session but not exposed in SessionInfo.
-    // We'll send via a direct lookup.
+    let callback_url = state.sessions.get_callback_url(&id).await.ok_or((
+        StatusCode::BAD_REQUEST,
+        "No callback URL for this session".into(),
+    ))?;
 
-    // TODO: Store callback_url in SessionInfo and POST to it
-    tracing::info!("Save callback triggered for {} ({} bytes)", id, data.len());
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&callback_url)
+        .header("Content-Type", "application/octet-stream")
+        .header("X-S1-File-Id", &id)
+        .header("X-S1-Event", "document.saved")
+        .body(data.clone())
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Callback failed: {e}")))?;
 
-    Ok(StatusCode::OK)
+    let status = resp.status().as_u16();
+    tracing::info!(
+        "Save callback {} → {} (HTTP {}, {} bytes)",
+        id,
+        callback_url,
+        status,
+        data.len()
+    );
+
+    Ok(Json(json!({
+        "fileId": id,
+        "callbackUrl": callback_url,
+        "callbackStatus": status,
+        "bytesSent": data.len(),
+    })))
 }
 
-/// Validate a JWT token for integration mode.
 fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClaims, String> {
     if secret.is_empty() {
         return Err("S1_JWT_SECRET not configured".into());
@@ -185,7 +150,6 @@ fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClai
         return Err("Invalid JWT format".into());
     }
 
-    // Decode payload
     use base64::Engine as _;
     let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(parts[1])
@@ -194,7 +158,6 @@ fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClai
     let claims: IntegrationClaims =
         serde_json::from_slice(&payload_bytes).map_err(|e| format!("Invalid claims: {e}"))?;
 
-    // Verify signature (HS256)
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
@@ -211,7 +174,6 @@ fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClai
     mac.verify_slice(&sig_bytes)
         .map_err(|_| "Invalid signature".to_string())?;
 
-    // Check expiry
     if claims.exp > 0 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -225,7 +187,6 @@ fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClai
     Ok(claims)
 }
 
-/// Fetch a document from a URL.
 async fn fetch_document(url: &str) -> Result<Vec<u8>, String> {
     let resp = reqwest::Client::new()
         .get(url)

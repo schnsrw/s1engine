@@ -79,13 +79,13 @@ Each layer is independently usable:
 
 | Component | License | Rationale |
 |-----------|---------|-----------|
-| Core engine (Rust crates) | MIT OR Apache-2.0 | Maximum adoption, no friction |
-| Server API | MIT OR Apache-2.0 | Encourages self-hosting |
-| Client SDK + Editor | MIT OR Apache-2.0 | Easy embedding in commercial products |
-| Relay/Collaboration Server | MIT OR Apache-2.0 | Self-hostable |
-| Enterprise Features (future) | Commercial / BSL | Revenue stream for sustainability |
+| Core engine (Rust crates) | AGPL-3.0-or-later | Protects against SaaS competitors |
+| Server API | AGPL-3.0-or-later | Network use triggers copyleft |
+| Client SDK + Editor | AGPL-3.0-or-later | Consistent licensing |
+| Relay/Collaboration Server | AGPL-3.0-or-later | Self-hostable under AGPL |
+| Commercial License | Dual-license (proprietary) | Revenue stream — companies buy to avoid AGPL |
 
-**[DECISION]**: Use permissive licensing (MIT/Apache-2.0) for all open-source components. Revenue comes from hosted services, enterprise support, and premium features — not from restrictive licensing. This is the approach used by Supabase, PostHog, and similar successful open-source products.
+**[DECISION]**: Use AGPL-3.0 with commercial dual-licensing for all components. This is the approach used by OnlyOffice, MongoDB, and similar successful open-source products. Companies that embed s1engine in proprietary SaaS products purchase a commercial license.
 
 ## Non-Goals (Explicit)
 

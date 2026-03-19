@@ -204,8 +204,18 @@ impl FileSessionManager {
         self.sessions.lock().await.contains_key(file_id)
     }
 
+    /// Get the callback URL for a session (for integration mode).
+    pub async fn get_callback_url(&self, file_id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .await
+            .get(file_id)
+            .and_then(|s| s.callback_url.clone())
+    }
+
     /// Clean up expired sessions (call periodically).
-    pub async fn cleanup_expired(&self) -> Vec<(String, Option<String>)> {
+    /// Returns: Vec of (file_id, callback_url, final_data_bytes).
+    pub async fn cleanup_expired(&self) -> Vec<(String, Option<String>, Vec<u8>)> {
         let mut expired = Vec::new();
         let mut sessions = self.sessions.lock().await;
         let to_remove: Vec<String> = sessions
@@ -217,15 +227,14 @@ impl FileSessionManager {
                     false
                 }
             })
-            .map(|(id, s)| {
-                expired.push((id.clone(), s.callback_url.clone()));
-                id.clone()
-            })
+            .map(|(id, _)| id.clone())
             .collect();
 
         for id in &to_remove {
-            sessions.remove(id);
-            tracing::info!("File session expired and cleaned up: {}", id);
+            if let Some(session) = sessions.remove(id) {
+                expired.push((id.clone(), session.callback_url, session.data));
+                tracing::info!("File session expired and cleaned up: {}", id);
+            }
         }
 
         expired

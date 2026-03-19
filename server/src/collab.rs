@@ -3,6 +3,14 @@
 //! Each file being edited gets a room keyed by `file_id`.
 //! The server maintains authoritative document state via file sessions.
 //! New editors receive the latest snapshot on connect.
+//!
+//! Protocol messages sent to clients:
+//!   - `joined`     — sent to the connecting peer with peerId + peer list
+//!   - `peer-join`  — broadcast when a new peer joins
+//!   - `peer-leave` — broadcast when a peer leaves
+//!   - `snapshot`   — latest document bytes (base64) sent to new joiners
+//!   - `op`         — forwarded edit operation with sender's peerId
+//!   - `awareness`  — forwarded cursor/selection data with sender's peerId
 
 use axum::{
     extract::{
@@ -20,10 +28,18 @@ use tokio::sync::{broadcast, Mutex};
 use crate::routes::AppState;
 use crate::storage::StorageBackend;
 
+/// Info about a connected peer in a room.
+#[derive(Debug, Clone)]
+struct PeerInfo {
+    peer_id: String,
+    user_name: String,
+    user_color: String,
+}
+
 /// A collaboration room for a document.
 struct Room {
     tx: broadcast::Sender<String>,
-    peer_count: usize,
+    peers: Vec<PeerInfo>,
     ops_log: Vec<String>,
     #[allow(dead_code)]
     doc_id: String,
@@ -42,24 +58,30 @@ impl RoomManager {
         }
     }
 
-    async fn join(&self, room_id: &str) -> (broadcast::Sender<String>, Vec<String>) {
+    /// Join a room. Returns (broadcast sender, catch-up ops, current peer list).
+    async fn join(
+        &self,
+        room_id: &str,
+        peer: PeerInfo,
+    ) -> (broadcast::Sender<String>, Vec<String>, Vec<PeerInfo>) {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
-            room.peer_count += 1;
+            let existing_peers = room.peers.clone();
+            room.peers.push(peer);
             let catch_up = room.ops_log.clone();
-            (room.tx.clone(), catch_up)
+            (room.tx.clone(), catch_up, existing_peers)
         } else {
             let (tx, _) = broadcast::channel(512);
             let room = Room {
                 tx: tx.clone(),
-                peer_count: 1,
+                peers: vec![peer],
                 ops_log: Vec::new(),
                 doc_id: room_id.to_string(),
                 dirty: false,
             };
             rooms.insert(room_id.to_string(), room);
             tracing::info!("Room created: {}", room_id);
-            (tx, Vec::new())
+            (tx, Vec::new(), Vec::new())
         }
     }
 
@@ -80,11 +102,11 @@ impl RoomManager {
             .unwrap_or(false)
     }
 
-    async fn leave(&self, room_id: &str) -> bool {
+    async fn leave(&self, room_id: &str, peer_id: &str) -> bool {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
-            room.peer_count = room.peer_count.saturating_sub(1);
-            if room.peer_count == 0 {
+            room.peers.retain(|p| p.peer_id != peer_id);
+            if room.peers.is_empty() {
                 rooms.remove(room_id);
                 tracing::info!("Room closed: {}", room_id);
                 return true;
@@ -164,55 +186,72 @@ pub async fn ws_collab_handler(
 }
 
 /// Handle a WebSocket connection for collaborative editing.
-async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, state: Arc<AppState>) {
-    // Check if file session exists
+async fn handle_socket(
+    socket: WebSocket,
+    file_id: String,
+    params: WsParams,
+    state: Arc<AppState>,
+) {
     let has_session = state.sessions.exists(&file_id).await;
+    let peer_id = params.uid.clone();
+    let user_name = params.user.clone();
 
-    // Join the room (creates if first peer)
-    let (tx, catch_up_ops) = state.rooms.join(&file_id).await;
+    // Build peer info
+    let peer_info = PeerInfo {
+        peer_id: peer_id.clone(),
+        user_name: user_name.clone(),
+        user_color: String::new(), // Will be set from client's join message
+    };
+
+    // Join the room
+    let (tx, catch_up_ops, existing_peers) = state.rooms.join(&file_id, peer_info).await;
     let mut rx = tx.subscribe();
 
-    // Track editor in session
+    // Track editor in file session
     if has_session {
         state
             .sessions
-            .editor_join(&file_id, &params.uid, &params.user, &params.mode)
+            .editor_join(&file_id, &peer_id, &user_name, &params.mode)
             .await;
     }
 
     let (mut sender, mut receiver) = socket.split();
 
-    // Send welcome with session info
-    let file_info = if has_session {
-        state
-            .sessions
-            .get_info(&file_id)
-            .await
-            .map(|i| {
-                serde_json::json!({
-                    "filename": i.filename,
-                    "size": i.size,
-                    "editorCount": i.editor_count,
-                })
+    // 1. Send "joined" to this peer with their peerId and current peer list
+    let peer_list: Vec<serde_json::Value> = existing_peers
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "peerId": p.peer_id,
+                "userName": p.user_name,
+                "userColor": p.user_color,
             })
-            .unwrap_or(serde_json::json!(null))
-    } else {
-        serde_json::json!(null)
-    };
+        })
+        .collect();
 
-    let welcome = serde_json::json!({
-        "type": "welcome",
-        "fileId": file_id,
-        "user": params.user,
-        "opsCount": catch_up_ops.len(),
-        "file": file_info,
+    let joined_msg = serde_json::json!({
+        "type": "joined",
+        "peerId": peer_id,
+        "room": file_id,
+        "peers": peer_list,
     });
-    let _ = sender.send(Message::Text(welcome.to_string().into())).await;
+    let _ = sender
+        .send(Message::Text(joined_msg.to_string().into()))
+        .await;
 
-    // Send document snapshot if session has data (new editor gets full doc)
+    // 2. Broadcast "peer-join" to all existing peers (with _sender so echo is filtered)
+    let peer_join_msg = serde_json::json!({
+        "type": "peer-join",
+        "peerId": peer_id,
+        "userName": user_name,
+        "userColor": "",
+        "_sender": peer_id,
+    });
+    let _ = tx.send(peer_join_msg.to_string());
+
+    // 3. Send document snapshot if session has data
     if has_session {
         if let Some(data) = state.sessions.get_data(&file_id).await {
-            // Send as base64 for transport
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
             let snapshot = serde_json::json!({
@@ -226,11 +265,12 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         }
     }
 
-    // Send catch-up ops
+    // 4. Send catch-up ops
     for op in &catch_up_ops {
         let msg = serde_json::json!({
-            "type": "catchUp",
-            "op": serde_json::from_str::<serde_json::Value>(op).unwrap_or_default(),
+            "type": "op",
+            "peerId": "server",
+            "data": op,
         });
         if sender
             .send(Message::Text(msg.to_string().into()))
@@ -241,27 +281,131 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         }
     }
 
-    // Broadcast → this peer
+    // Broadcast → this peer (filter out own messages) + periodic ping
+    let my_peer_id = peer_id.clone();
     let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            tokio::select! {
+                msg = rx.recv() => {
+                    match msg {
+                        Ok(msg) => {
+                            // Don't echo messages back to the sender
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg) {
+                                if parsed.get("_sender").and_then(|s| s.as_str()) == Some(my_peer_id.as_str()) {
+                                    continue;
+                                }
+                            }
+                            if sender.send(Message::Text(msg.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    // Send ping to detect dead connections
+                    if sender.send(Message::Ping(vec![].into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
 
-    // This peer → validate → broadcast + record
+    // This peer → parse → wrap with peerId → broadcast + record + snapshot update
     let rooms = state.rooms.clone();
+    let sessions_for_recv = state.sessions.clone();
     let tx_clone = tx.clone();
     let file_id_recv = file_id.clone();
+    let sender_peer_id = peer_id.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Text(text) => {
                     let text_str = text.to_string();
-                    if RoomManager::validate_op(&text_str) {
-                        let _ = tx_clone.send(text_str.clone());
-                        rooms.record_op(&file_id_recv, &text_str).await;
+                    if !RoomManager::validate_op(&text_str) {
+                        continue;
+                    }
+
+                    // Parse the incoming message to determine its type
+                    let parsed: serde_json::Value = match serde_json::from_str(&text_str) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    let msg_type = parsed
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("");
+
+                    match msg_type {
+                        "join" => {
+                            // Client join message — update peer color if provided
+                            // Already handled by the room join above; just extract color
+                            // for future peer-join broadcasts
+                            continue;
+                        }
+                        "op" => {
+                            // Forward op with sender's peerId attached
+                            let data = parsed.get("data").cloned().unwrap_or_default();
+                            let forwarded = serde_json::json!({
+                                "type": "op",
+                                "peerId": sender_peer_id,
+                                "data": data,
+                                "_sender": sender_peer_id,
+                            });
+                            let forwarded_str = forwarded.to_string();
+
+                            // Record the raw op data in the ops log (not the envelope)
+                            if let Some(data_str) = data.as_str() {
+                                rooms.record_op(&file_id_recv, data_str).await;
+
+                                // Check for fullSync to update session snapshot
+                                if let Ok(inner) =
+                                    serde_json::from_str::<serde_json::Value>(data_str)
+                                {
+                                    if inner.get("action").and_then(|a| a.as_str())
+                                        == Some("fullSync")
+                                    {
+                                        if let Some(b64) =
+                                            inner.get("docBase64").and_then(|d| d.as_str())
+                                        {
+                                            use base64::Engine as _;
+                                            if let Ok(bytes) =
+                                                base64::engine::general_purpose::STANDARD
+                                                    .decode(b64)
+                                            {
+                                                sessions_for_recv
+                                                    .update_snapshot(&file_id_recv, bytes)
+                                                    .await;
+                                                tracing::debug!(
+                                                    "Updated snapshot for {} from fullSync",
+                                                    file_id_recv
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            let _ = tx_clone.send(forwarded_str);
+                        }
+                        "awareness" => {
+                            // Forward awareness with sender's peerId
+                            let data = parsed.get("data").cloned().unwrap_or_default();
+                            let forwarded = serde_json::json!({
+                                "type": "awareness",
+                                "peerId": sender_peer_id,
+                                "data": data,
+                                "_sender": sender_peer_id,
+                            });
+                            let _ = tx_clone.send(forwarded.to_string());
+                        }
+                        _ => {
+                            // Unknown type — still broadcast for extensibility
+                            let _ = tx_clone.send(text_str);
+                        }
                     }
                 }
                 Message::Close(_) => break,
@@ -275,15 +419,23 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         _ = &mut recv_task => send_task.abort(),
     }
 
-    // Cleanup: remove editor from session, leave room
-    if has_session {
-        state.sessions.editor_leave(&file_id, &params.uid).await;
-    }
-    let room_closed = state.rooms.leave(&file_id).await;
+    // Cleanup: broadcast peer-leave, remove from session, leave room
+    let leave_msg = serde_json::json!({
+        "type": "peer-leave",
+        "peerId": peer_id,
+        "_sender": peer_id,
+    });
+    let _ = tx.send(leave_msg.to_string());
 
-    tracing::debug!(
-        "Editor {} disconnected from {} (room {})",
-        params.user,
+    if has_session {
+        state.sessions.editor_leave(&file_id, &peer_id).await;
+    }
+    let room_closed = state.rooms.leave(&file_id, &peer_id).await;
+
+    tracing::info!(
+        "Editor {} ({}) disconnected from {} (room {})",
+        user_name,
+        peer_id,
         file_id,
         if room_closed {
             "closed"

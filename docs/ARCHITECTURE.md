@@ -46,8 +46,7 @@ s1engine/
 |-- Cargo.toml                    # Workspace root
 |-- CLAUDE.md                     # AI development context
 |-- README.md
-|-- LICENSE-MIT
-|-- LICENSE-APACHE
+|-- LICENSE                      # AGPL-3.0-or-later
 |-- crates/
 |   |-- s1-model/                 # Core document model (zero deps)
 |   |   +-- src/

@@ -1,11 +1,11 @@
 # s1engine
 
 [![CI](https://github.com/schnsrw/s1engine/actions/workflows/ci.yml/badge.svg)](https://github.com/schnsrw/s1engine/actions)
-[![License: MIT/Apache-2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a browser-based editor.
 
-**1,390+ tests** · **Zero C/C++ dependencies** · **MIT / Apache-2.0**
+**1,390+ tests** · **Zero C/C++ dependencies** · **AGPL-3.0**
 
 > **[Format Compatibility & Known Limitations](docs/COMPATIBILITY.md)** — what works, what's partial, what's not supported.
 
@@ -273,12 +273,9 @@ We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Licensed under either of:
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
 
-- [MIT License](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
-
-at your option.
+For commercial licensing options (proprietary use without AGPL obligations), contact the maintainers.
 
 ## Acknowledgments
 

@@ -648,6 +648,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   outline:none;
   word-wrap:break-word;
   overflow-wrap:break-word;
+  overflow:hidden;
   -webkit-font-smoothing:antialiased;
   caret-color:var(--accent);
 }

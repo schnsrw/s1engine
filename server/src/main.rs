@@ -115,14 +115,31 @@ async fn main() {
         }
     });
 
-    // Background: clean up expired file sessions every 60s
+    // Background: clean up expired file sessions every 60s + POST callbacks
     tokio::spawn(async move {
+        let client = reqwest::Client::new();
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             let expired = cleanup_sessions.cleanup_expired().await;
-            for (file_id, _callback_url) in &expired {
-                tracing::info!("Session expired: {}", file_id);
+            for (file_id, callback_url, data) in expired {
+                tracing::info!("Session expired: {} ({} bytes)", file_id, data.len());
+                // C-05: POST final document to callback URL if configured
+                if let Some(url) = callback_url {
+                    if !url.is_empty() {
+                        tracing::info!("Posting callback for {} to {}", file_id, url);
+                        let req = client
+                            .post(&url)
+                            .header("Content-Type", "application/octet-stream")
+                            .header("X-S1-File-Id", &file_id)
+                            .header("X-S1-Event", "session.closed")
+                            .body(data);
+                        match req.send().await {
+                            Ok(resp) => tracing::info!("Callback {}: HTTP {}", url, resp.status()),
+                            Err(e) => tracing::warn!("Callback {} failed: {}", url, e),
+                        }
+                    }
+                }
             }
         }
     });

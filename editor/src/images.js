@@ -361,41 +361,34 @@ export function initImageContextMenu() {
     }
   });
 
-  // Align left
-  document.getElementById('imAlignLeft').addEventListener('click', () => {
+  // Image alignment helper — sets alignment on the PARENT PARAGRAPH, not the image
+  function alignImage(alignment) {
     document.getElementById('imageContextMenu').style.display = 'none';
     if (!state._ctxImageNodeId || !state.doc) return;
     try {
-      state.doc.set_alignment(state._ctxImageNodeId, 'left');
-      broadcastOp({ action: 'setAlignment', nodeId: state._ctxImageNodeId, alignment: 'left' });
-      renderDocument();
-      updateUndoRedo();
-    } catch (e) { console.error('image align:', e); }
-  });
+      // Find the parent paragraph of this image
+      const imgEl = document.querySelector(`[data-node-id="${state._ctxImageNodeId}"]`);
+      const paraEl = imgEl?.closest('[data-node-id]')?.parentElement?.closest('[data-node-id]');
+      const paraNodeId = paraEl?.dataset?.nodeId || state._ctxImageNodeId;
 
-  // Align center
-  document.getElementById('imAlignCenter').addEventListener('click', () => {
-    document.getElementById('imageContextMenu').style.display = 'none';
-    if (!state._ctxImageNodeId || !state.doc) return;
-    try {
-      state.doc.set_alignment(state._ctxImageNodeId, 'center');
-      broadcastOp({ action: 'setAlignment', nodeId: state._ctxImageNodeId, alignment: 'center' });
-      renderDocument();
-      updateUndoRedo();
-    } catch (e) { console.error('image align:', e); }
-  });
+      // Try to get parent via WASM if available
+      let targetId = paraNodeId;
+      try {
+        if (typeof state.doc.get_parent_id === 'function') {
+          targetId = state.doc.get_parent_id(state._ctxImageNodeId) || paraNodeId;
+        }
+      } catch (_) {}
 
-  // Align right
-  document.getElementById('imAlignRight').addEventListener('click', () => {
-    document.getElementById('imageContextMenu').style.display = 'none';
-    if (!state._ctxImageNodeId || !state.doc) return;
-    try {
-      state.doc.set_alignment(state._ctxImageNodeId, 'right');
-      broadcastOp({ action: 'setAlignment', nodeId: state._ctxImageNodeId, alignment: 'right' });
+      state.doc.set_alignment(targetId, alignment);
+      broadcastOp({ action: 'setAlignment', nodeId: targetId, alignment });
       renderDocument();
       updateUndoRedo();
     } catch (e) { console.error('image align:', e); }
-  });
+  }
+
+  document.getElementById('imAlignLeft').addEventListener('click', () => alignImage('left'));
+  document.getElementById('imAlignCenter').addEventListener('click', () => alignImage('center'));
+  document.getElementById('imAlignRight').addEventListener('click', () => alignImage('right'));
 
   // Alt text — open modal
   document.getElementById('imAltText').addEventListener('click', () => {

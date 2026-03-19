@@ -5,7 +5,7 @@
 
 ## Vision
 
-s1engine becomes the open-source alternative to OnlyOffice/Collabora — a single Docker image that any product can embed for document editing, collaboration, and conversion. MIT licensed, pure Rust, sub-100MB image.
+s1engine becomes the open-source alternative to OnlyOffice/Collabora — a single Docker image that any product can embed for document editing, collaboration, and conversion. AGPL-3.0 licensed (with commercial dual-license), pure Rust, sub-200MB image.
 
 ---
 
@@ -196,7 +196,7 @@ Editor → Plugin API → LLM Provider Interface
 1. **Format-per-WASM**: Each document type is a separate WASM module. Browser loads only what's needed.
 2. **Single binary server**: No sidecar processes, no separate relay, no nginx. One binary does everything.
 3. **Stateless-ready**: In-memory by default for simplicity, but every state component has a shared-storage backend for clustering.
-4. **MIT licensed**: No AGPL traps. Integrators can use it without open-sourcing their product.
+4. **AGPL-3.0 + commercial dual-license**: Same model as OnlyOffice. Free for open-source use; commercial license for proprietary embedding.
 5. **Pure Rust**: No C/C++ dependencies in the core. Compiles anywhere Rust does.
 6. **Progressive features**: Basic editing works immediately. Advanced features (collab, AI, forms) load on demand.
 

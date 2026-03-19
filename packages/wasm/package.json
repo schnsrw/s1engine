@@ -2,7 +2,7 @@
   "name": "@s1engine/wasm",
   "version": "1.0.1",
   "description": "WebAssembly bindings for s1engine — read, write, edit, and convert DOCX, ODT, PDF documents in the browser",
-  "license": "MIT OR Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/schnsrw/s1engine",
@@ -25,8 +25,7 @@
   "files": [
     "dist/",
     "README.md",
-    "LICENSE-MIT",
-    "LICENSE-APACHE"
+    "LICENSE"
   ],
   "sideEffects": false,
   "engines": {

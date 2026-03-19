@@ -69,7 +69,7 @@ name = "s1-model"
 version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 description = "Core document model for s1engine — document tree, nodes, attributes, styles"
 repository = "https://github.com/schnsrw/s1engine"
 homepage = "https://s1engine.dev"
@@ -182,7 +182,7 @@ packages/
   "name": "@s1engine/editor",
   "version": "1.0.0",
   "description": "Embeddable document editor with DOCX, PDF, and collaboration support",
-  "license": "MIT OR Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

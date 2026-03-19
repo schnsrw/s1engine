@@ -538,39 +538,34 @@ Before a consumer ships their white-labeled editor, verify:
 
 For consumers who want to redistribute s1engine as part of their product:
 
-### MIT/Apache-2.0 License Requirements
+### AGPL-3.0 License Requirements
 
-Under the current permissive license, consumers can:
-- Use s1engine in commercial products
-- Modify the source code
-- Redistribute (with or without source)
-- White-label completely (no attribution required beyond license file)
+Under AGPL-3.0, consumers can:
+- Use s1engine freely for internal or open-source projects
+- Modify the source code (must share modifications under AGPL)
+- Self-host and redistribute (must provide source to all network users)
 
-**Only requirement**: Include the license text somewhere in the product (e.g., in an "Open Source Licenses" page or in the binary distribution).
+**Key requirement**: Any service that uses s1engine over a network (SaaS, web app) must make the complete source code available to all users under AGPL-3.0.
 
-### Optional Commercial License
+### Commercial Dual-License
 
-For consumers who need:
-- Warranty or liability coverage
-- SLA for support
-- Indemnification
+For consumers who need to use s1engine in proprietary/closed-source products without AGPL obligations:
+- Proprietary SaaS embedding (no source disclosure)
+- Warranty and liability coverage
+- SLA for support and priority bug fixes
 - Custom feature development
-- Priority bug fixes
+- Indemnification
 
-A separate commercial license agreement can be offered. This is a business relationship, not a code change — the same open-source code is used.
+A commercial license removes all AGPL obligations. This is the same model used by OnlyOffice, MongoDB, and Qt.
 
-### Dual-License Strategy (Future Option)
-
-If certain features are developed as commercial-only:
+### Licensing Tiers
 
 | Component | License |
 |-----------|---------|
-| Core engine | MIT/Apache-2.0 (always free) |
-| Editor SDK | MIT/Apache-2.0 (always free) |
-| Self-hosted server | MIT/Apache-2.0 (always free) |
-| Advanced collaboration (conflict-free merge, offline) | BSL (open after 3 years) |
+| Core engine | AGPL-3.0 (free for open-source) |
+| Editor SDK | AGPL-3.0 (free for open-source) |
+| Self-hosted server | AGPL-3.0 (free for open-source) |
+| All of the above for proprietary use | Commercial license (paid) |
 | Enterprise auth (SSO, SCIM) | Commercial only |
 | Audit logging & compliance | Commercial only |
 | Managed cloud service | SaaS (commercial) |
-
-This follows the model used by Supabase, GitLab, PostHog, and others.

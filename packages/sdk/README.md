@@ -79,4 +79,4 @@ engine.destroy();
 
 ## License
 
-MIT OR Apache-2.0
+AGPL-3.0-or-later
