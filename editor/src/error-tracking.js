@@ -5,6 +5,13 @@
 let _lastError = null;
 let _errorCount = 0;
 
+// Automatically capture console.error calls for error tracking.
+const _origConsoleError = console.error;
+console.error = function(...args) {
+  _origConsoleError.apply(console, args);
+  try { recordError(args.map(a => String(a)).join(' ')); } catch(_) {}
+};
+
 /**
  * Record an error and update the status bar indicator.
  * @param {*} error - The error object, string, or rejection reason

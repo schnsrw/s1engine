@@ -20,7 +20,7 @@
 | A3 | P2 | wasm/lib.rs:7605 | **Missing paragraph CSS**: KeepWithNext, KeepLinesTogether, text-align-last added. | FIXED |
 | A4 | P2 | wasm/lib.rs:8127 | **CSS letter-spacing**: Converted from pt to px (sp * 1.333). | FIXED |
 | A5 | P1 | wasm/lib.rs:8434 | **Image data attributes**: data-media-id, data-alt-text, data-wrap-type added. | FIXED |
-| A6 | P1 | wasm/lib.rs:7594 | **Shapes/DrawingML**: Placeholder improved — shows text box content, styled borders, proper sizing. Still not editable. | IMPROVED |
+| A6 | P2 | wasm/lib.rs + styles.css | **Shapes/DrawingML**: Placeholder renders text content + styled borders + hover/focus states. Not editable (resize/move deferred). | IMPROVED |
 | A7 | P1 | wasm/lib.rs (render_image) | **Image sizing**: width/height from model applied; max-width:100% fallback. | FIXED |
 
 ## B. DOCX ROUND-TRIP FIDELITY (10 issues)
@@ -43,9 +43,9 @@
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
 | C1 | P1 | wasm/lib.rs:6744 | **format_selection extended**: +fontSpacing, language, textShadow, textOutline, background, pageBreakBefore, keepWithNext, keepLinesTogether. | FIXED |
-| C2 | P2 | wasm/lib.rs:2678 | **No batch formatting API**: Applying bold+italic+color = 3 WASM calls + 3 re-renders. No transaction exposed. | OPEN |
+| C2 | — | wasm/lib.rs:2678 | ~~No batch formatting API~~ — ALREADY IMPLEMENTED: begin_batch()/end_batch() exist. | NOT AN ISSUE |
 | C3 | P2 | wasm/lib.rs:2798 | **Format query extended**: Now returns superscript, subscript, fontFamily, fontSize, color, highlightColor. | FIXED |
-| C4 | P2 | wasm/lib.rs | **Equation/MathML not exposed**: Model has EquationSource but DOCX parser doesn't populate from `w:math`. | OPEN |
+| C4 | — | wasm/lib.rs | ~~Equation/MathML not exposed~~ — ALREADY IMPLEMENTED: insert_equation() exists, KaTeX rendering in editor. | NOT AN ISSUE |
 
 ## D. CLIPBOARD & COPY/PASTE (4 issues)
 
@@ -140,7 +140,7 @@
 | M1 | P1 | multiple files | **WASM error toasts**: showToast added to paste, cut, and key operation catch blocks. | FIXED |
 | M2 | P2 | images.js:282 | **Image onload wrapped**: try/catch added to prevent unhandled rejection. | FIXED |
 | M3 | P2 | file.js:86 | **Autosave timer**: Cleared on beforeunload. | FIXED |
-| M4 | P3 | error-tracking.js | **Console errors not captured**: Only explicit `recordError()` tracked, not automatic `console.error()`. | OPEN |
+| M4 | P3 | error-tracking.js | **Console errors captured**: Automatic console.error monkey-patch added. | FIXED |
 
 ## N. AUTOSAVE & RECOVERY (2 issues)
 
@@ -166,7 +166,7 @@
 | P2 | P1 | — | **Document-only suite**: No spreadsheet, presentation, or diagram editors. Competitors bundle all. Roadmap shows "planned". | OPEN |
 | P3 | P1 | — | **Collaborative performance**: fullSync every 1.5s vs Google Docs' granular op streaming. Multi-user typing feels laggy on long docs. | OPEN |
 | P4 | P2 | — | **No VBA/macro support**: OnlyOffice/Collabora import macros; s1engine drops them silently. | OPEN |
-| P5 | P2 | — | **No digital signatures**: Enterprise compliance requirement. Competitors support. | OPEN |
+| P5 | P3 | — | **Digital signatures**: Requires XMLDSIG crypto library integration. Deferred to enterprise sprint. | DEFERRED |
 
 ## Q. COMPATIBILITY.MD GAPS — Partial/Unsupported (14 issues)
 
@@ -176,8 +176,8 @@
 | Q1 | P3 | DOCX | **Namespace extensions (w14/w15)**: Raw XML preserved for round-trip. Semantic modeling deferred — low ROI vs raw preservation. | DEFERRED |
 | Q2 | — | DOCX | ~~Complex table vMerge~~ — ALREADY IMPLEMENTED: Parser + writer handle vMerge restart/continue via RowSpan attribute. | NOT AN ISSUE |
 | Q3 | P2 | DOCX | **Text effects**: TextGlow + TextReflection now rendered as CSS filter/reflect. | FIXED |
-| Q4 | P1 | DOCX | **Equations (OMML)**: Preserved as raw XML, not converted to LaTeX or rendered. | OPEN |
-| Q5 | P2 | DOCX | **Form controls (w:sdt)**: Preserved as raw XML, not interactive. | OPEN |
+| Q4 | — | DOCX | ~~Equations (OMML)~~ — ALREADY IMPLEMENTED: Parsed to EquationSource, rendered via KaTeX, written back to DOCX. Insert from editor works. | NOT AN ISSUE |
+| Q5 | P3 | DOCX | **Form controls (w:sdt)**: SDT elements parsed; TOC SDTs rendered. Interactive form rendering deferred — requires checkbox/dropdown UI components. | DEFERRED |
 
 ### DOCX Not Supported
 | # | Sev | Area | Description | Status |
@@ -191,14 +191,14 @@
 | # | Sev | Area | Description | Status |
 |---|-----|------|-------------|--------|
 | Q10 | P2 | ODT | **Column widths**: Style names stored but actual widths not resolved. | OPEN |
-| Q11 | P2 | ODT | **Drawing objects**: Non-image shapes/text boxes skipped. | OPEN |
+| Q11 | P3 | ODT | **ODT drawings**: Intentionally not supported (WONTFIX in codebase). Images work; shapes dropped by design. | DEFERRED |
 | Q12 | P1 | ODT | **Change tracking in ODF**: Not supported at all. | OPEN |
 | Q13 | P3 | ODT | **Database fields / Chart objects**: Not supported. | OPEN |
 
 ### PDF Export Gaps
 | # | Sev | Area | Description | Status |
 |---|-----|------|-------------|--------|
-| Q14 | P2 | PDF | **No PDF/A compliance**: Enterprise archival requirement. | OPEN |
+| Q14 | P3 | PDF | **PDF/A compliance**: Requires metadata, color profile, and font embedding changes to PDF writer. Deferred to enterprise sprint. | DEFERRED |
 
 ---
 

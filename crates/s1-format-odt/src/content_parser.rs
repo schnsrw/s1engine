@@ -96,6 +96,32 @@ pub fn parse_content_body(
                         );
                         skip_element_odt(reader)?;
                     }
+
+                    // Q12 — ODF Change Tracking (text:tracked-changes, text:changed-region).
+                    //
+                    // ODF documents may contain change-tracking markup that records
+                    // insertions, deletions, and format changes made by reviewers.
+                    // The top-level container is <text:tracked-changes> which holds
+                    // one or more <text:changed-region> children. Inline, the
+                    // elements <text:change-start>, <text:change-end>, and
+                    // <text:change> reference those regions.
+                    //
+                    // Full semantic modelling of tracked changes is out-of-scope for
+                    // now. To ensure round-trip preservation we capture the raw XML
+                    // of the <text:tracked-changes> block as an opaque attribute on
+                    // the body node. This mirrors the approach used by the DOCX reader
+                    // for unknown namespace elements.
+                    //
+                    // When a full tracked-changes model is added, this block should
+                    // be replaced with structured parsing.
+                    b"tracked-changes" => {
+                        let raw = capture_raw_xml(reader, "tracked-changes")?;
+                        if let Some(body) = doc.node_mut(body_id) {
+                            body.attributes
+                                .set(AttributeKey::RawXml, AttributeValue::String(raw));
+                        }
+                    }
+
                     _ => {}
                 }
             }
@@ -1212,6 +1238,63 @@ fn parse_toc_into(
     }
 
     Ok(())
+}
+
+/// Capture the raw XML content of an element (including children) as a string.
+///
+/// The reader must be positioned just after reading the `Start` event for the
+/// element identified by `tag_name`. The function reads until the matching `End`
+/// event and returns the inner XML (including nested elements) as a String.
+/// This is used for round-trip preservation of elements we don't semantically model.
+fn capture_raw_xml(reader: &mut Reader<&[u8]>, tag_name: &str) -> Result<String, OdtError> {
+    let mut depth = 1u32;
+    let mut buf = String::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                depth += 1;
+                buf.push('<');
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                for attr in e.attributes().flatten() {
+                    buf.push(' ');
+                    buf.push_str(&String::from_utf8_lossy(attr.key.as_ref()));
+                    buf.push_str("=\"");
+                    buf.push_str(&String::from_utf8_lossy(&attr.value));
+                    buf.push('"');
+                }
+                buf.push('>');
+            }
+            Ok(Event::End(ref e)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                buf.push_str("</");
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                buf.push('>');
+            }
+            Ok(Event::Empty(ref e)) => {
+                buf.push('<');
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                for attr in e.attributes().flatten() {
+                    buf.push(' ');
+                    buf.push_str(&String::from_utf8_lossy(attr.key.as_ref()));
+                    buf.push_str("=\"");
+                    buf.push_str(&String::from_utf8_lossy(&attr.value));
+                    buf.push('"');
+                }
+                buf.push_str("/>");
+            }
+            Ok(Event::Text(ref e)) => {
+                buf.push_str(&e.unescape().unwrap_or_default());
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(OdtError::Xml(e.to_string())),
+            _ => {}
+        }
+    }
+    let _ = tag_name; // used for documentation clarity at call-site
+    Ok(buf)
 }
 
 /// Skip an element and all its children (ODT version).

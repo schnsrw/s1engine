@@ -4461,6 +4461,43 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
 }
 
 /* ═══════════════════════════════════════════════════
+   Shapes / Drawings (VML/DrawingML)
+   ═══════════════════════════════════════════════════ */
+.page-content .vml-shape {
+  display: inline-block;
+  border: 1px solid #c4c7cc;
+  border-radius: 4px;
+  background: #fafbfc;
+  padding: 8px;
+  margin: 4px 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  cursor: default;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  vertical-align: top;
+}
+.page-content .vml-shape:hover {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 1px #1a73e8;
+}
+.page-content .vml-shape:focus {
+  outline: none;
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.3);
+}
+.page-content .vml-shape p {
+  margin: 0 0 4px;
+}
+[data-theme="dark"] .page-content .vml-shape {
+  background: #2a2d32;
+  border-color: #444;
+}
+[data-theme="dark"] .page-content .vml-shape:hover {
+  border-color: #8ab4f8;
+  box-shadow: 0 0 0 1px #8ab4f8;
+}
+
+/* ═══════════════════════════════════════════════════
    UXP-20 — Bookmarks
    ═══════════════════════════════════════════════════ */
 

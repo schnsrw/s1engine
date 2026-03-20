@@ -462,6 +462,13 @@ pub async fn get_file_info(
         StatusCode::NOT_FOUND,
         format!("File session not found: {id}"),
     ))?;
+
+    // TODO: When auth is enabled, check permission:
+    // let user = request.extensions().get::<AuthUser>();
+    // if let Some(user) = user {
+    //     auth::check_permission_with_session(user, info.owner_id.as_deref(), &info.mode, Permission::Viewer)?;
+    // }
+
     Ok(Json(serde_json::to_value(info).unwrap_or_default()))
 }
 
@@ -474,6 +481,13 @@ pub async fn download_file(
         StatusCode::NOT_FOUND,
         format!("File session not found: {id}"),
     ))?;
+
+    // TODO: When auth is enabled, check permission:
+    // let user = request.extensions().get::<AuthUser>();
+    // if let Some(user) = user {
+    //     auth::check_permission_with_session(user, info.owner_id.as_deref(), &info.mode, Permission::Viewer)?;
+    // }
+
     let data = state.sessions.get_data(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("File session not found: {id}"),
@@ -503,6 +517,15 @@ pub async fn close_file(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Vec<u8>, (StatusCode, String)> {
+    // TODO: When auth is enabled, check permission:
+    // let user = request.extensions().get::<AuthUser>();
+    // if let Some(user) = user {
+    //     let info = state.sessions.get_info(&id).await;
+    //     if let Some(ref info) = info {
+    //         auth::check_permission_with_session(user, info.owner_id.as_deref(), &info.mode, Permission::Editor)?;
+    //     }
+    // }
+
     state.sessions.force_close(&id).await.ok_or((
         StatusCode::NOT_FOUND,
         format!("File session not found: {id}"),
