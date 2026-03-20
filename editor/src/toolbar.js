@@ -158,10 +158,28 @@ function _updateToolbarStateImpl() {
 export function updateUndoRedo() {
   if (!state.doc) return;
   try {
-    const canUndo = state.doc.can_undo();
-    const canRedo = state.doc.can_redo();
+    // G4: Query WASM document (and collabDoc when active) for authoritative
+    // undo/redo capability instead of relying solely on JS-side history.
+    let canUndo = state.doc.can_undo();
+    let canRedo = state.doc.can_redo();
+    // When collaboration is active, also check the collabDoc's undo/redo state
+    if (state.collabDoc) {
+      if (typeof state.collabDoc.can_undo === 'function') {
+        canUndo = canUndo || state.collabDoc.can_undo();
+      }
+      if (typeof state.collabDoc.can_redo === 'function') {
+        canRedo = canRedo || state.collabDoc.can_redo();
+      }
+    }
     $('btnUndo').disabled = !canUndo;
     $('btnRedo').disabled = !canRedo;
+    // Sync JS-side history position with WASM state to prevent divergence
+    if (!canUndo && state.undoHistoryPos < state.undoHistory.length) {
+      state.undoHistoryPos = state.undoHistory.length;
+    }
+    if (!canRedo && state.undoHistoryPos > 0) {
+      // No redo available in WASM — don't let JS think there are redo steps
+    }
     // E3.4: Set tooltip with action label
     const undoLabel = state.undoHistory.length > state.undoHistoryPos
       ? state.undoHistory[state.undoHistoryPos]?.label : null;

@@ -2213,11 +2213,13 @@ fn resolve_list_info(attrs: &mut AttributeMap, numbering: &NumberingDefinitions)
     }
 }
 
-/// Try to parse an `<w:sdt>` as a Table of Contents.
+/// Try to parse an `<w:sdt>` as a Table of Contents or form control.
 ///
 /// If the SDT contains a `docPartGallery` with value "Table of Contents",
 /// creates a `NodeType::TableOfContents` node with cached entry paragraphs.
-/// Returns `true` if a TOC node was created, `false` if the SDT was skipped.
+/// If the SDT contains form control elements (`w14:checkbox`, `w:dropDownList`,
+/// `w:text`), creates a `NodeType::Paragraph` node with form attributes.
+/// Returns `true` if a node was created, `false` if the SDT was skipped.
 fn parse_sdt_toc(
     reader: &mut Reader<&[u8]>,
     doc: &mut DocumentModel,
@@ -2231,6 +2233,12 @@ fn parse_sdt_toc(
     let mut toc_id: Option<NodeId> = None;
     let mut toc_child_index = 0;
     let mut in_field = false; // track fldChar begin/separate/end
+
+    // Form control detection state
+    let mut form_type: Option<String> = None; // "checkbox", "dropdown", "text"
+    let mut form_checked = false;
+    let mut form_options: Vec<String> = Vec::new();
+    let mut form_node_created = false;
 
     loop {
         match reader.read_event() {
@@ -2253,6 +2261,23 @@ fn parse_sdt_toc(
                     b"docPartObj" if in_sdt_pr => {
                         // Don't skip — descend into it to find docPartGallery
                     }
+                    // Form control: w14:checkbox
+                    b"checkbox" if in_sdt_pr => {
+                        form_type = Some("checkbox".to_string());
+                        // Parse inside to find w14:checked
+                        parse_sdt_checkbox_props(reader, &mut form_checked)?;
+                    }
+                    // Form control: w:dropDownList
+                    b"dropDownList" if in_sdt_pr => {
+                        form_type = Some("dropdown".to_string());
+                        // Parse inside to collect listItem values
+                        parse_sdt_dropdown_props(reader, &mut form_options)?;
+                    }
+                    // Form control: w:text inside sdtPr
+                    b"text" if in_sdt_pr => {
+                        form_type = Some("text".to_string());
+                        skip_element(reader)?;
+                    }
                     b"sdtContent" => {
                         in_sdt_content = true;
                         if is_toc {
@@ -2268,6 +2293,30 @@ fn parse_sdt_toc(
                                     "failed to insert TableOfContents under parent {parent_id:?} at index {child_index}: {e}"
                                 )))?;
                             toc_id = Some(id);
+                        } else if let Some(ref ft) = form_type {
+                            // Create a paragraph node for the form control
+                            let id = doc.next_id();
+                            let mut form_node = Node::new(id, NodeType::Paragraph);
+                            form_node
+                                .attributes
+                                .set(AttributeKey::FormType, AttributeValue::String(ft.clone()));
+                            if ft == "checkbox" {
+                                form_node.attributes.set(
+                                    AttributeKey::FormChecked,
+                                    AttributeValue::Bool(form_checked),
+                                );
+                            }
+                            if ft == "dropdown" && !form_options.is_empty() {
+                                form_node.attributes.set(
+                                    AttributeKey::FormOptions,
+                                    AttributeValue::String(form_options.join(",")),
+                                );
+                            }
+                            doc.insert_node(parent_id, child_index, form_node)
+                                .map_err(|e| DocxError::InvalidStructure(format!(
+                                    "failed to insert form control under parent {parent_id:?} at index {child_index}: {e}"
+                                )))?;
+                            form_node_created = true;
                         }
                     }
                     b"p" if in_sdt_content && is_toc => {
@@ -2285,6 +2334,12 @@ fn parse_sdt_toc(
                         } else {
                             skip_element(reader)?;
                         }
+                    }
+                    b"p" if in_sdt_content && form_node_created => {
+                        // Form SDT: parse inner paragraph as regular body content to
+                        // capture the display text (the form node itself was already
+                        // created, so we skip re-inserting the inner paragraph).
+                        skip_element(reader)?;
                     }
                     b"p" if in_sdt_content && !is_toc => {
                         // Non-TOC SDT: parse content paragraphs as regular body content
@@ -2316,12 +2371,50 @@ fn parse_sdt_toc(
                 }
             }
             Ok(Event::Empty(e)) => {
-                if e.local_name().as_ref() == b"docPartGallery" && in_sdt_pr {
+                let local_name = e.local_name();
+                let ln = local_name.as_ref();
+                if ln == b"docPartGallery" && in_sdt_pr {
                     for attr in e.attributes().flatten() {
                         if attr.key.local_name().as_ref() == b"val" {
                             let val = String::from_utf8_lossy(&attr.value);
                             if val.contains("Table of Contents") {
                                 is_toc = true;
+                            }
+                        }
+                    }
+                }
+                // Empty form elements (self-closing tags)
+                if ln == b"checkbox" && in_sdt_pr {
+                    form_type = Some("checkbox".to_string());
+                }
+                if ln == b"dropDownList" && in_sdt_pr {
+                    form_type = Some("dropdown".to_string());
+                }
+                if ln == b"text" && in_sdt_pr {
+                    form_type = Some("text".to_string());
+                }
+                // Self-closing w14:checked inside checkbox
+                if ln == b"checked" && in_sdt_pr {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"val" {
+                            let val = String::from_utf8_lossy(&attr.value);
+                            form_checked = val == "1" || val == "true";
+                        }
+                    }
+                }
+                // Self-closing listItem inside dropDownList
+                if ln == b"listItem" && in_sdt_pr {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"displayText" {
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            form_options.push(val);
+                        } else if attr.key.local_name().as_ref() == b"value"
+                            && form_options.is_empty()
+                        {
+                            // Fallback: use value if displayText not yet captured
+                            let val = String::from_utf8_lossy(&attr.value).to_string();
+                            if !form_options.contains(&val) {
+                                form_options.push(val);
                             }
                         }
                     }
@@ -2333,7 +2426,111 @@ fn parse_sdt_toc(
         }
     }
 
-    Ok(toc_id.is_some())
+    Ok(toc_id.is_some() || form_node_created)
+}
+
+/// Parse checkbox properties inside `<w14:checkbox>`.
+///
+/// Looks for `<w14:checked w14:val="1"/>` to determine checked state.
+fn parse_sdt_checkbox_props(
+    reader: &mut Reader<&[u8]>,
+    checked: &mut bool,
+) -> Result<(), DocxError> {
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                if e.local_name().as_ref() == b"checked" {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"val" {
+                            let val = String::from_utf8_lossy(&attr.value);
+                            *checked = val == "1" || val == "true";
+                        }
+                    }
+                }
+                // Don't skip — continue parsing children
+            }
+            Ok(Event::Empty(e)) => {
+                if e.local_name().as_ref() == b"checked" {
+                    for attr in e.attributes().flatten() {
+                        if attr.key.local_name().as_ref() == b"val" {
+                            let val = String::from_utf8_lossy(&attr.value);
+                            *checked = val == "1" || val == "true";
+                        }
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"checkbox" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Parse dropdown list properties inside `<w:dropDownList>`.
+///
+/// Collects `displayText` (or `value`) attributes from `<w:listItem>` elements.
+fn parse_sdt_dropdown_props(
+    reader: &mut Reader<&[u8]>,
+    options: &mut Vec<String>,
+) -> Result<(), DocxError> {
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                if e.local_name().as_ref() == b"listItem" {
+                    let mut display_text: Option<String> = None;
+                    let mut value: Option<String> = None;
+                    for attr in e.attributes().flatten() {
+                        let key = attr.key.local_name();
+                        if key.as_ref() == b"displayText" {
+                            display_text = Some(String::from_utf8_lossy(&attr.value).to_string());
+                        } else if key.as_ref() == b"value" {
+                            value = Some(String::from_utf8_lossy(&attr.value).to_string());
+                        }
+                    }
+                    if let Some(dt) = display_text {
+                        options.push(dt);
+                    } else if let Some(v) = value {
+                        options.push(v);
+                    }
+                    skip_element(reader)?;
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                if e.local_name().as_ref() == b"listItem" {
+                    let mut display_text: Option<String> = None;
+                    let mut value: Option<String> = None;
+                    for attr in e.attributes().flatten() {
+                        let key = attr.key.local_name();
+                        if key.as_ref() == b"displayText" {
+                            display_text = Some(String::from_utf8_lossy(&attr.value).to_string());
+                        } else if key.as_ref() == b"value" {
+                            value = Some(String::from_utf8_lossy(&attr.value).to_string());
+                        }
+                    }
+                    if let Some(dt) = display_text {
+                        options.push(dt);
+                    } else if let Some(v) = value {
+                        options.push(v);
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"dropDownList" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Parse a paragraph inside an SDT TOC.

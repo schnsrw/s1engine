@@ -231,7 +231,23 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Base64 decode error: {e}"))
 }
 
+/// Session-level permission info (extracted from file session or JWT claims).
+#[derive(Debug, Clone)]
+pub struct DocPermission {
+    /// The permission level for this user on this document.
+    pub level: Permission,
+    /// Whether this user is the owner of the document session.
+    pub is_owner: bool,
+}
+
 /// Check if a user has at least the given permission for a document.
+///
+/// Permission resolution order:
+/// 1. Admin role → full access
+/// 2. Anonymous → Viewer only
+/// 3. Session owner → Owner permission
+/// 4. Session mode "view" → Viewer, "comment" → Commenter, "edit" → Editor
+/// 5. Default for authenticated users without session context → Editor
 #[allow(dead_code)]
 pub fn check_permission(
     user: &AuthUser,
@@ -251,13 +267,58 @@ pub fn check_permission(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // TODO: Look up per-document permissions from storage
-    // For now, authenticated users get Editor permission
+    // Authenticated users: default to Editor
+    // Per-document permissions are resolved via check_permission_with_session
     if required <= Permission::Editor {
         return Ok(());
     }
 
     Err(StatusCode::FORBIDDEN)
+}
+
+/// Check permission with session context (owner, mode).
+///
+/// Called from route handlers that have access to the file session info.
+#[allow(dead_code)]
+pub fn check_permission_with_session(
+    user: &AuthUser,
+    session_owner: Option<&str>,
+    session_mode: &str,
+    required: Permission,
+) -> Result<(), StatusCode> {
+    // Admins can do everything
+    if user.role == UserRole::Admin {
+        return Ok(());
+    }
+
+    // Anonymous users get Viewer only
+    if user.role == UserRole::Anonymous {
+        if required <= Permission::Viewer {
+            return Ok(());
+        }
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Session owner gets full Owner permissions
+    if let Some(owner_id) = session_owner {
+        if user.user_id == owner_id {
+            return Ok(()); // Owner can do anything
+        }
+    }
+
+    // Non-owner: permission based on session mode
+    let granted = match session_mode {
+        "view" => Permission::Viewer,
+        "comment" => Permission::Commenter,
+        "edit" => Permission::Editor,
+        _ => Permission::Editor, // default
+    };
+
+    if required <= granted {
+        Ok(())
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
 }
 
 #[cfg(test)]

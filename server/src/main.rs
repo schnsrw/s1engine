@@ -86,6 +86,24 @@ async fn main() {
     // Initialize admin start time
     admin::init_start_time();
 
+    // Startup warnings
+    if std::env::var("S1_JWT_SECRET")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        tracing::warn!(
+            "S1_JWT_SECRET not set — /edit?token= integration mode will reject all tokens"
+        );
+    }
+    let auth_enabled = std::env::var("S1_AUTH_ENABLED")
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("true");
+    if !auth_enabled {
+        tracing::warn!(
+            "Authentication disabled (S1_AUTH_ENABLED=false) — all endpoints are public"
+        );
+    }
+
     let app = Router::new()
         // Health
         .route("/health", get(routes::health))
@@ -121,6 +139,11 @@ async fn main() {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
+            // Remove editors whose last_activity is older than 5 minutes
+            let stale = cleanup_sessions.cleanup_stale_editors().await;
+            for (fid, _) in &stale {
+                tracing::info!("Removed stale editor from session {}", fid);
+            }
             let expired = cleanup_sessions.cleanup_expired().await;
             for (file_id, callback_url, data) in expired {
                 tracing::info!("Session expired: {} ({} bytes)", file_id, data.len());
@@ -181,6 +204,8 @@ fn api_routes() -> Router<Arc<AppState>> {
         .route("/webhooks", post(routes::register_webhook))
         .route("/webhooks", get(routes::list_webhooks))
         .route("/webhooks/{id}", delete(routes::delete_webhook))
+        // Error reporting
+        .route("/errors", post(routes::report_error))
         // Info
         .route("/info", get(routes::server_info))
 }

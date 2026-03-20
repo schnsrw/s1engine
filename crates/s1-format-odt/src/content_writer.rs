@@ -94,6 +94,13 @@ fn write_body(
         None => return xml,
     };
 
+    // Q12: Write back preserved tracked-changes raw XML if present
+    if let Some(raw) = body.attributes.get_string(&AttributeKey::RawXml) {
+        if raw.contains("tracked-changes") {
+            xml.push_str(raw);
+        }
+    }
+
     // Track list nesting depth for reconstructing ODF nested lists.
     // The stack depth represents the current nesting level (0 = top-level list).
     // We track whether the current list-item at each level is still open (needs closing

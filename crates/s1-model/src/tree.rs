@@ -116,6 +116,11 @@ pub struct DocumentModel {
     /// Invalidated whenever styles are added, modified, or removed via
     /// [`set_style`](Self::set_style) or [`remove_style`](Self::remove_style).
     style_cache: HashMap<String, AttributeMap>,
+    /// Preserved ZIP entries for round-trip fidelity (path → bytes).
+    /// Stores entries like `_xmlsignatures/`, `customXml/`, `word/diagrams/`,
+    /// `word/charts/`, `word/embeddings/` that the engine doesn't semantically
+    /// model but needs to preserve on re-export.
+    preserved_parts: HashMap<String, Vec<u8>>,
 }
 
 impl DocumentModel {
@@ -153,7 +158,25 @@ impl DocumentModel {
             sections: Vec::new(),
             doc_defaults: DocumentDefaults::default(),
             style_cache: HashMap::new(),
+            preserved_parts: HashMap::new(),
         }
+    }
+
+    // ─── Preserved ZIP Parts ────────────────────────────────────────────
+
+    /// Store a ZIP entry for round-trip preservation (e.g., signatures, charts, custom XML).
+    pub fn add_preserved_part(&mut self, path: impl Into<String>, data: Vec<u8>) {
+        self.preserved_parts.insert(path.into(), data);
+    }
+
+    /// Get all preserved ZIP entries.
+    pub fn preserved_parts(&self) -> &HashMap<String, Vec<u8>> {
+        &self.preserved_parts
+    }
+
+    /// Check if a preserved part exists.
+    pub fn has_preserved_part(&self, path: &str) -> bool {
+        self.preserved_parts.contains_key(path)
     }
 
     // ─── ID generation ──────────────────────────────────────────────────

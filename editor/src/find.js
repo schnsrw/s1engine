@@ -1,7 +1,7 @@
 // Find & Replace
 import { state, $ } from './state.js';
 import { renderDocument, syncAllText } from './render.js';
-import { updateUndoRedo } from './toolbar.js';
+import { updateUndoRedo, recordUndoAction } from './toolbar.js';
 import { broadcastOp } from './collab.js';
 
 let _findRefreshTimer = null;
@@ -92,9 +92,15 @@ export function initFind() {
   const findBarKeydown = e => {
     if (e.key === 'Escape') { closeFindBar(); }
     if (e.key === 'Tab') {
-      e.preventDefault();
       const focusable = $('findBar').querySelectorAll('input, button');
       const idx = Array.from(focusable).indexOf(document.activeElement);
+      // K3: Shift+Tab on first element exits find bar and returns focus to editor
+      if (e.shiftKey && idx === 0) {
+        e.preventDefault();
+        ($('pageContainer')?.querySelector('.page-content') || $('pageContainer'))?.focus();
+        return;
+      }
+      e.preventDefault();
       const next = e.shiftKey ? (idx - 1 + focusable.length) % focusable.length : (idx + 1) % focusable.length;
       focusable[next].focus();
     }
@@ -195,6 +201,10 @@ function doFind() {
     if (freshRange) _selectionRange = freshRange;
     if (_selectionRange) {
       selectionNodeIds = getNodeIdsBetween(_selectionRange.startNodeId, _selectionRange.endNodeId);
+    }
+    // If no valid selection range, search entire document instead of using stale range
+    if (!selectionNodeIds || selectionNodeIds.length === 0) {
+      selectionNodeIds = null;
     }
   }
 
@@ -464,6 +474,7 @@ function doReplaceAll() {
   if (!query) return;
   syncAllText();
   try {
+    recordUndoAction('Replace all');
     const count = state.doc.replace_all(query, replacement, _matchCase);
     broadcastOp({ action: 'replaceAll', query, replacement, caseSensitive: _matchCase });
     renderDocument();

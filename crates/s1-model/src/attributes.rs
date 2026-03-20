@@ -350,6 +350,12 @@ pub enum AttributeKey {
     /// Scope of the TOC index (ODF: text:index-scope, e.g. "document" or "chapter").
     TocIndexScope,
 
+    // Additional paragraph attributes (round-trip preservation)
+    /// Contextual spacing: suppress extra space between paragraphs of the same style.
+    ContextualSpacing,
+    /// Word wrap: controls whether East Asian text wraps at arbitrary positions.
+    WordWrap,
+
     // Hyphenation attributes
     /// Suppress automatic hyphenation for this paragraph.
     SuppressAutoHyphens,
@@ -422,6 +428,19 @@ pub enum AttributeKey {
     TextGlow,
     /// Text reflection effect definition (CSS-like or raw XML string).
     TextReflection,
+
+    // Form control attributes (DOCX SDT)
+    /// Form control type: "checkbox", "dropdown", or "text".
+    FormType,
+    /// Comma-separated list of options for dropdown form controls.
+    FormOptions,
+    /// Whether a checkbox form control is checked.
+    FormChecked,
+
+    // Change tracking metadata
+    /// JSON string containing parsed change tracking info (regions with id,
+    /// type, author, date). Used for ODT tracked-changes preservation.
+    ChangeTrackingInfo,
 
     // Raw XML preservation
     /// Raw XML content from elements not fully modeled (e.g., SmartArt, charts,

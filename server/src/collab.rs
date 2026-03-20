@@ -99,7 +99,12 @@ impl RoomManager {
         if let Some(room) = rooms.get_mut(room_id) {
             room.ops_log.push(op.to_string());
             room.dirty = true;
-            if room.ops_log.len() > 10_000 {
+            if room.ops_log.len() > 10000 {
+                tracing::warn!(
+                    "Room {} ops_log at {} entries — truncating oldest 5000. Late joiners may miss history.",
+                    room_id,
+                    room.ops_log.len()
+                );
                 room.ops_log.drain(..5_000);
             }
         }
@@ -167,6 +172,9 @@ pub struct WsParams {
     /// Editing mode.
     #[serde(default = "default_mode")]
     pub mode: String,
+    /// Access level: "view" or "edit". Controls whether the peer can send structural ops.
+    #[serde(default = "default_mode")]
+    pub access: String,
 }
 
 fn default_user_name() -> String {
@@ -199,6 +207,14 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
     let has_session = state.sessions.exists(&file_id).await;
     let peer_id = params.uid.clone();
     let user_name = params.user.clone();
+
+    if params.access == "view" {
+        tracing::info!(
+            "Viewer {} connected to {} (read-only)",
+            params.user,
+            file_id
+        );
+    }
 
     // Build peer info
     let peer_info = PeerInfo {
@@ -238,6 +254,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         "peerId": peer_id,
         "room": file_id,
         "peers": peer_list,
+        "access": params.access,
     });
     let _ = sender
         .send(Message::Text(joined_msg.to_string().into()))
@@ -331,6 +348,11 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                     if !RoomManager::validate_op(&text_str) {
                         continue;
                     }
+
+                    // Update last-activity timestamp for this editor
+                    sessions_for_recv
+                        .update_activity(&file_id_recv, &sender_peer_id)
+                        .await;
 
                     // Parse the incoming message to determine its type
                     let parsed: serde_json::Value = match serde_json::from_str(&text_str) {

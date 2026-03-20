@@ -40,7 +40,7 @@ pub fn write_document_xml(
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push('\n');
     xml.push_str(
-        r#"<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mo="http://schemas.microsoft.com/office/mac/office/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">"#,
+        r#"<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mo="http://schemas.microsoft.com/office/mac/office/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">"#,
     );
     xml.push('\n');
 
@@ -77,7 +77,12 @@ fn write_body_children(
 
         match child.node_type {
             NodeType::Paragraph => {
-                write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
+                // Check if this paragraph is a form control (SDT)
+                if let Some(form_type) = child.attributes.get_string(&AttributeKey::FormType) {
+                    write_sdt_form(doc, child_id, form_type, xml, image_rels, hyperlink_rels);
+                } else {
+                    write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
+                }
             }
             NodeType::Table => write_table(doc, child_id, xml, image_rels, hyperlink_rels),
             NodeType::TableOfContents => {
@@ -138,6 +143,105 @@ fn write_toc(
 
     xml.push_str("</w:sdtContent>");
     xml.push_str("</w:sdt>");
+}
+
+/// Write a `<w:sdt>` element for a form control (checkbox, dropdown, or text).
+fn write_sdt_form(
+    doc: &DocumentModel,
+    para_id: NodeId,
+    form_type: &str,
+    xml: &mut String,
+    _image_rels: &mut Vec<ImageRelEntry>,
+    _hyperlink_rels: &mut Vec<HyperlinkRelEntry>,
+) {
+    let para = match doc.node(para_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    xml.push_str("<w:sdt>");
+    xml.push_str("<w:sdtPr>");
+
+    match form_type {
+        "checkbox" => {
+            let checked = para
+                .attributes
+                .get_bool(&AttributeKey::FormChecked)
+                .unwrap_or(false);
+            let val = if checked { "1" } else { "0" };
+            xml.push_str(&format!(
+                r#"<w14:checkbox><w14:checked w14:val="{val}"/></w14:checkbox>"#
+            ));
+        }
+        "dropdown" => {
+            xml.push_str("<w:dropDownList>");
+            if let Some(options) = para.attributes.get_string(&AttributeKey::FormOptions) {
+                for option in options.split(',') {
+                    let opt = escape_xml(option.trim());
+                    xml.push_str(&format!(
+                        r#"<w:listItem w:displayText="{opt}" w:value="{opt}"/>"#
+                    ));
+                }
+            }
+            xml.push_str("</w:dropDownList>");
+        }
+        "text" => {
+            xml.push_str("<w:text/>");
+        }
+        _ => {}
+    }
+
+    xml.push_str("</w:sdtPr>");
+    xml.push_str("<w:sdtContent>");
+
+    // Write inner paragraph with the display text from child runs
+    xml.push_str("<w:p><w:r><w:t xml:space=\"preserve\">");
+    let display_text = collect_para_text(doc, para_id);
+    if display_text.is_empty() {
+        // Provide default display text based on form type
+        if form_type == "checkbox" {
+            let checked = para
+                .attributes
+                .get_bool(&AttributeKey::FormChecked)
+                .unwrap_or(false);
+            if checked {
+                xml.push('\u{2611}'); // ☑
+            } else {
+                xml.push('\u{2610}'); // ☐
+            }
+        }
+    } else {
+        xml.push_str(&escape_xml(&display_text));
+    }
+    xml.push_str("</w:t></w:r></w:p>");
+
+    xml.push_str("</w:sdtContent>");
+    xml.push_str("</w:sdt>");
+}
+
+/// Collect all text content from child runs of a paragraph.
+fn collect_para_text(doc: &DocumentModel, para_id: NodeId) -> String {
+    let para = match doc.node(para_id) {
+        Some(n) => n,
+        None => return String::new(),
+    };
+    let mut text = String::new();
+    for &child_id in &para.children {
+        if let Some(child) = doc.node(child_id) {
+            if child.node_type == NodeType::Run {
+                for &text_id in &child.children {
+                    if let Some(text_node) = doc.node(text_id) {
+                        if text_node.node_type == NodeType::Text {
+                            if let Some(ref t) = text_node.text_content {
+                                text.push_str(t);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    text
 }
 
 /// Write a `<w:p>` element.
@@ -478,6 +582,14 @@ fn write_table_grid(doc: &DocumentModel, table: &s1_model::Node, xml: &mut Strin
 fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
     let mut tpr = String::new();
 
+    // Table style reference
+    if let Some(style_id) = attrs.get_string(&AttributeKey::StyleId) {
+        tpr.push_str(&format!(
+            r#"<w:tblStyle w:val="{}"/>"#,
+            escape_xml(style_id)
+        ));
+    }
+
     // Table width
     if let Some(AttributeValue::TableWidth(tw)) = attrs.get(&AttributeKey::TableWidth) {
         match tw {
@@ -593,7 +705,11 @@ fn write_table_cell(
         };
         match child.node_type {
             NodeType::Paragraph => {
-                write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
+                if let Some(ft) = child.attributes.get_string(&AttributeKey::FormType) {
+                    write_sdt_form(doc, child_id, ft, xml, image_rels, hyperlink_rels);
+                } else {
+                    write_paragraph(doc, child_id, xml, image_rels, hyperlink_rels);
+                }
                 has_content = true;
             }
             NodeType::Table => {
@@ -1003,6 +1119,12 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
     if attrs.get_bool(&AttributeKey::SuppressAutoHyphens) == Some(true) {
         ppr.push_str("<w:suppressAutoHyphens/>");
     }
+    if attrs.get_bool(&AttributeKey::ContextualSpacing) == Some(true) {
+        ppr.push_str("<w:contextualSpacing/>");
+    }
+    if attrs.get_bool(&AttributeKey::WordWrap) == Some(false) {
+        ppr.push_str(r#"<w:wordWrap w:val="false"/>"#);
+    }
 
     // Tab stops
     if let Some(AttributeValue::TabStops(tab_stops)) = attrs.get(&AttributeKey::TabStops) {
@@ -1061,7 +1183,9 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
 
 /// Write a property change element (`pPrChange`, `tcPrChange`, `trPrChange`, `tblPrChange`).
 ///
-/// Emits `<w:{tag} w:id="..." w:author="..." w:date="..."><w:{inner_tag}/></w:{tag}>`.
+/// Emits `<w:{tag} w:id="..." w:author="..." w:date="..."><w:{inner_tag}>...</w:{inner_tag}></w:{tag}>`.
+/// If `RevisionOriginalFormatting` is available, it is used as the inner content;
+/// otherwise an empty `<w:{inner_tag}/>` is written as fallback.
 fn write_property_change_element(
     tag: &str,
     inner_tag: &str,
@@ -1081,8 +1205,13 @@ fn write_property_change_element(
         escape_xml(author),
         escape_xml(date),
     ));
-    // Write empty old properties element (original formatting not stored)
-    xml.push_str(&format!("<w:{inner_tag}/>"));
+    // Write the original (pre-change) properties if stored; otherwise fallback
+    // to an empty element.
+    if let Some(orig) = attrs.get_string(&AttributeKey::RevisionOriginalFormatting) {
+        xml.push_str(orig);
+    } else {
+        xml.push_str(&format!("<w:{inner_tag}/>"));
+    }
     xml.push_str(&format!("</w:{tag}>"));
 }
 
@@ -1268,10 +1397,19 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         rpr.push_str(&format!(r#"<w:color w:val="{}"/>"#, color.to_hex()));
     }
 
-    // Highlight color
+    // Highlight color — use w:highlight for standard colors, w:shd for arbitrary
     if let Some(color) = attrs.get_color(&AttributeKey::HighlightColor) {
         let name = color_to_highlight_name(color);
-        rpr.push_str(&format!(r#"<w:highlight w:val="{name}"/>"#));
+        if name != "yellow" || (color.r == 255 && color.g == 255 && color.b == 0) {
+            // Known named color
+            rpr.push_str(&format!(r#"<w:highlight w:val="{name}"/>"#));
+        } else {
+            // Arbitrary color — use shading
+            rpr.push_str(&format!(
+                r#"<w:shd w:val="clear" w:color="auto" w:fill="{}"/>"#,
+                color.to_hex()
+            ));
+        }
     }
 
     // Superscript / Subscript
@@ -1285,6 +1423,16 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
     if let Some(pts) = attrs.get_f64(&AttributeKey::FontSpacing) {
         let twips = points_to_twips(pts);
         rpr.push_str(&format!(r#"<w:spacing w:val="{twips}"/>"#));
+    }
+
+    // Text shadow
+    if attrs.get_bool(&AttributeKey::TextShadow) == Some(true) {
+        rpr.push_str("<w:shadow/>");
+    }
+
+    // Text outline
+    if attrs.get_bool(&AttributeKey::TextOutline) == Some(true) {
+        rpr.push_str("<w:outline/>");
     }
 
     // Language
@@ -1304,7 +1452,15 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         if let Some(date) = attrs.get_string(&AttributeKey::RevisionDate) {
             rpr_change.push_str(&format!(r#" w:date="{}""#, escape_xml(date)));
         }
-        rpr_change.push_str("><w:rPr/></w:rPrChange>");
+        rpr_change.push('>');
+        // Write the original (pre-change) run properties if stored; otherwise
+        // emit an empty <w:rPr/> as a fallback.
+        if let Some(orig) = attrs.get_string(&AttributeKey::RevisionOriginalFormatting) {
+            rpr_change.push_str(orig);
+        } else {
+            rpr_change.push_str("<w:rPr/>");
+        }
+        rpr_change.push_str("</w:rPrChange>");
         rpr.push_str(&rpr_change);
     }
 
@@ -2881,6 +3037,151 @@ mod tests {
         assert!(
             xml.contains("<w:r>"),
             "revision run should be preserved even without text: {xml}"
+        );
+    }
+
+    #[test]
+    fn write_sdt_checkbox() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        let mut para = Node::new(para_id, NodeType::Paragraph);
+        para.attributes.set(
+            AttributeKey::FormType,
+            AttributeValue::String("checkbox".into()),
+        );
+        para.attributes
+            .set(AttributeKey::FormChecked, AttributeValue::Bool(true));
+        doc.insert_node(body_id, 0, para).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains("<w:sdt>"),
+            "checkbox should be wrapped in SDT: {xml}"
+        );
+        assert!(
+            xml.contains("w14:checkbox"),
+            "should contain w14:checkbox: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w14:checked w14:val="1""#),
+            "should be checked: {xml}"
+        );
+        // Should NOT have a bare <w:p> for this node
+        assert!(
+            xml.contains("<w:sdtContent><w:p>"),
+            "SDT content should wrap a paragraph: {xml}"
+        );
+    }
+
+    #[test]
+    fn write_sdt_checkbox_unchecked() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        let mut para = Node::new(para_id, NodeType::Paragraph);
+        para.attributes.set(
+            AttributeKey::FormType,
+            AttributeValue::String("checkbox".into()),
+        );
+        para.attributes
+            .set(AttributeKey::FormChecked, AttributeValue::Bool(false));
+        doc.insert_node(body_id, 0, para).unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains(r#"w14:checked w14:val="0""#),
+            "should be unchecked: {xml}"
+        );
+    }
+
+    #[test]
+    fn write_sdt_dropdown() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        let mut para = Node::new(para_id, NodeType::Paragraph);
+        para.attributes.set(
+            AttributeKey::FormType,
+            AttributeValue::String("dropdown".into()),
+        );
+        para.attributes.set(
+            AttributeKey::FormOptions,
+            AttributeValue::String("Red,Green,Blue".into()),
+        );
+        doc.insert_node(body_id, 0, para).unwrap();
+
+        // Add a run with selected text
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "Green"))
+            .unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains("<w:sdt>"),
+            "dropdown should be wrapped in SDT: {xml}"
+        );
+        assert!(
+            xml.contains("<w:dropDownList>"),
+            "should contain dropDownList: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:displayText="Red""#),
+            "should contain Red option: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:displayText="Green""#),
+            "should contain Green option: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:displayText="Blue""#),
+            "should contain Blue option: {xml}"
+        );
+        assert!(
+            xml.contains("Green</w:t>"),
+            "SDT content should contain selected text: {xml}"
+        );
+    }
+
+    #[test]
+    fn write_sdt_text() {
+        let mut doc = DocumentModel::new();
+        let body_id = doc.body_id().unwrap();
+
+        let para_id = doc.next_id();
+        let mut para = Node::new(para_id, NodeType::Paragraph);
+        para.attributes.set(
+            AttributeKey::FormType,
+            AttributeValue::String("text".into()),
+        );
+        doc.insert_node(body_id, 0, para).unwrap();
+
+        // Add a run with content text
+        let run_id = doc.next_id();
+        doc.insert_node(para_id, 0, Node::new(run_id, NodeType::Run))
+            .unwrap();
+        let text_id = doc.next_id();
+        doc.insert_node(run_id, 0, Node::text(text_id, "User input"))
+            .unwrap();
+
+        let (xml, _, _) = write_document_xml(&doc);
+        assert!(
+            xml.contains("<w:sdt>"),
+            "text form should be wrapped in SDT: {xml}"
+        );
+        assert!(
+            xml.contains("<w:text/>"),
+            "should contain w:text element: {xml}"
+        );
+        assert!(
+            xml.contains("User input</w:t>"),
+            "SDT content should contain the text: {xml}"
         );
     }
 }

@@ -113,9 +113,9 @@ function onDrop(e) {
           state.doc.move_node_after(_draggedImgNodeId, targetNodeId);
           broadcastOp({ action: 'moveNodeAfter', nodeId: _draggedImgNodeId, afterId: targetNodeId });
         }
-        renderDocument();
-        // ED2-28: Record undo action for image drag & drop so Ctrl+Z works
+        // G2: Record undo BEFORE render so it's saved even if renderDocument() throws
         recordUndoAction('Move image');
+        renderDocument();
         updateUndoRedo();
       } catch (err) {
         console.error('move image:', err);
@@ -264,6 +264,9 @@ function stopResize() {
 // ED2-14: Clean up resize listeners when tab loses visibility (prevents leaks on tab switch)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && state.resizing) {
+    // Persist the current resize state before stopping
+    const img = state.resizing;
+    if (img) persistResizeDuringDrag(img);
     stopResize();
   }
 });
@@ -280,13 +283,17 @@ export function insertImage(file) {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      // Convert pixels to points (1pt = 1/72in, 1px = 1/96in at standard DPI)
-      const pxToPt = 72 / 96;
-      let w = img.naturalWidth * pxToPt, h = img.naturalHeight * pxToPt;
-      // Cap at 468pt (6.5in) page content width
-      if (w > 468) { h *= 468 / w; w = 468; }
-      try { doc.insert_image(nodeId, bytes, type, w, h); broadcastOp({ action: 'insertImage', afterNodeId: nodeId }); renderDocument(); updateUndoRedo(); }
-      catch (e) { console.error('insert image:', e); }
+      try {
+        // Convert pixels to points (1pt = 1/72in, 1px = 1/96in at standard DPI)
+        const pxToPt = 72 / 96;
+        let w = img.naturalWidth * pxToPt, h = img.naturalHeight * pxToPt;
+        // Cap at 468pt (6.5in) page content width
+        if (w > 468) { h *= 468 / w; w = 468; }
+        try { doc.insert_image(nodeId, bytes, type, w, h); broadcastOp({ action: 'insertImage', afterNodeId: nodeId }); renderDocument(); updateUndoRedo(); }
+        catch (e) { console.error('insert image:', e); }
+      } catch(e) {
+        console.error('Image load processing error:', e);
+      }
       URL.revokeObjectURL(url);
     };
     img.onerror = () => {
@@ -412,8 +419,10 @@ export function initImageContextMenu() {
     document.getElementById('altTextModal').classList.remove('show');
     if (!state._ctxImageNodeId || !state.doc) return;
     try {
-      state.doc.set_image_alt_text(state._ctxImageNodeId, alt);
-      broadcastOp({ action: 'setImageAltText', nodeId: state._ctxImageNodeId, alt });
+      // J5: Sanitize alt text — strip HTML tags before passing to WASM
+      const sanitized = alt.replace(/<[^>]*>/g, '');
+      state.doc.set_image_alt_text(state._ctxImageNodeId, sanitized);
+      broadcastOp({ action: 'setImageAltText', nodeId: state._ctxImageNodeId, alt: sanitized });
       renderDocument();
       updateUndoRedo();
     } catch (e) { console.error('alt text:', e); }

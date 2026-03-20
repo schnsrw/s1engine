@@ -14,7 +14,9 @@ import { getLastError, clearErrors } from './error-tracking.js';
 
 // ── Selection save/restore for modal dialogs ─────
 // Saves the current DOM selection before a modal opens, restores it after close.
+// We store both the DOM Range (fast path) and node ID + offset info (survives re-renders).
 let _savedModalSelection = null;
+let _savedModalSelInfo = null;
 
 function saveModalSelection() {
   try {
@@ -27,20 +29,47 @@ function saveModalSelection() {
   } catch (_) {
     _savedModalSelection = null;
   }
+  // Also save node ID + offset info which survives DOM re-renders
+  try {
+    _savedModalSelInfo = getSelectionInfo();
+  } catch (_) {
+    _savedModalSelInfo = null;
+  }
 }
 
 function restoreModalSelection() {
-  if (!_savedModalSelection) return;
+  if (!_savedModalSelection && !_savedModalSelInfo) return;
   try {
     // ED2-18: Verify saved range nodes are still in the DOM after re-render
-    const startOk = _savedModalSelection.startContainer && _savedModalSelection.startContainer.isConnected;
-    const endOk = _savedModalSelection.endContainer && _savedModalSelection.endContainer.isConnected;
+    const startOk = _savedModalSelection && _savedModalSelection.startContainer && _savedModalSelection.startContainer.isConnected;
+    const endOk = _savedModalSelection && _savedModalSelection.endContainer && _savedModalSelection.endContainer.isConnected;
     if (startOk && endOk) {
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(_savedModalSelection);
+    } else if (_savedModalSelInfo && _savedModalSelInfo.startNodeId) {
+      // DOM Range is invalid (nodes disconnected after re-render).
+      // Fall back to restoring via node ID + offset which survives re-renders.
+      const page = $('pageContainer');
+      if (page) {
+        const startEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.startNodeId}"]`);
+        if (startEl) {
+          const content = startEl.closest('.page-content');
+          if (content) content.focus();
+          if (_savedModalSelInfo.collapsed) {
+            setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+          } else {
+            const endEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.endNodeId}"]`);
+            if (endEl) {
+              setSelectionRange(startEl, _savedModalSelInfo.startOffset, endEl, _savedModalSelInfo.endOffset);
+            } else {
+              setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+            }
+          }
+        }
+      }
     } else {
-      // Fall back: place cursor at start of first paragraph
+      // Last resort: place cursor at start of first paragraph
       const firstPara = $('pageContainer')?.querySelector('.page-content p[data-node-id], .page-content h1[data-node-id]');
       if (firstPara) {
         const content = firstPara.closest('.page-content');
@@ -54,9 +83,23 @@ function restoreModalSelection() {
       }
     }
   } catch (_) {
-    // Range may be invalid if DOM changed; fall back to focusing editor
+    // Range may be invalid if DOM changed; try node-ID fallback
+    try {
+      if (_savedModalSelInfo && _savedModalSelInfo.startNodeId) {
+        const page = $('pageContainer');
+        if (page) {
+          const startEl = page.querySelector(`[data-node-id="${_savedModalSelInfo.startNodeId}"]`);
+          if (startEl) {
+            const content = startEl.closest('.page-content');
+            if (content) content.focus();
+            setCursorAtOffset(startEl, _savedModalSelInfo.startOffset);
+          }
+        }
+      }
+    } catch (_2) { /* give up */ }
   }
   _savedModalSelection = null;
+  _savedModalSelInfo = null;
 }
 
 // E7.2: Screen reader announcement — briefly sets the aria-live region text
@@ -1252,6 +1295,8 @@ export function setZoomLevel(level) {
   level = Math.max(50, Math.min(200, Math.round(level)));
   const changed = state.zoomLevel !== level;
   state.zoomLevel = level;
+  // Persist zoom across sessions
+  try { localStorage.setItem('s1_zoom', String(level)); } catch (_) {}
   const label = level + '%';
   if ($('zoomValue')) $('zoomValue').textContent = label;
   if ($('tbZoomValue')) $('tbZoomValue').textContent = label;
@@ -1308,7 +1353,7 @@ function initZoomDropdown() {
 
   // Restore saved zoom level
   try {
-    const saved = localStorage.getItem('s1-zoom');
+    const saved = localStorage.getItem('s1_zoom');
     if (saved) {
       const parsed = parseInt(saved);
       if (!isNaN(parsed) && parsed >= 50 && parsed <= 200) {
@@ -1614,6 +1659,7 @@ function initAppMenubar() {
 // ─── Comment Replies (in-memory store) ────────────
 // Replies stored in-memory keyed by parent comment ID.
 // Each reply: { id, parentId, author, text, timestamp }
+try { state.commentReplies = JSON.parse(localStorage.getItem('s1_commentReplies') || '[]'); } catch(_) { state.commentReplies = []; }
 if (!state.commentReplies) state.commentReplies = [];
 let _replyCounter = 0;
 
@@ -1679,6 +1725,7 @@ function refreshComments() {
           broadcastOp({ action: 'deleteComment', commentId: id });
           // Also remove any replies to this comment
           state.commentReplies = (state.commentReplies || []).filter(r => r.parentId !== id);
+          try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
           // Also remove from resolved set
           if (state.resolvedComments) state.resolvedComments.delete(id);
           renderDocument();
@@ -1719,6 +1766,7 @@ function refreshComments() {
       btn.addEventListener('click', () => {
         const replyId = btn.dataset.replyId;
         state.commentReplies = (state.commentReplies || []).filter(r => r.id !== replyId);
+        try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
         refreshComments();
       });
     });
@@ -1905,6 +1953,7 @@ function submitReply(parentId, text) {
   };
   if (!state.commentReplies) state.commentReplies = [];
   state.commentReplies.push(reply);
+  try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
   refreshComments();
 }
 
@@ -2544,9 +2593,26 @@ function initTableContextMenu() {
 
   // UXP-12: Merge cells — uses existing WASM merge_cells API
   cmAction('cmMergeCells', () => {
+    // J2: Validate that row/col indices are valid numbers before merging
+    if (typeof state.ctxRow !== 'number' || typeof state.ctxCol !== 'number'
+        || isNaN(state.ctxRow) || isNaN(state.ctxCol)
+        || state.ctxRow < 0 || state.ctxCol < 0) {
+      showToast('Select a valid cell before merging', 'error');
+      return;
+    }
+    // J2: Validate rectangular selection if multi-cell selection is tracked
+    if (state.selectionCells
+        && (!state.selectionCells.rowSpan || !state.selectionCells.colSpan)) {
+      showToast('Select a rectangular range of cells to merge', 'error');
+      return;
+    }
     // Merge a 2x2 block starting from the right-clicked cell.
     // If cell is at the last row/col, merge just the available range.
     const dims = JSON.parse(state.doc.get_table_dimensions(state.ctxTable));
+    if (state.ctxRow >= dims.rows || state.ctxCol >= dims.cols) {
+      showToast('Cell position is out of table bounds', 'error');
+      return;
+    }
     const endRow = Math.min(state.ctxRow + 1, dims.rows - 1);
     const endCol = Math.min(state.ctxCol + 1, dims.cols - 1);
     state.doc.merge_cells(state.ctxTable, state.ctxRow, state.ctxCol, endRow, endCol);
@@ -2579,7 +2645,7 @@ function initTableContextMenu() {
   });
   $('cmCellBgPicker').addEventListener('input', e => {
     $('tableContextMenu').style.display = 'none';
-    if (!state.doc || !state.ctxCell) return;
+    if (!state.ctxTable || !state.doc || !state.ctxCell) return;
     const hex = e.target.value.replace('#', '');
     try {
       state.doc.set_cell_background(state.ctxCell, hex);
@@ -6490,7 +6556,13 @@ function openPrintPreview() {
   // Prevent body scroll when overlay is open
   document.body.style.overflow = 'hidden';
 
-  // Keyboard handler: Escape to close, Ctrl+P to print
+  // Focus management: make overlay focusable and focus it
+  overlay.tabIndex = -1;
+  overlay.focus();
+
+  // Keyboard handler: Escape to close, Ctrl+P to print, Tab trap
+  const closeBtn = $('printPreviewClose');
+  const printBtn = $('printPreviewPrint');
   _printPreviewKeyHandler = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -6501,12 +6573,31 @@ function openPrintPreview() {
       e.stopPropagation();
       closePrintPreview();
       setTimeout(() => window.print(), 120);
+    } else if (e.key === 'Tab') {
+      // Tab trap: keep focus within the print preview overlay
+      const focusable = overlay.querySelectorAll('button, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first || document.activeElement === overlay) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || document.activeElement === overlay) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     }
   };
   document.addEventListener('keydown', _printPreviewKeyHandler, true);
 
   // Focus the close button for accessibility
-  const closeBtn = $('printPreviewClose');
   if (closeBtn) closeBtn.focus();
 
   trackEvent('view', 'print-preview-open');

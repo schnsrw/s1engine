@@ -57,9 +57,15 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                         if let Some(date) = get_attr(&e, b"date") {
                             attrs.set(AttributeKey::RevisionDate, AttributeValue::String(date));
                         }
-                        // Skip the inner <w:rPr> (old formatting) — we don't
-                        // store it in a structured way for now
-                        skip_to_end(reader)?;
+                        // Capture the inner <w:rPr> (old formatting) as raw XML
+                        // for round-trip fidelity.
+                        let old_rpr_xml = capture_inner_xml(reader, b"rPrChange")?;
+                        if !old_rpr_xml.is_empty() {
+                            attrs.set(
+                                AttributeKey::RevisionOriginalFormatting,
+                                AttributeValue::String(old_rpr_xml),
+                            );
+                        }
                     }
                     _ => {
                         skip_to_end(reader)?;
@@ -123,6 +129,19 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                             }
                         }
                     }
+                    b"shd" => {
+                        // Run-level shading (arbitrary highlight color)
+                        if let Some(fill) = get_attr(&e, b"fill") {
+                            if fill != "auto" {
+                                if let Some(color) = Color::from_hex(&fill) {
+                                    attrs.set(
+                                        AttributeKey::HighlightColor,
+                                        AttributeValue::Color(color),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     b"rFonts" => {
                         if let Some(font) = get_attr(&e, b"ascii")
                             .or_else(|| get_attr(&e, b"hAnsi"))
@@ -156,6 +175,18 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                         if let Some(lang) = get_val(&e) {
                             attrs.set(AttributeKey::Language, AttributeValue::String(lang));
                         }
+                    }
+                    b"shadow" => {
+                        attrs.set(
+                            AttributeKey::TextShadow,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"outline" => {
+                        attrs.set(
+                            AttributeKey::TextOutline,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
                     }
                     _ => {}
                 }
@@ -224,8 +255,14 @@ pub fn parse_paragraph_properties(reader: &mut Reader<&[u8]>) -> Result<Attribut
                         if let Some(date) = get_attr(&e, b"date") {
                             attrs.set(AttributeKey::RevisionDate, AttributeValue::String(date));
                         }
-                        // Skip the inner <w:pPr> (old formatting)
-                        skip_to_end(reader)?;
+                        // Capture the inner <w:pPr> (old formatting) as raw XML
+                        let old_ppr_xml = capture_inner_xml(reader, b"pPrChange")?;
+                        if !old_ppr_xml.is_empty() {
+                            attrs.set(
+                                AttributeKey::RevisionOriginalFormatting,
+                                AttributeValue::String(old_ppr_xml),
+                            );
+                        }
                     }
                     _ => {
                         skip_to_end(reader)?;
@@ -336,6 +373,19 @@ pub fn parse_paragraph_properties(reader: &mut Reader<&[u8]>) -> Result<Attribut
                             AttributeValue::Bool(is_toggle_on(&e)),
                         );
                     }
+                    b"contextualSpacing" => {
+                        attrs.set(
+                            AttributeKey::ContextualSpacing,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"wordWrap" => {
+                        // wordWrap defaults to true; only explicit val="false"/val="0" disables
+                        attrs.set(
+                            AttributeKey::WordWrap,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
                     b"shd" => {
                         // Paragraph shading/background color
                         if let Some(fill) = get_attr(&e, b"fill") {
@@ -392,8 +442,14 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                         if let Some(date) = get_attr(&e, b"date") {
                             attrs.set(AttributeKey::RevisionDate, AttributeValue::String(date));
                         }
-                        // Skip the inner <w:tblPr> (old table properties)
-                        skip_to_end(reader)?;
+                        // Capture the inner <w:tblPr> (old table properties) as raw XML
+                        let old_tbl_xml = capture_inner_xml(reader, b"tblPrChange")?;
+                        if !old_tbl_xml.is_empty() {
+                            attrs.set(
+                                AttributeKey::RevisionOriginalFormatting,
+                                AttributeValue::String(old_tbl_xml),
+                            );
+                        }
                     }
                     _ => {
                         skip_to_end(reader)?;
@@ -406,6 +462,11 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                     b"tblW" => {
                         if let Some(w) = parse_width(&e) {
                             attrs.set(AttributeKey::TableWidth, AttributeValue::TableWidth(w));
+                        }
+                    }
+                    b"tblStyle" => {
+                        if let Some(style_id) = get_val(&e) {
+                            attrs.set(AttributeKey::StyleId, AttributeValue::String(style_id));
                         }
                     }
                     b"jc" => {
@@ -445,6 +506,19 @@ pub fn parse_cell_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap,
                         let borders = parse_borders(reader, b"tcBorders")?;
                         attrs.set(AttributeKey::CellBorders, AttributeValue::Borders(borders));
                     }
+                    b"vMerge" => {
+                        // vMerge as non-self-closing element (with val attr)
+                        let val = get_val(&e);
+                        let merge_val = match val.as_deref() {
+                            Some("restart") => "restart",
+                            _ => "continue",
+                        };
+                        attrs.set(
+                            AttributeKey::RowSpan,
+                            AttributeValue::String(merge_val.to_string()),
+                        );
+                        skip_to_end(reader)?;
+                    }
                     b"tcPrChange" => {
                         // Track changes — table cell property change revision
                         attrs.set(
@@ -462,8 +536,14 @@ pub fn parse_cell_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap,
                         if let Some(date) = get_attr(&e, b"date") {
                             attrs.set(AttributeKey::RevisionDate, AttributeValue::String(date));
                         }
-                        // Skip the inner <w:tcPr> (old cell properties)
-                        skip_to_end(reader)?;
+                        // Capture the inner <w:tcPr> (old cell properties) as raw XML
+                        let old_tcp_xml = capture_inner_xml(reader, b"tcPrChange")?;
+                        if !old_tcp_xml.is_empty() {
+                            attrs.set(
+                                AttributeKey::RevisionOriginalFormatting,
+                                AttributeValue::String(old_tcp_xml),
+                            );
+                        }
                     }
                     _ => {
                         skip_to_end(reader)?;
@@ -563,8 +643,14 @@ pub fn parse_row_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap, 
                         if let Some(date) = get_attr(&e, b"date") {
                             attrs.set(AttributeKey::RevisionDate, AttributeValue::String(date));
                         }
-                        // Skip the inner <w:trPr> (old row properties)
-                        skip_to_end(reader)?;
+                        // Capture the inner <w:trPr> (old row properties) as raw XML
+                        let old_trp_xml = capture_inner_xml(reader, b"trPrChange")?;
+                        if !old_trp_xml.is_empty() {
+                            attrs.set(
+                                AttributeKey::RevisionOriginalFormatting,
+                                AttributeValue::String(old_trp_xml),
+                            );
+                        }
                     }
                     _ => {
                         skip_to_end(reader)?;
@@ -862,6 +948,68 @@ fn skip_to_end(reader: &mut Reader<&[u8]>) -> Result<(), DocxError> {
         }
     }
     Ok(())
+}
+
+/// Capture all inner XML content of the current element as a raw string.
+///
+/// The reader should be positioned just after reading the `Start` event of
+/// the outer element. This function reads until the matching `End` event
+/// with `end_tag` and returns the raw XML content in between.
+fn capture_inner_xml(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Result<String, DocxError> {
+    let mut xml = String::new();
+    let mut depth = 1u32;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                depth += 1;
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                xml.push('<');
+                xml.push_str(&name);
+                for attr in e.attributes().flatten() {
+                    let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                    let val = String::from_utf8_lossy(&attr.value).to_string();
+                    xml.push(' ');
+                    xml.push_str(&key);
+                    xml.push_str("=\"");
+                    xml.push_str(&val);
+                    xml.push('"');
+                }
+                xml.push('>');
+            }
+            Ok(Event::Empty(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                xml.push('<');
+                xml.push_str(&name);
+                for attr in e.attributes().flatten() {
+                    let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+                    let val = String::from_utf8_lossy(&attr.value).to_string();
+                    xml.push(' ');
+                    xml.push_str(&key);
+                    xml.push_str("=\"");
+                    xml.push_str(&val);
+                    xml.push('"');
+                }
+                xml.push_str("/>");
+            }
+            Ok(Event::End(e)) => {
+                depth -= 1;
+                if depth == 0 && e.local_name().as_ref() == end_tag {
+                    break;
+                }
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                xml.push_str("</");
+                xml.push_str(&name);
+                xml.push('>');
+            }
+            Ok(Event::Text(t)) => {
+                xml.push_str(&String::from_utf8_lossy(t.as_ref()));
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+    Ok(xml)
 }
 
 /// Convert OOXML highlight color names to Color values.

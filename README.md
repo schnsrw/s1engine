@@ -22,6 +22,25 @@ s1engine is a modular Rust SDK that powers document workflows across desktop, se
 - **Web editor** — S1 Editor: browser-based document editor with toolbar, comments, track changes, and PDF viewer
 - **Embeddable** — Use as a Rust library, WASM module, or C shared library
 
+## Why s1engine?
+
+| | s1engine | LibreOffice | OnlyOffice | Collabora | Google Docs |
+|---|---|---|---|---|---|
+| **Embeddable SDK** | Yes — Rust, WASM, C FFI | No (monolithic) | Partial (JS client) | Partial (LibreOffice fork) | No |
+| **Pure Rust** | Yes — zero C/C++ deps | C++ | C++/JS | C++ | Proprietary |
+| **WASM support** | Native | No | No | No | No |
+| **CRDT collaboration** | Built-in (Fugue) | No | OT-based | No | Proprietary |
+| **Self-hostable** | Single Docker image | Yes | Yes | Yes | No |
+| **Document model** | CRDT-ready tree with unique IDs | Legacy DOM | Custom | Legacy DOM | Proprietary |
+| **License** | AGPL-3.0 | MPL-2.0 | AGPL-3.0 | MPL-2.0 | Proprietary |
+
+**Use s1engine if you need:**
+- A Rust library for reading/writing DOCX, ODT, PDF, or Markdown
+- A self-hosted document editor you can embed in your product (like OnlyOffice Document Server, but in Rust)
+- WASM-powered document editing in the browser without server-side rendering
+- CRDT-based real-time collaboration without external dependencies
+- A format conversion pipeline (DOCX to PDF, ODT to DOCX, DOC to DOCX, etc.)
+
 ## Quick Start
 
 ### As a Rust Library

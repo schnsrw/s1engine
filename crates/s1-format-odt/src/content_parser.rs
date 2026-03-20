@@ -96,6 +96,43 @@ pub fn parse_content_body(
                         );
                         skip_element_odt(reader)?;
                     }
+
+                    // Q12 — ODF Change Tracking (text:tracked-changes, text:changed-region).
+                    //
+                    // ODF documents may contain change-tracking markup that records
+                    // insertions, deletions, and format changes made by reviewers.
+                    // The top-level container is <text:tracked-changes> which holds
+                    // one or more <text:changed-region> children. Inline, the
+                    // elements <text:change-start>, <text:change-end>, and
+                    // <text:change> reference those regions.
+                    //
+                    // Full semantic modelling of tracked changes is out-of-scope for
+                    // now. To ensure round-trip preservation we capture the raw XML
+                    // of the <text:tracked-changes> block as an opaque attribute on
+                    // the body node. This mirrors the approach used by the DOCX reader
+                    // for unknown namespace elements.
+                    //
+                    // When a full tracked-changes model is added, this block should
+                    // be replaced with structured parsing.
+                    b"tracked-changes" => {
+                        let raw = capture_raw_xml(reader, "tracked-changes")?;
+                        if let Some(body) = doc.node_mut(body_id) {
+                            body.attributes
+                                .set(AttributeKey::RawXml, AttributeValue::String(raw.clone()));
+
+                            // Best-effort extraction of change region metadata.
+                            // Parse the raw XML to extract structured info from
+                            // <text:changed-region> elements.
+                            let info = extract_change_tracking_info(&raw);
+                            if !info.is_empty() {
+                                body.attributes.set(
+                                    AttributeKey::ChangeTrackingInfo,
+                                    AttributeValue::String(info),
+                                );
+                            }
+                        }
+                    }
+
                     _ => {}
                 }
             }
@@ -1214,6 +1251,63 @@ fn parse_toc_into(
     Ok(())
 }
 
+/// Capture the raw XML content of an element (including children) as a string.
+///
+/// The reader must be positioned just after reading the `Start` event for the
+/// element identified by `tag_name`. The function reads until the matching `End`
+/// event and returns the inner XML (including nested elements) as a String.
+/// This is used for round-trip preservation of elements we don't semantically model.
+fn capture_raw_xml(reader: &mut Reader<&[u8]>, tag_name: &str) -> Result<String, OdtError> {
+    let mut depth = 1u32;
+    let mut buf = String::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                depth += 1;
+                buf.push('<');
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                for attr in e.attributes().flatten() {
+                    buf.push(' ');
+                    buf.push_str(&String::from_utf8_lossy(attr.key.as_ref()));
+                    buf.push_str("=\"");
+                    buf.push_str(&String::from_utf8_lossy(&attr.value));
+                    buf.push('"');
+                }
+                buf.push('>');
+            }
+            Ok(Event::End(ref e)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                buf.push_str("</");
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                buf.push('>');
+            }
+            Ok(Event::Empty(ref e)) => {
+                buf.push('<');
+                buf.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                for attr in e.attributes().flatten() {
+                    buf.push(' ');
+                    buf.push_str(&String::from_utf8_lossy(attr.key.as_ref()));
+                    buf.push_str("=\"");
+                    buf.push_str(&String::from_utf8_lossy(&attr.value));
+                    buf.push('"');
+                }
+                buf.push_str("/>");
+            }
+            Ok(Event::Text(ref e)) => {
+                buf.push_str(&e.unescape().unwrap_or_default());
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(OdtError::Xml(e.to_string())),
+            _ => {}
+        }
+    }
+    let _ = tag_name; // used for documentation clarity at call-site
+    Ok(buf)
+}
+
 /// Skip an element and all its children (ODT version).
 fn skip_element_odt(reader: &mut Reader<&[u8]>) -> Result<(), OdtError> {
     let mut depth = 1u32;
@@ -1437,6 +1531,121 @@ fn parse_table_cell_into(
     }
 
     Ok(cell_id)
+}
+
+/// Best-effort extraction of change tracking metadata from raw tracked-changes XML.
+///
+/// Parses `<text:changed-region>` elements from the captured raw XML and returns
+/// a JSON string with an array of region objects, each containing:
+/// - `id`: the `text:id` attribute
+/// - `type`: "insertion", "deletion", or "format-change"
+/// - `author`: the dc:creator value (if present)
+/// - `date`: the dc:date value (if present)
+///
+/// Returns an empty string if no regions could be parsed.
+fn extract_change_tracking_info(raw_xml: &str) -> String {
+    // Wrap in a root element so the XML is well-formed for parsing
+    let wrapped = format!(
+        "<root xmlns:text='urn:oasis:names:tc:opendocument:xmlns:text:1.0' \
+         xmlns:dc='http://purl.org/dc/elements/1.1/' \
+         xmlns:office='urn:oasis:names:tc:opendocument:xmlns:office:1.0'>{raw_xml}</root>"
+    );
+    let mut reader = Reader::from_str(&wrapped);
+    reader.config_mut().trim_text(true);
+
+    let mut regions: Vec<String> = Vec::new();
+    let mut current_id = String::new();
+    let mut current_type = String::new();
+    let mut current_author = String::new();
+    let mut current_date = String::new();
+    let mut in_region = false;
+    let mut in_creator = false;
+    let mut in_date = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                let local = e.local_name();
+                match local.as_ref() {
+                    b"changed-region" => {
+                        in_region = true;
+                        current_id.clear();
+                        current_type.clear();
+                        current_author.clear();
+                        current_date.clear();
+                        for attr in e.attributes().flatten() {
+                            if attr.key.local_name().as_ref() == b"id" {
+                                current_id = String::from_utf8_lossy(&attr.value).to_string();
+                            }
+                        }
+                    }
+                    b"insertion" if in_region => {
+                        current_type = "insertion".to_string();
+                    }
+                    b"deletion" if in_region => {
+                        current_type = "deletion".to_string();
+                    }
+                    b"format-change" if in_region => {
+                        current_type = "format-change".to_string();
+                    }
+                    b"creator" if in_region => {
+                        in_creator = true;
+                    }
+                    b"date" if in_region => {
+                        in_date = true;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref e)) => {
+                if in_creator {
+                    current_author = e.unescape().unwrap_or_default().to_string();
+                } else if in_date {
+                    current_date = e.unescape().unwrap_or_default().to_string();
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = e.local_name();
+                match local.as_ref() {
+                    b"changed-region" => {
+                        if in_region && !current_id.is_empty() {
+                            let json_obj = format!(
+                                r#"{{"id":"{}","type":"{}","author":"{}","date":"{}"}}"#,
+                                json_escape(&current_id),
+                                json_escape(&current_type),
+                                json_escape(&current_author),
+                                json_escape(&current_date),
+                            );
+                            regions.push(json_obj);
+                        }
+                        in_region = false;
+                    }
+                    b"creator" => in_creator = false,
+                    b"date" => in_date = false,
+                    b"root" => break,
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break, // Best-effort: stop on parse errors
+            _ => {}
+        }
+    }
+
+    if regions.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", regions.join(","))
+    }
+}
+
+/// Minimal JSON string escaping for change tracking info values.
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 #[cfg(test)]
@@ -2073,5 +2282,94 @@ mod tests {
             }
         }
         assert!(found, "annotation-end should create CommentEnd");
+    }
+
+    #[test]
+    fn extract_change_tracking_from_tracked_changes() {
+        let xml = r#"<text:tracked-changes xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">
+            <text:changed-region text:id="ct1">
+                <text:insertion>
+                    <office:change-info>
+                        <dc:creator>Alice</dc:creator>
+                        <dc:date>2026-03-15T10:30:00</dc:date>
+                    </office:change-info>
+                </text:insertion>
+            </text:changed-region>
+            <text:changed-region text:id="ct2">
+                <text:deletion>
+                    <office:change-info>
+                        <dc:creator>Bob</dc:creator>
+                        <dc:date>2026-03-15T11:00:00</dc:date>
+                    </office:change-info>
+                </text:deletion>
+            </text:changed-region>
+        </text:tracked-changes>
+        <text:p>Some text</text:p>"#;
+
+        let doc = parse_body_xml(xml);
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+
+        // Raw XML should be preserved
+        let raw = body.attributes.get_string(&AttributeKey::RawXml);
+        assert!(raw.is_some(), "RawXml should be set");
+
+        // Structured change tracking info should be extracted
+        let info = body
+            .attributes
+            .get_string(&AttributeKey::ChangeTrackingInfo);
+        assert!(info.is_some(), "ChangeTrackingInfo should be set");
+        let info_str = info.unwrap();
+        assert!(
+            info_str.contains(r#""id":"ct1""#),
+            "should contain ct1: {info_str}"
+        );
+        assert!(
+            info_str.contains(r#""type":"insertion""#),
+            "should contain insertion type: {info_str}"
+        );
+        assert!(
+            info_str.contains(r#""author":"Alice""#),
+            "should contain author Alice: {info_str}"
+        );
+        assert!(
+            info_str.contains(r#""id":"ct2""#),
+            "should contain ct2: {info_str}"
+        );
+        assert!(
+            info_str.contains(r#""type":"deletion""#),
+            "should contain deletion type: {info_str}"
+        );
+        assert!(
+            info_str.contains(r#""author":"Bob""#),
+            "should contain author Bob: {info_str}"
+        );
+    }
+
+    #[test]
+    fn extract_change_tracking_unit() {
+        // Test the extraction function directly
+        let raw = r#"<text:changed-region text:id="r1"><text:format-change><office:change-info><dc:creator>Carol</dc:creator><dc:date>2026-01-01</dc:date></office:change-info></text:format-change></text:changed-region>"#;
+        let info = super::extract_change_tracking_info(raw);
+        assert!(
+            info.contains(r#""id":"r1""#),
+            "should have region id: {info}"
+        );
+        assert!(
+            info.contains(r#""type":"format-change""#),
+            "should have format-change type: {info}"
+        );
+        assert!(
+            info.contains(r#""author":"Carol""#),
+            "should have author Carol: {info}"
+        );
+    }
+
+    #[test]
+    fn extract_change_tracking_empty_returns_empty() {
+        // No changed-region elements
+        let raw = "<text:some-other-element/>";
+        let info = super::extract_change_tracking_info(raw);
+        assert!(info.is_empty(), "should be empty for no regions: {info}");
     }
 }

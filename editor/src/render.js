@@ -729,11 +729,18 @@ export function debouncedSync(el) {
     // E6.3: Don't sync during IME composition — wait for compositionend
     if (state._composing) return;
     syncParagraphText(el);
-    state.pagesRendered = false;
-    // E8.3: Debounce layout — repagination is deferred and batched.
-    // Text-only edits within a single paragraph use the debounced path
-    // so rapid typing doesn't trigger layout on every keystroke.
-    debouncedRepaginate();
+
+    // Try incremental render for single-paragraph text edits (avoids full repagination).
+    // Falls back to full repaginate if incremental render isn't possible.
+    const nodeId = el?.dataset?.nodeId;
+    if (nodeId && renderSingleParagraphIfPossible(nodeId)) {
+      // Incremental render succeeded — skip full repagination
+      state.pagesRendered = false;
+    } else {
+      state.pagesRendered = false;
+      // E8.3: Full repagination only when incremental render wasn't enough
+      debouncedRepaginate();
+    }
     // Record typing in undo history so the panel isn't empty
     if (state._typingBatch && !state._typingUndoRecorded) {
       state._typingUndoRecorded = true;

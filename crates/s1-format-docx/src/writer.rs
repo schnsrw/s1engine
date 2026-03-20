@@ -212,6 +212,22 @@ pub fn write(doc: &DocumentModel) -> Result<Vec<u8>, DocxError> {
         zip.write_all(core.as_bytes())?;
     }
 
+    // Preserve digital signature entries (_xmlsignatures/*) for round-trip
+    // fidelity. Signature data is stored in custom_properties with keys
+    // prefixed by "signatureEntry:".
+    //
+    // NOTE: modifying the document content will invalidate the cryptographic
+    // signature.  Full re-signing requires a crypto library (e.g., `ring`)
+    // and a private key, which is outside the scope of this writer.
+    write_preserved_signatures(doc, &mut zip, options)?;
+
+    // Write all preserved ZIP parts (customXml, charts, diagrams, embeddings, VBA)
+    for (path, data) in doc.preserved_parts() {
+        if zip.start_file(path, options).is_ok() {
+            let _ = zip.write_all(data);
+        }
+    }
+
     let cursor = zip.finish()?;
     Ok(cursor.into_inner())
 }
@@ -568,6 +584,38 @@ fn build_hf_rel_entries(
         }
     }
     entries
+}
+
+/// Write preserved digital signature entries (`_xmlsignatures/*`) back into
+/// the ZIP archive.
+///
+/// Signatures are stored in `preserved_parts` with their original ZIP paths
+/// (e.g., `_xmlsignatures/sig1.xml`).
+///
+/// **Important**: if the document content has been modified since the
+/// signatures were read, the cryptographic signature will be invalid.
+/// Re-signing would require a crypto library (e.g., `ring`) and a private
+/// key, which is outside the scope of this writer.
+fn write_preserved_signatures(
+    doc: &DocumentModel,
+    zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+    options: SimpleFileOptions,
+) -> Result<(), crate::error::DocxError> {
+    let mut sig_entries: Vec<(&str, &[u8])> = doc
+        .preserved_parts()
+        .iter()
+        .filter(|(k, _)| k.starts_with("_xmlsignatures/"))
+        .map(|(k, v)| (k.as_str(), v.as_slice()))
+        .collect();
+
+    // Sort for deterministic ZIP output order
+    sig_entries.sort_by_key(|(path, _)| *path);
+
+    for (path, data) in sig_entries {
+        zip.start_file(path, options)?;
+        zip.write_all(data)?;
+    }
+    Ok(())
 }
 
 /// Generate `[Content_Types].xml`.
@@ -2932,6 +2980,131 @@ mod tests {
         assert!(
             doc_xml.contains(r#"w:w="11900""#),
             "should use custom page width: {doc_xml}"
+        );
+    }
+
+    #[test]
+    fn roundtrip_preserves_signature_entries() {
+        // Create a document model that has preserved signature data
+        // (as the reader would have stored it)
+        let mut doc = make_simple_doc("Signed Document");
+
+        let sig_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+  <KeyInfo>
+    <X509Data>
+      <X509SubjectName>CN=Round Trip Signer</X509SubjectName>
+      <X509Certificate>MIICdTCCAd4...</X509Certificate>
+    </X509Data>
+  </KeyInfo>
+  <Object>
+    <SignatureProperties>
+      <SignatureProperty>
+        <SignedSignatureProperties>
+          <SigningTime>2025-08-01T12:00:00Z</SigningTime>
+        </SignedSignatureProperties>
+      </SignatureProperty>
+    </SignatureProperties>
+  </Object>
+</Signature>"#;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature" Target="sig1.xml"/>
+</Relationships>"#;
+
+        // Simulate what the reader does: store signature metadata and entries
+        doc.metadata_mut()
+            .custom_properties
+            .insert("hasDigitalSignature".to_string(), "true".to_string());
+        doc.metadata_mut()
+            .custom_properties
+            .insert("signatureValid".to_string(), "unverified".to_string());
+        doc.metadata_mut().custom_properties.insert(
+            "signatureSubject".to_string(),
+            "CN=Round Trip Signer".to_string(),
+        );
+        doc.metadata_mut().custom_properties.insert(
+            "signatureDate".to_string(),
+            "2025-08-01T12:00:00Z".to_string(),
+        );
+        // Signature entries are stored in preserved_parts (binary-safe)
+        doc.add_preserved_part("_xmlsignatures/sig1.xml", sig_xml.as_bytes().to_vec());
+        doc.add_preserved_part(
+            "_xmlsignatures/_rels/origin.sigs.rels",
+            rels_xml.as_bytes().to_vec(),
+        );
+
+        // Write the DOCX
+        let bytes = write(&doc).unwrap();
+
+        // Read it back
+        let doc2 = crate::read(&bytes).unwrap();
+        let props = &doc2.metadata().custom_properties;
+
+        // Verify signature metadata survives
+        assert_eq!(
+            props.get("hasDigitalSignature").map(|s| s.as_str()),
+            Some("true"),
+            "hasDigitalSignature should survive round-trip"
+        );
+        assert!(
+            props.get("signatureValid").is_some(),
+            "signatureValid should be present after round-trip"
+        );
+        assert_eq!(
+            props.get("signatureSubject").map(|s| s.as_str()),
+            Some("CN=Round Trip Signer"),
+            "signatureSubject should survive round-trip"
+        );
+        assert_eq!(
+            props.get("signatureDate").map(|s| s.as_str()),
+            Some("2025-08-01T12:00:00Z"),
+            "signatureDate should survive round-trip"
+        );
+
+        // Verify the signature ZIP entries are preserved in preserved_parts
+        let parts = doc2.preserved_parts();
+        let stored_sig = parts.get("_xmlsignatures/sig1.xml");
+        assert!(
+            stored_sig.is_some(),
+            "sig1.xml should be preserved in round-trip"
+        );
+        let sig_str = std::str::from_utf8(stored_sig.unwrap()).unwrap();
+        assert!(
+            sig_str.contains("Round Trip Signer"),
+            "signature XML content should be preserved"
+        );
+
+        let stored_rels = parts.get("_xmlsignatures/_rels/origin.sigs.rels");
+        assert!(
+            stored_rels.is_some(),
+            "rels file should be preserved in round-trip"
+        );
+    }
+
+    #[test]
+    fn write_without_signatures_has_no_signature_entries() {
+        let doc = make_simple_doc("Unsigned");
+        let bytes = write(&doc).unwrap();
+
+        // Verify no _xmlsignatures/ entries in the ZIP
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let sig_entries: Vec<_> = (0..archive.len())
+            .filter_map(|i| {
+                let f = archive.by_index_raw(i).ok()?;
+                let name = f.name().to_string();
+                if name.starts_with("_xmlsignatures/") {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            sig_entries.is_empty(),
+            "unsigned document should have no signature entries, found: {sig_entries:?}"
         );
     }
 }

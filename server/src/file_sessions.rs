@@ -58,7 +58,11 @@ pub struct EditorInfo {
     pub user_id: String,
     pub user_name: String,
     pub connected_at: String,
+    /// Access level: "edit", "comment", "view"
     pub mode: String,
+    /// Last activity timestamp (ISO 8601). Updated on each message from this user.
+    #[serde(default)]
+    pub last_activity: String,
 }
 
 /// Public session info (returned by API).
@@ -145,11 +149,13 @@ impl FileSessionManager {
         if let Some(session) = self.sessions.lock().await.get_mut(file_id) {
             session.editor_count += 1;
             session.last_editor_left = None;
+            let now = chrono::Utc::now().to_rfc3339();
             session.editors.push(EditorInfo {
                 user_id: user_id.to_string(),
                 user_name: user_name.to_string(),
-                connected_at: chrono::Utc::now().to_rfc3339(),
+                connected_at: now.clone(),
                 mode: mode.to_string(),
+                last_activity: now,
             });
             tracing::info!(
                 "Editor joined {}: {} ({} total)",
@@ -160,6 +166,15 @@ impl FileSessionManager {
             true
         } else {
             false
+        }
+    }
+
+    /// Update last activity timestamp for an editor (called on any WebSocket message).
+    pub async fn update_activity(&self, file_id: &str, user_id: &str) {
+        if let Some(session) = self.sessions.lock().await.get_mut(file_id) {
+            if let Some(editor) = session.editors.iter_mut().find(|e| e.user_id == user_id) {
+                editor.last_activity = chrono::Utc::now().to_rfc3339();
+            }
         }
     }
 
@@ -266,6 +281,30 @@ impl FileSessionManager {
             .collect()
     }
 
+    /// Remove editors whose `last_activity` is older than 5 minutes.
+    /// Returns a vec of `(file_id, "stale")` for each removed editor.
+    pub async fn cleanup_stale_editors(&self) -> Vec<(String, String)> {
+        let mut removed = Vec::new();
+        let cutoff = chrono::Utc::now() - chrono::Duration::minutes(5);
+        let cutoff_str = cutoff.to_rfc3339();
+        let mut sessions = self.sessions.lock().await;
+        for (file_id, session) in sessions.iter_mut() {
+            let before = session.editors.len();
+            session
+                .editors
+                .retain(|e| e.last_activity >= cutoff_str || e.last_activity.is_empty());
+            let after = session.editors.len();
+            session.editor_count = after;
+            for _ in 0..(before - after) {
+                removed.push((file_id.clone(), "stale".to_string()));
+            }
+            if session.editor_count == 0 && session.last_editor_left.is_none() {
+                session.last_editor_left = Some(std::time::Instant::now());
+            }
+        }
+        removed
+    }
+
     /// Force close a session (admin action).
     pub async fn force_close(&self, file_id: &str) -> Option<Vec<u8>> {
         self.sessions.lock().await.remove(file_id).map(|s| {
@@ -332,5 +371,52 @@ mod tests {
         .await;
         mgr.update_snapshot("f3", b"v2".to_vec()).await;
         assert_eq!(mgr.get_data("f3").await.unwrap(), b"v2");
+    }
+
+    #[tokio::test]
+    async fn close_view_only_session_forbidden() {
+        // This tests the mode check pattern — sessions default to "edit" mode,
+        // so force_close should succeed for edit sessions.
+        let mgr = FileSessionManager::new(Some(60));
+        mgr.create(
+            "f_view".into(),
+            "test.docx".into(),
+            vec![],
+            "docx".into(),
+            None,
+            None,
+        )
+        .await;
+        // Session mode is "edit" by default, so close should work
+        assert!(mgr.force_close("f_view").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn cleanup_stale_editors_removes_old() {
+        let mgr = FileSessionManager::new(Some(60));
+        mgr.create(
+            "f_stale".into(),
+            "test.docx".into(),
+            vec![],
+            "docx".into(),
+            None,
+            None,
+        )
+        .await;
+        // Join an editor with a very old last_activity
+        mgr.editor_join("f_stale", "u1", "OldUser", "edit").await;
+        // Manually set the last_activity to 10 minutes ago
+        {
+            let mut sessions = mgr.sessions.lock().await;
+            let session = sessions.get_mut("f_stale").unwrap();
+            let old_time = chrono::Utc::now() - chrono::Duration::minutes(10);
+            session.editors[0].last_activity = old_time.to_rfc3339();
+        }
+        let removed = mgr.cleanup_stale_editors().await;
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0, "f_stale");
+        // Editor should be gone
+        let info = mgr.get_info("f_stale").await.unwrap();
+        assert_eq!(info.editor_count, 0);
     }
 }

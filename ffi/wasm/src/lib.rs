@@ -2899,6 +2899,34 @@ impl WasmDocument {
             }
         }
 
+        // Also collect font, size, color, highlight from the first run
+        let mut font_family: Option<String> = None;
+        let mut font_size: Option<f64> = None;
+        let mut color_hex: Option<String> = None;
+        let mut highlight_hex: Option<String> = None;
+        let mut superscript = false;
+        let mut subscript = false;
+
+        if let Some(&first_rid) = run_ids.first() {
+            if let Some(run) = doc.node(first_rid) {
+                font_family = run
+                    .attributes
+                    .get_string(&AttributeKey::FontFamily)
+                    .map(|s| s.to_string());
+                font_size = run.attributes.get_f64(&AttributeKey::FontSize);
+                if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Color) {
+                    color_hex = Some(format!("#{}", c.to_hex()));
+                }
+                if let Some(AttributeValue::Color(c)) =
+                    run.attributes.get(&AttributeKey::HighlightColor)
+                {
+                    highlight_hex = Some(format!("#{}", c.to_hex()));
+                }
+                superscript = run.attributes.get_bool(&AttributeKey::Superscript) == Some(true);
+                subscript = run.attributes.get_bool(&AttributeKey::Subscript) == Some(true);
+            }
+        }
+
         fn fmt_val(mixed: bool, val: Option<bool>) -> String {
             if mixed {
                 "\"mixed\"".to_string()
@@ -2907,13 +2935,29 @@ impl WasmDocument {
             }
         }
 
-        Ok(format!(
-            "{{\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{}}}",
+        let mut json = format!(
+            "{{\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{},\"superscript\":{},\"subscript\":{}",
             fmt_val(mixed_bold, bold_state),
             fmt_val(mixed_italic, italic_state),
             fmt_val(mixed_underline, underline_state),
             fmt_val(mixed_strike, strike_state),
-        ))
+            superscript,
+            subscript,
+        );
+        if let Some(ref f) = font_family {
+            json.push_str(&format!(",\"fontFamily\":\"{}\"", escape_json(f)));
+        }
+        if let Some(s) = font_size {
+            json.push_str(&format!(",\"fontSize\":{s}"));
+        }
+        if let Some(ref c) = color_hex {
+            json.push_str(&format!(",\"color\":\"{}\"", c));
+        }
+        if let Some(ref h) = highlight_hex {
+            json.push_str(&format!(",\"highlightColor\":\"{}\"", h));
+        }
+        json.push('}');
+        Ok(json)
     }
 
     // ─── P.2: Table Operations API ──────────────────────────────
@@ -6823,6 +6867,53 @@ fn parse_format_kv(key: &str, value: &str) -> Result<s1_model::AttributeMap, JsE
                 AttributeValue::String(value.to_string()),
             );
         }
+        // Extended format keys (C1 fix)
+        "fontSpacing" => {
+            let v: f64 = value
+                .parse()
+                .map_err(|_| JsError::new("Invalid fontSpacing value"))?;
+            attrs.set(AttributeKey::FontSpacing, AttributeValue::Float(v));
+        }
+        "language" => {
+            attrs.set(
+                AttributeKey::Language,
+                AttributeValue::String(value.to_string()),
+            );
+        }
+        "textShadow" => {
+            attrs.set(
+                AttributeKey::TextShadow,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "textOutline" => {
+            attrs.set(
+                AttributeKey::TextOutline,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "backgroundColor" | "background" => {
+            let color = Color::from_hex(value).ok_or_else(|| JsError::new("Invalid color hex"))?;
+            attrs.set(AttributeKey::Background, AttributeValue::Color(color));
+        }
+        "pageBreakBefore" => {
+            attrs.set(
+                AttributeKey::PageBreakBefore,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "keepWithNext" => {
+            attrs.set(
+                AttributeKey::KeepWithNext,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
+        "keepLinesTogether" => {
+            attrs.set(
+                AttributeKey::KeepLinesTogether,
+                AttributeValue::Bool(value == "true"),
+            );
+        }
         _ => return Err(JsError::new(&format!("Unknown format key: {}", key))),
     }
     Ok(attrs)
@@ -7613,6 +7704,78 @@ fn render_paragraph(
         None => return,
     };
 
+    // Form control rendering: if this paragraph carries a FormType attribute,
+    // render as an interactive form element instead of a normal paragraph.
+    if let Some(form_type) = para.attributes.get_string(&AttributeKey::FormType) {
+        let nid = format!("{}:{}", para_id.replica, para_id.counter);
+        match form_type {
+            "checkbox" => {
+                let checked = para
+                    .attributes
+                    .get_bool(&AttributeKey::FormChecked)
+                    .unwrap_or(false);
+                let checked_attr = if checked { " checked" } else { "" };
+                html.push_str(&format!(
+                    "<label class=\"form-checkbox\" contenteditable=\"false\" \
+                     data-node-id=\"{nid}\">\
+                     <input type=\"checkbox\" data-node-id=\"{nid}\"{checked_attr}> Checkbox\
+                     </label>"
+                ));
+            }
+            "dropdown" => {
+                let options_str = para
+                    .attributes
+                    .get_string(&AttributeKey::FormOptions)
+                    .unwrap_or("");
+                html.push_str(&format!(
+                    "<select class=\"form-dropdown\" contenteditable=\"false\" \
+                     data-node-id=\"{nid}\">"
+                ));
+                if options_str.is_empty() {
+                    html.push_str("<option></option>");
+                } else {
+                    for opt in options_str.split(',') {
+                        let escaped = escape_html(opt);
+                        html.push_str(&format!("<option value=\"{escaped}\">{escaped}</option>"));
+                    }
+                }
+                html.push_str("</select>");
+            }
+            "text" => {
+                // Collect text content from child runs for the default value
+                let mut value = String::new();
+                if let Some(node) = model.node(para_id) {
+                    for &child_id in &node.children {
+                        if let Some(child) = model.node(child_id) {
+                            if child.node_type == NodeType::Run {
+                                for &text_id in &child.children {
+                                    if let Some(text_node) = model.node(text_id) {
+                                        if text_node.node_type == NodeType::Text {
+                                            if let Some(ref tc) = text_node.text_content {
+                                                value.push_str(tc);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let escaped_value = escape_html(&value);
+                html.push_str(&format!(
+                    "<input type=\"text\" class=\"form-text\" contenteditable=\"false\" \
+                     data-node-id=\"{nid}\" value=\"{escaped_value}\">"
+                ));
+            }
+            _ => {
+                // Unknown form type — fall through to normal paragraph rendering
+            }
+        }
+        if form_type == "checkbox" || form_type == "dropdown" || form_type == "text" {
+            return;
+        }
+    }
+
     // UXP-08: Render section break indicator before paragraphs that start a new section.
     if let Some(AttributeValue::Int(sec_idx)) = para.attributes.get(&AttributeKey::SectionIndex) {
         let sections = model.sections();
@@ -7671,6 +7834,16 @@ fn render_paragraph(
         if !val.is_empty() {
             style.push_str(&format!("text-align:{val};"));
         }
+        if matches!(a, s1_model::Alignment::Justify) {
+            style.push_str("text-align-last:left;");
+        }
+    }
+    // Keep with next / keep lines together
+    if para.attributes.get_bool(&AttributeKey::KeepWithNext) == Some(true) {
+        style.push_str("break-after:avoid;");
+    }
+    if para.attributes.get_bool(&AttributeKey::KeepLinesTogether) == Some(true) {
+        style.push_str("break-inside:avoid;");
     }
 
     // Spacing
@@ -8115,10 +8288,35 @@ fn render_run(model: &DocumentModel, run_id: NodeId, html: &mut String) {
     if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Color) {
         style.push_str(&format!("color:#{};", c.to_hex()));
     }
+    // Highlight / background color
+    if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::HighlightColor) {
+        style.push_str(&format!("background-color:#{};", c.to_hex()));
+    } else if let Some(AttributeValue::Color(c)) = run.attributes.get(&AttributeKey::Background) {
+        style.push_str(&format!("background-color:#{};", c.to_hex()));
+    }
+    // Text shadow
+    if run.attributes.get_bool(&AttributeKey::TextShadow) == Some(true) {
+        style.push_str("text-shadow:1px 1px 2px rgba(0,0,0,0.3);");
+    }
+    // Text outline
+    if run.attributes.get_bool(&AttributeKey::TextOutline) == Some(true) {
+        style.push_str("-webkit-text-stroke:1px currentColor;");
+    }
+    // Q3: Text glow effect
+    if run.attributes.get(&AttributeKey::TextGlow).is_some() {
+        style.push_str("filter:drop-shadow(0 0 3px currentColor);");
+    }
+    // Q3: Text reflection effect
+    if run.attributes.get(&AttributeKey::TextReflection).is_some() {
+        style.push_str(
+            "-webkit-box-reflect:below 0px linear-gradient(transparent, rgba(0,0,0,0.1));",
+        );
+    }
     // Character spacing
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {
-            style.push_str(&format!("letter-spacing:{sp}pt;"));
+            let sp_px = sp * 1.333;
+            style.push_str(&format!("letter-spacing:{:.2}px;", sp_px));
         }
     }
 
@@ -8513,7 +8711,8 @@ fn render_run_clean_partial(
     }
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {
-            style.push_str(&format!("letter-spacing:{sp}pt;"));
+            let sp_px = sp * 1.333;
+            style.push_str(&format!("letter-spacing:{:.2}px;", sp_px));
         }
     }
 
@@ -8651,8 +8850,8 @@ fn render_image_clean(model: &DocumentModel, img_id: NodeId, html: &mut String) 
                 _ => {}
             }
             html.push_str(&format!(
-                "<img src=\"data:{mime};base64,{b64}\" style=\"{img_style}\" alt=\"{}\"/>",
-                escape_html(alt)
+                "<img data-media-id=\"{}\" data-alt-text=\"{}\" data-wrap-type=\"{}\" src=\"data:{mime};base64,{b64}\" style=\"{img_style}\" alt=\"{}\"/>",
+                media_id.0, escape_html(alt), escape_html(wrap_mode), escape_html(alt)
             ));
             return;
         }
@@ -8798,8 +8997,8 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
                 String::new()
             };
             html.push_str(&format!(
-                "<img data-node-id=\"{}:{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"{wrap_attr}/>",
-                img_id.replica, img_id.counter, escape_html(alt)
+                "<img data-node-id=\"{}:{}\" data-media-id=\"{}\" data-alt-text=\"{}\" data-wrap-type=\"{}\" src=\"data:{mime};base64,{b64}\" style=\"{style}\" alt=\"{}\"{wrap_attr}/>",
+                img_id.replica, img_id.counter, media_id.0, escape_html(alt), escape_html(wrap_mode), escape_html(alt)
             ));
             return;
         }
@@ -8811,7 +9010,7 @@ fn render_image(model: &DocumentModel, img_id: NodeId, html: &mut String) {
     ));
 }
 
-/// Render a Drawing/VML node as a placeholder div showing the shape dimensions.
+/// Render a Drawing/VML node as a visible placeholder with content if available.
 fn render_drawing(model: &DocumentModel, drawing_id: NodeId, html: &mut String) {
     let node = match model.node(drawing_id) {
         Some(n) => n,
@@ -8821,25 +9020,50 @@ fn render_drawing(model: &DocumentModel, drawing_id: NodeId, html: &mut String) 
     let width = node
         .attributes
         .get_f64(&AttributeKey::ShapeWidth)
-        .unwrap_or(100.0);
+        .unwrap_or(200.0);
     let height = node
         .attributes
         .get_f64(&AttributeKey::ShapeHeight)
-        .unwrap_or(100.0);
+        .unwrap_or(60.0);
     let shape_type = node
         .attributes
         .get_string(&AttributeKey::ShapeType)
         .unwrap_or("shape");
-    let title = format!("VML Shape: {}", shape_type);
 
-    let escaped_title = escape_html(&title);
+    // Try to extract text content from child nodes (text boxes have paragraph children)
+    let mut inner_html = String::new();
+    let mut has_content = false;
+    for &child_id in &node.children {
+        if let Some(child) = model.node(child_id) {
+            if child.node_type == NodeType::Paragraph {
+                render_node(model, child_id, &mut inner_html);
+                has_content = true;
+            }
+        }
+    }
+
+    let label = if has_content {
+        String::new()
+    } else {
+        format!(
+            "<span style=\"color:#999;font-size:11px;font-style:italic\">{}</span>",
+            escape_html(shape_type)
+        )
+    };
+
     html.push_str(&format!(
-        "<div class=\"vml-shape\" data-node-id=\"{r}:{c}\" style=\"width:{w}pt;height:{h}pt;border:1px solid #999;background:#f0f0f0\" title=\"{t}\"></div>",
+        "<div class=\"vml-shape\" data-node-id=\"{r}:{c}\" \
+         style=\"display:inline-block;width:{w}pt;min-height:{h}pt;\
+         border:1px solid #c4c7cc;border-radius:4px;background:#fafbfc;\
+         padding:8px;margin:4px 0;box-sizing:border-box;overflow:hidden\" \
+         title=\"Shape: {t}\">{label}{content}</div>",
         r = drawing_id.replica,
         c = drawing_id.counter,
         w = width,
         h = height,
-        t = escaped_title
+        t = escape_html(shape_type),
+        label = label,
+        content = inner_html
     ));
 }
 
@@ -9736,6 +9960,300 @@ impl WasmCollabDocument {
         temp_doc
             .export(fmt)
             .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    // ─── Rendering (delegates to same render functions as WasmDocument) ───
+
+    /// Render a single node as HTML (for incremental rendering).
+    pub fn render_node_html(&self, node_id_str: &str) -> Result<String, JsError> {
+        let doc = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| JsError::new("Document freed"))?;
+        let node_id = parse_node_id(node_id_str)?;
+        let model = doc.model();
+        let mut html = String::new();
+        render_node(model, node_id, &mut html);
+        Ok(html)
+    }
+
+    /// Get paragraph IDs as JSON array.
+    pub fn paragraph_ids_json(&self) -> Result<String, JsError> {
+        let doc = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| JsError::new("Document freed"))?;
+        let model = doc.model();
+        let body_id = model.body_id().ok_or_else(|| JsError::new("No body"))?;
+        let body = model
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+        let mut ids = Vec::new();
+        for &child_id in &body.children {
+            if let Some(child) = model.node(child_id) {
+                if child.node_type == NodeType::Paragraph {
+                    ids.push(format!("\"{}:{}\"", child_id.replica, child_id.counter));
+                }
+            }
+        }
+        Ok(format!("[{}]", ids.join(",")))
+    }
+
+    /// Get formatting info for a node as JSON (delegates to WasmDocument).
+    pub fn get_formatting_json(&self, node_id_str: &str) -> Result<String, JsError> {
+        let doc = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| JsError::new("Document freed"))?;
+        let temp = s1engine::Document::from_model(doc.model().clone());
+        let wasm_doc = WasmDocument {
+            batch_label: None,
+            batch_count: 0,
+            inner: Some(temp),
+        };
+        wasm_doc.get_formatting_json(node_id_str)
+    }
+
+    // ─── Structural Editing (apply on model, produce CRDT ops) ───
+
+    /// Set paragraph text (replaces all text in the paragraph).
+    pub fn set_paragraph_text(&mut self, node_id_str: &str, text: &str) -> Result<String, JsError> {
+        let doc = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| JsError::new("Document freed"))?;
+        let node_id = parse_node_id(node_id_str)?;
+
+        // Get current text length, delete all, then insert new text
+        let (text_node_id, current_len) = find_first_text_node(doc.model(), node_id)?;
+        let mut ops_json = Vec::new();
+
+        if current_len > 0 {
+            let del_op = Operation::delete_text(text_node_id, 0, current_len);
+            let crdt_op = doc
+                .apply_local(del_op)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            ops_json.push(serialize_crdt_op_to_json(&crdt_op));
+        }
+
+        if !text.is_empty() {
+            let ins_op = Operation::insert_text(text_node_id, 0, text.to_string());
+            let crdt_op = doc
+                .apply_local(ins_op)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            ops_json.push(serialize_crdt_op_to_json(&crdt_op));
+        }
+
+        Ok(format!("[{}]", ops_json.join(",")))
+    }
+
+    // ─── Structural Editing (delegates to WasmDocument, reconstructs collab) ───
+    // These operations modify the underlying model via WasmDocument's existing
+    // implementations, then reconstruct the CollabDocument. This preserves full
+    // editor compatibility while the CRDT layer handles text-level ops natively.
+
+    /// Helper: apply a closure that mutates a WasmDocument, then reconstruct CollabDocument.
+    fn with_wasm_doc<F>(&mut self, f: F) -> Result<(), JsError>
+    where
+        F: FnOnce(&mut WasmDocument) -> Result<(), JsError>,
+    {
+        let collab = self
+            .inner
+            .take()
+            .ok_or_else(|| JsError::new("Document freed"))?;
+        let replica = collab.replica_id();
+        let model = collab.model().clone();
+        let mut wasm_doc = WasmDocument {
+            batch_label: None,
+            batch_count: 0,
+            inner: Some(s1engine::Document::from_model(model)),
+        };
+        f(&mut wasm_doc)?;
+        let doc = wasm_doc
+            .inner
+            .take()
+            .ok_or_else(|| JsError::new("Internal error"))?;
+        self.inner = Some(s1_crdt::CollabDocument::from_model(
+            doc.into_model(),
+            replica,
+        ));
+        Ok(())
+    }
+
+    /// Delete a text selection (single or cross-paragraph).
+    pub fn delete_selection(
+        &mut self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+    ) -> Result<(), JsError> {
+        let s = start_node_str.to_string();
+        let e = end_node_str.to_string();
+        self.with_wasm_doc(|doc| doc.delete_selection(&s, start_offset, &e, end_offset))
+    }
+
+    /// Insert text in a paragraph at a specific offset (CRDT-native).
+    pub fn insert_text_in_paragraph(
+        &mut self,
+        node_id_str: &str,
+        offset: usize,
+        text: &str,
+    ) -> Result<String, JsError> {
+        self.apply_local_insert_text(node_id_str, offset, text)
+    }
+
+    /// Format a selection.
+    pub fn format_selection(
+        &mut self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+        key: &str,
+        value: &str,
+    ) -> Result<(), JsError> {
+        let s = start_node_str.to_string();
+        let e = end_node_str.to_string();
+        let k = key.to_string();
+        let v = value.to_string();
+        self.with_wasm_doc(|doc| doc.format_selection(&s, start_offset, &e, end_offset, &k, &v))
+    }
+
+    /// Split a paragraph at the given offset.
+    pub fn split_paragraph(&mut self, node_id_str: &str, offset: usize) -> Result<String, JsError> {
+        let n = node_id_str.to_string();
+        let mut new_id = String::new();
+        self.with_wasm_doc(|doc| {
+            new_id = doc.split_paragraph(&n, offset)?;
+            Ok(())
+        })?;
+        Ok(new_id)
+    }
+
+    /// Merge two paragraphs.
+    pub fn merge_paragraphs(&mut self, node1_str: &str, node2_str: &str) -> Result<(), JsError> {
+        let n1 = node1_str.to_string();
+        let n2 = node2_str.to_string();
+        self.with_wasm_doc(|doc| doc.merge_paragraphs(&n1, &n2))
+    }
+
+    /// Set heading level for a paragraph.
+    pub fn set_heading_level(&mut self, node_id_str: &str, level: u8) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        self.with_wasm_doc(|doc| doc.set_heading_level(&n, level))
+    }
+
+    /// Set alignment for a paragraph.
+    pub fn set_alignment(&mut self, node_id_str: &str, alignment: &str) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        let a = alignment.to_string();
+        self.with_wasm_doc(|doc| doc.set_alignment(&n, &a))
+    }
+
+    /// Set list format for a paragraph.
+    pub fn set_list_format(
+        &mut self,
+        node_id_str: &str,
+        format: &str,
+        level: u32,
+    ) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        let f = format.to_string();
+        self.with_wasm_doc(|doc| doc.set_list_format(&n, &f, level))
+    }
+
+    /// Paste plain text (may create multiple paragraphs).
+    pub fn paste_plain_text(
+        &mut self,
+        node_id_str: &str,
+        offset: usize,
+        text: &str,
+    ) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        let t = text.to_string();
+        self.with_wasm_doc(|doc| doc.paste_plain_text(&n, offset, &t))
+    }
+
+    /// Insert a paragraph after a given node.
+    pub fn insert_paragraph_after(
+        &mut self,
+        after_node_str: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let n = after_node_str.to_string();
+        let t = text.to_string();
+        let mut new_id = String::new();
+        self.with_wasm_doc(|doc| {
+            new_id = doc.insert_paragraph_after(&n, &t)?;
+            Ok(())
+        })?;
+        Ok(new_id)
+    }
+
+    /// Set line spacing for a paragraph.
+    pub fn set_line_spacing(&mut self, node_id_str: &str, value: &str) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        let v = value.to_string();
+        self.with_wasm_doc(|doc| doc.set_line_spacing(&n, &v))
+    }
+
+    /// Set indent for a paragraph.
+    pub fn set_indent(&mut self, node_id_str: &str, side: &str, value: f64) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        let s = side.to_string();
+        self.with_wasm_doc(|doc| doc.set_indent(&n, &s, value))
+    }
+
+    /// Delete a node.
+    pub fn delete_node(&mut self, node_id_str: &str) -> Result<(), JsError> {
+        let n = node_id_str.to_string();
+        self.with_wasm_doc(|doc| doc.delete_node(&n))
+    }
+
+    /// Append an empty paragraph.
+    pub fn append_paragraph(&mut self, text: &str) -> Result<String, JsError> {
+        let t = text.to_string();
+        let mut new_id = String::new();
+        self.with_wasm_doc(|doc| {
+            new_id = doc.append_paragraph(&t)?;
+            Ok(())
+        })?;
+        Ok(new_id)
+    }
+
+    /// Insert a table.
+    pub fn insert_table(
+        &mut self,
+        after_node_str: &str,
+        rows: u32,
+        cols: u32,
+    ) -> Result<String, JsError> {
+        let n = after_node_str.to_string();
+        let mut table_id = String::new();
+        self.with_wasm_doc(|doc| {
+            table_id = doc.insert_table(&n, rows, cols)?;
+            Ok(())
+        })?;
+        Ok(table_id)
+    }
+
+    /// Insert horizontal rule.
+    pub fn insert_horizontal_rule(&mut self, after_node_str: &str) -> Result<(), JsError> {
+        let n = after_node_str.to_string();
+        self.with_wasm_doc(|doc| {
+            doc.insert_horizontal_rule(&n)?;
+            Ok(())
+        })
+    }
+
+    /// Insert page break.
+    pub fn insert_page_break(&mut self, after_node_str: &str) -> Result<(), JsError> {
+        let n = after_node_str.to_string();
+        self.with_wasm_doc(|doc| {
+            doc.insert_page_break(&n)?;
+            Ok(())
+        })
     }
 
     /// Free the document (for manual memory management from JS).

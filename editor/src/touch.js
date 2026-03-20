@@ -422,7 +422,9 @@ async function execTouchAction(action) {
       if (sel && !sel.isCollapsed) {
         try {
           const text = sel.toString();
-          await navigator.clipboard.writeText(text);
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+          }
           // Delete the selected text via WASM
           if (info && !info.collapsed && state.doc) {
             syncAllText();
@@ -437,22 +439,26 @@ async function execTouchAction(action) {
     case 'copy':
       if (sel && !sel.isCollapsed) {
         try {
-          await navigator.clipboard.writeText(sel.toString());
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(sel.toString());
+          }
         } catch (_) {}
       }
       break;
     case 'paste':
       try {
-        const text = await navigator.clipboard.readText();
-        if (text && state.doc && info) {
-          syncAllText();
-          if (!info.collapsed) {
-            state.doc.delete_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset);
+        if (navigator.clipboard?.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text && state.doc && info) {
+            syncAllText();
+            if (!info.collapsed) {
+              state.doc.delete_selection(info.startNodeId, info.startOffset, info.endNodeId, info.endOffset);
+            }
+            state.doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
+            const { renderDocument } = await import('./render.js');
+            renderDocument();
+            markDirty();
           }
-          state.doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
-          const { renderDocument } = await import('./render.js');
-          renderDocument();
-          markDirty();
         }
       } catch (_) {}
       break;

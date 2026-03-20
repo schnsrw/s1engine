@@ -78,6 +78,12 @@ pub struct SectionProperties {
     pub footers: Vec<HeaderFooterRef>,
     /// Whether first-page header/footer is enabled (`w:titlePg`).
     pub title_page: bool,
+    /// Whether even and odd page headers/footers are differentiated (`w:evenAndOddHeaders`).
+    ///
+    /// When `true`, even-page headers/footers use the `Even` type references,
+    /// and odd pages use the `Default` type. This maps to the `w:evenAndOddHeaders`
+    /// element in OOXML settings or section properties.
+    pub even_and_odd_headers: bool,
 }
 
 impl Default for SectionProperties {
@@ -100,6 +106,7 @@ impl Default for SectionProperties {
             headers: Vec::new(),
             footers: Vec::new(),
             title_page: false,
+            even_and_odd_headers: false,
         }
     }
 }

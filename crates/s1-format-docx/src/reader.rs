@@ -134,6 +134,93 @@ pub fn read(input: &[u8]) -> Result<DocumentModel, DocxError> {
         parse_endnotes_xml(&endnotes_xml, &mut doc)?;
     }
 
+    // P5: Detect and preserve digital signatures (_xmlsignatures/ entries)
+    let signature_entries = extract_signature_entries(&mut archive);
+    if !signature_entries.is_empty() {
+        doc.metadata_mut()
+            .custom_properties
+            .insert("hasDigitalSignature".to_string(), "true".to_string());
+
+        // Parse each signature XML to extract signer info and store the first
+        // signature's subject/date as top-level metadata.
+        let mut sig_index = 0u32;
+        for (path, content) in &signature_entries {
+            // Only parse .xml files (skip .rels and other support files)
+            if path.ends_with(".xml") && !path.ends_with(".rels") {
+                let mut info = crate::signature_parser::parse_signature_xml(content);
+                crate::signature_parser::validate_signature(&mut info);
+                if sig_index == 0 {
+                    doc.metadata_mut()
+                        .custom_properties
+                        .insert("signatureValid".to_string(), info.validation_status.clone());
+                    if let Some(ref subject) = info.subject {
+                        doc.metadata_mut()
+                            .custom_properties
+                            .insert("signatureSubject".to_string(), subject.clone());
+                    }
+                    if let Some(ref time) = info.signing_time {
+                        doc.metadata_mut()
+                            .custom_properties
+                            .insert("signatureDate".to_string(), time.clone());
+                    }
+                }
+                sig_index += 1;
+            }
+        }
+
+        // Store signature count
+        if sig_index > 0 {
+            doc.metadata_mut()
+                .custom_properties
+                .insert("signatureCount".to_string(), sig_index.to_string());
+        }
+
+        // Preserve raw signature entries for round-trip fidelity using the
+        // preserved_parts mechanism (binary-safe storage in the document model).
+        for (path, content) in &signature_entries {
+            doc.add_preserved_part(path.clone(), content.as_bytes().to_vec());
+        }
+    }
+
+    // Preserve ZIP entries for round-trip fidelity (custom XML, charts, diagrams, embeddings, VBA)
+    let preserve_prefixes = [
+        "customXml/",
+        "word/diagrams/",
+        "word/charts/",
+        "word/embeddings/",
+    ];
+    let preserve_files = ["word/vbaProject.bin", "word/vbaData.xml"];
+    for i in 0..archive.len() {
+        if let Ok(mut entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            let should_preserve = preserve_prefixes.iter().any(|p| name.starts_with(p))
+                || preserve_files.iter().any(|f| name == *f);
+            if should_preserve {
+                let mut data = Vec::new();
+                if entry.read_to_end(&mut data).is_ok() && !data.is_empty() {
+                    doc.add_preserved_part(name, data);
+                }
+            }
+        }
+    }
+
+    // P5: Detect VBA macros
+    let has_macros = doc
+        .preserved_parts()
+        .keys()
+        .any(|k| k.contains("vbaProject"))
+        || (0..archive.len()).any(|i| {
+            archive
+                .by_index(i)
+                .map(|f| f.name().contains("vbaProject"))
+                .unwrap_or(false)
+        });
+    if has_macros {
+        doc.metadata_mut()
+            .custom_properties
+            .insert("hasMacros".to_string(), "true".to_string());
+    }
+
     Ok(doc)
 }
 
@@ -238,6 +325,33 @@ fn extract_media_files(archive: &mut ZipArchive<Cursor<&[u8]>>) -> HashMap<Strin
     }
 
     media
+}
+
+/// Extract all `_xmlsignatures/*` entries from the ZIP archive as UTF-8 strings.
+///
+/// Returns a vec of `(path, content)` tuples preserving the original ZIP paths.
+/// Non-UTF-8 entries (e.g., binary certificate files) are skipped since the
+/// round-trip preservation only needs the XML and .rels files.
+fn extract_signature_entries(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Vec<(String, String)> {
+    let paths: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let file = archive.by_index(i).ok()?;
+            let name = file.name().to_string();
+            if name.starts_with("_xmlsignatures/") && name.len() > "_xmlsignatures/".len() {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut entries = Vec::new();
+    for path in paths {
+        if let Ok(content) = read_zip_entry(archive, &path) {
+            entries.push((path, content));
+        }
+    }
+    entries
 }
 
 #[cfg(test)]
@@ -408,5 +522,143 @@ mod tests {
 
         let result = read(&bytes);
         assert!(result.is_err());
+    }
+
+    /// Helper: build a DOCX with digital signature entries in _xmlsignatures/.
+    fn make_signed_docx(doc_xml: &str, sig_xml: &str) -> Vec<u8> {
+        let buf = Vec::new();
+        let mut zip = ZipWriter::new(Cursor::new(buf));
+        let options = SimpleFileOptions::default();
+
+        // [Content_Types].xml
+        zip.start_file("[Content_Types].xml", options).unwrap();
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#,
+        )
+        .unwrap();
+
+        // _rels/.rels
+        zip.start_file("_rels/.rels", options).unwrap();
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#,
+        )
+        .unwrap();
+
+        // word/document.xml
+        zip.start_file("word/document.xml", options).unwrap();
+        zip.write_all(doc_xml.as_bytes()).unwrap();
+
+        // _xmlsignatures/sig1.xml — digital signature entry
+        zip.start_file("_xmlsignatures/sig1.xml", options).unwrap();
+        zip.write_all(sig_xml.as_bytes()).unwrap();
+
+        // _xmlsignatures/_rels/origin.sigs.rels — relationship file
+        zip.start_file("_xmlsignatures/_rels/origin.sigs.rels", options)
+            .unwrap();
+        zip.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature" Target="sig1.xml"/>
+</Relationships>"#,
+        )
+        .unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn read_detects_digital_signature() {
+        let doc_xml = simple_doc_xml(r#"<w:p><w:r><w:t>Signed</w:t></w:r></w:p>"#);
+        let sig_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+  <KeyInfo>
+    <X509Data>
+      <X509SubjectName>CN=Test Signer, O=Test Corp</X509SubjectName>
+      <X509Certificate>MIICdTCCAd4CCQDZh...</X509Certificate>
+    </X509Data>
+  </KeyInfo>
+  <Object>
+    <SignatureProperties>
+      <SignatureProperty>
+        <SignedSignatureProperties>
+          <SigningTime>2025-06-15T10:30:00Z</SigningTime>
+        </SignedSignatureProperties>
+      </SignatureProperty>
+    </SignatureProperties>
+  </Object>
+</Signature>"#;
+
+        let docx = make_signed_docx(&doc_xml, sig_xml);
+        let doc = read(&docx).unwrap();
+
+        assert_eq!(doc.to_plain_text(), "Signed");
+
+        let props = &doc.metadata().custom_properties;
+        assert_eq!(
+            props.get("hasDigitalSignature").map(|s| s.as_str()),
+            Some("true")
+        );
+        // When crypto feature is enabled, validate_signature runs and may return
+        // "no_signature_value" for test data. Without crypto, it returns "unverified".
+        assert!(
+            props.get("signatureValid").is_some(),
+            "signatureValid metadata should be present"
+        );
+        assert_eq!(
+            props.get("signatureSubject").map(|s| s.as_str()),
+            Some("CN=Test Signer, O=Test Corp")
+        );
+        assert_eq!(
+            props.get("signatureDate").map(|s| s.as_str()),
+            Some("2025-06-15T10:30:00Z")
+        );
+        assert_eq!(props.get("signatureCount").map(|s| s.as_str()), Some("1"));
+    }
+
+    #[test]
+    fn read_preserves_signature_entries() {
+        let doc_xml = simple_doc_xml(r#"<w:p><w:r><w:t>Signed</w:t></w:r></w:p>"#);
+        let sig_xml =
+            r#"<?xml version="1.0"?><Signature xmlns="http://www.w3.org/2000/09/xmldsig#"/>"#;
+
+        let docx = make_signed_docx(&doc_xml, sig_xml);
+        let doc = read(&docx).unwrap();
+
+        let parts = doc.preserved_parts();
+
+        // Signature XML should be preserved in preserved_parts
+        let stored_sig = parts.get("_xmlsignatures/sig1.xml");
+        assert!(stored_sig.is_some(), "sig1.xml should be preserved");
+        let sig_str = std::str::from_utf8(stored_sig.unwrap()).unwrap();
+        assert!(
+            sig_str.contains("xmldsig"),
+            "stored content should contain the original XML"
+        );
+
+        // Relationship file should also be preserved
+        let stored_rels = parts.get("_xmlsignatures/_rels/origin.sigs.rels");
+        assert!(stored_rels.is_some(), "rels file should be preserved");
+    }
+
+    #[test]
+    fn read_no_signature_no_metadata() {
+        let doc_xml = simple_doc_xml(r#"<w:p><w:r><w:t>Unsigned</w:t></w:r></w:p>"#);
+        let docx = make_docx(&doc_xml, None, None);
+
+        let doc = read(&docx).unwrap();
+
+        let props = &doc.metadata().custom_properties;
+        assert!(props.get("hasDigitalSignature").is_none());
+        assert!(props.get("signatureSubject").is_none());
+        assert!(props.get("signatureDate").is_none());
+        assert!(props.get("signatureValid").is_none());
     }
 }

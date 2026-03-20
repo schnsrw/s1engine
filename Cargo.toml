@@ -28,8 +28,8 @@ rust-version = "1.88"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/schnsrw/s1engine"
 homepage = "https://github.com/schnsrw/s1engine"
-keywords = ["document", "docx", "odt", "pdf", "editor"]
-categories = ["parsing", "text-processing"]
+keywords = ["document", "docx", "odt", "collaborative-editing", "wasm"]
+categories = ["parsing", "text-processing", "web-programming"]
 
 [workspace.dependencies]
 # Internal crates (path for local dev, version for crates.io publish)
@@ -53,6 +53,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 base64 = "0.22"
 encoding_rs = "0.8"
 pulldown-cmark = "0.12"
+
+# Crypto (for digital signature validation)
+ring = "0.17"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 # Dev dependencies
 proptest = "1"

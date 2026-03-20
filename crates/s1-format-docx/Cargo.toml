@@ -10,12 +10,20 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+crypto = ["ring", "x509-cert"]
+
 [dependencies]
 s1-model = { workspace = true }
 quick-xml = { workspace = true }
 zip = { workspace = true }
 base64 = { workspace = true }
 thiserror = { workspace = true }
+ring = { workspace = true, optional = true }
+x509-cert = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+ring = { workspace = true }
+x509-cert = { workspace = true }

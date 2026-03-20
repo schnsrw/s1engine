@@ -282,7 +282,7 @@ pre{font-size:11px;background:#f9f9f9;padding:10px;border-radius:4px;overflow-x:
 <div class="container">
 <div class="cards" id="cards"></div>
 <div class="section"><h2>Active Sessions</h2>
-<table><thead><tr><th>ID</th><th>File</th><th>Fmt</th><th>Size</th><th>Editors</th><th>Status</th><th>Age</th><th></th></tr></thead>
+<table><thead><tr><th>ID</th><th>File</th><th>Fmt</th><th>Size</th><th>Editors</th><th>Last Active</th><th>Status</th><th>Age</th><th></th></tr></thead>
 <tbody id="sessions"></tbody></table></div>
 <div class="section"><h2>Config</h2><pre id="config"></pre></div>
 </div>
@@ -299,14 +299,17 @@ async function r(){
   <div class="card"><div class="card-label">Memory</div><div class="card-value">${s.memory_mb.toFixed(1)}MB</div></div>`;
  const tb=document.getElementById('sessions');
  function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+ function la(eds){if(!eds||!eds.length)return'-';const acts=eds.filter(e=>e.last_activity).map(e=>e.last_activity);if(!acts.length)return'-';acts.sort();const t=new Date(acts[acts.length-1]);const ago=Math.floor((Date.now()-t.getTime())/1000);return ago<0?'now':fu(ago)+' ago'}
+ function edTip(eds){if(!eds||!eds.length)return'';return eds.map(e=>esc(e.user_name)+' ('+esc(e.mode)+')'+( e.last_activity?' last: '+e.last_activity:'')).join('\\n')}
  tb.innerHTML=ss.sessions.length?ss.sessions.map(s=>`<tr>
   <td style="font-family:monospace;font-size:10px">${esc(s.file_id.substring(0,8))}</td>
   <td>${esc(s.filename)}</td><td>${esc(s.format)}</td><td>${fs(s.size)}</td>
-  <td>${s.editor_count}</td>
+  <td title="${edTip(s.editors)}">${s.editor_count}</td>
+  <td>${la(s.editors)}</td>
   <td><span class="badge badge-${esc(s.status)}">${esc(s.status)}</span></td>
   <td>${fu(s.created_at_secs_ago)}</td>
   <td><button class="btn-sm" onclick="cl('${esc(s.file_id)}')">Close</button></td></tr>`).join('')
-  :'<tr><td colspan="8" style="text-align:center;color:#ccc;padding:16px">No active sessions</td></tr>';
+  :'<tr><td colspan="9" style="text-align:center;color:#ccc;padding:16px">No active sessions</td></tr>';
  document.getElementById('config').textContent=JSON.stringify(c,null,2);
 }
 async function cl(id){if(!confirm('Close session?'))return;await fetch('/admin/api/sessions/'+encodeURIComponent(id),{method:'DELETE'});r()}
