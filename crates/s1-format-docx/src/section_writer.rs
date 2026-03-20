@@ -80,6 +80,11 @@ pub fn write_section_properties(props: &SectionProperties, hf_rels: &[HfRelEntry
         ));
     }
 
+    // Even and odd headers flag
+    if props.even_and_odd_headers {
+        xml.push_str("<w:evenAndOddHeaders/>");
+    }
+
     // Title page flag
     if props.title_page {
         xml.push_str("<w:titlePg/>");

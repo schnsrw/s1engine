@@ -163,6 +163,9 @@ pub fn parse_section_properties(
                     b"titlePg" => {
                         props.title_page = true;
                     }
+                    b"evenAndOddHeaders" => {
+                        props.even_and_odd_headers = true;
+                    }
                     _ => {}
                 }
             }

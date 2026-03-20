@@ -8230,6 +8230,16 @@ fn render_run(model: &DocumentModel, run_id: NodeId, html: &mut String) {
     if run.attributes.get_bool(&AttributeKey::TextOutline) == Some(true) {
         style.push_str("-webkit-text-stroke:1px currentColor;");
     }
+    // Q3: Text glow effect
+    if run.attributes.get(&AttributeKey::TextGlow).is_some() {
+        style.push_str("filter:drop-shadow(0 0 3px currentColor);");
+    }
+    // Q3: Text reflection effect
+    if run.attributes.get(&AttributeKey::TextReflection).is_some() {
+        style.push_str(
+            "-webkit-box-reflect:below 0px linear-gradient(transparent, rgba(0,0,0,0.1));",
+        );
+    }
     // Character spacing
     if let Some(sp) = run.attributes.get_f64(&AttributeKey::FontSpacing) {
         if sp.abs() > 0.01 {

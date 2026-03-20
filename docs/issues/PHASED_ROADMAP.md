@@ -146,7 +146,7 @@ Sprint 7+:  Phase 6 — Multi-App Suite         [P2,P1]
 | Phase | Items | Priority | Status |
 |-------|-------|----------|--------|
 | 1. CRDT Collaboration | 7 | Critical | **COMPLETE** (14/14 steps) |
-| 2. Format Fidelity | 8 | High | NOT STARTED |
+| 2. Format Fidelity | 8 | High | **COMPLETE** (6 fixed, 2 not-an-issue, 1 deferred) |
 | 3. Equations & Drawings | 5 | High | NOT STARTED |
 | 4. Enterprise & Compliance | 6 | High | NOT STARTED |
 | 5. Advanced Formats | 7 | Medium | NOT STARTED |

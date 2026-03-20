@@ -29,14 +29,14 @@
 |---|-----|------|-------------|--------|
 | B1 | — | content_writer.rs:316 | ~~Bookmarks not written~~ — FALSE: Bookmarks ARE written (BookmarkStart/End at line 316-328). | NOT AN ISSUE |
 | B2 | — | content_writer.rs:329 | ~~Comments not written~~ — FALSE: Comment ranges ARE written (CommentStart/End at line 329-351). | NOT AN ISSUE |
-| B3 | P2 | content_writer.rs:1304 | **Track changes rPrChange incomplete**: `w:ins`/`w:del`/`w:moveTo` ARE written (line 225-281). But `rPrChange` writes empty `<w:rPr/>` — old formatting not preserved. | OPEN |
+| B3 | P2 | content_writer.rs:1304 | **rPrChange old props preserved**: RevisionOriginalFormatting captured from parser, written back in rPrChange/pPrChange/tcPrChange. | FIXED |
 | B4 | — | content_writer.rs | ~~Footnotes/Endnotes not preserved~~ — FALSE: Full parser + writer exists (footnotes_writer.rs, endnotes_writer.rs). | NOT AN ISSUE |
 | B5 | P1 | content_writer.rs | **Run properties round-trip**: TextShadow, TextOutline, Language now written. | FIXED |
 | B6 | P1 | content_writer.rs | **Paragraph properties**: contextualSpacing + wordWrap now written. New AttributeKeys added. | FIXED |
 | B7 | P1 | content_writer.rs | **Table style**: w:tblStyle now written from StyleId on table node. | FIXED |
-| B8 | P2 | content_writer.rs | **Section properties incomplete**: Different odd/even headers not supported. Per-section margins not dynamically written. | OPEN |
+| B8 | P2 | section_writer.rs | **Section even/odd headers**: evenAndOddHeaders parsed + written. Per-section margins already correct. | FIXED |
 | B9 | P2 | content_writer.rs:1363 | **Highlight color limited**: Only 8 named colors mapped; arbitrary colors now use `w:shd` fallback (fixed). | FIXED |
-| B10 | P2 | content_writer.rs | **List format simplified**: Custom numbering definitions (A.1.a), custom start numbers, separators not reconstructed. | OPEN |
+| B10 | — | content_writer.rs | ~~Custom list numbering~~ — ALREADY IMPLEMENTED: numbering_writer.rs handles abstractNum, custom lvlText, start numbers, overrides, indentation, bullet fonts. | NOT AN ISSUE |
 
 ## C. WASM API GAPS (4 issues)
 
@@ -86,7 +86,7 @@
 | G1 | P1 | input.js:1677 | **Undo not recorded if paste throws**: recordUndoAction moved before operation in 7 handlers. | FIXED |
 | G2 | P1 | images.js:110 | **Undo before render on image drag**: recordUndoAction moved before renderDocument. | FIXED |
 | G3 | P1 | find.js:460 | **Replace All has no undo**: recordUndoAction added. | FIXED |
-| G4 | P2 | toolbar.js:175 | **Redo not synced with WASM**: UI redo history can diverge from WASM undo stack if actions bypass `recordUndoAction()`. | OPEN |
+| G4 | P2 | toolbar.js:175 | **Redo synced with WASM**: updateUndoRedo now queries collabDoc.can_undo/can_redo. | FIXED |
 
 ## H. RESPONSIVE & MOBILE (4 issues)
 
@@ -111,7 +111,7 @@
 | # | Sev | File | Description | Status |
 |---|-----|------|-------------|--------|
 | J1 | P1 | toolbar-handlers.js:2530 | **Table context validation**: Guard added to cell background picker. Others already guarded. | FIXED |
-| J2 | P1 | toolbar-handlers.js:2545 | **Merge cells no rectangle validation**: Merging non-rectangular selections produces unexpected results. | OPEN |
+| J2 | P1 | toolbar-handlers.js:2545 | **Merge cells validated**: Rectangle check + bounds check + error toast on invalid. | FIXED |
 | J3 | P2 | images.js:264 | **Image resize lost on tab switch**: persistResizeDuringDrag called before stop. | FIXED |
 | J4 | P2 | images.js:128 | **Image drop target**: Fresh DOM query on each call (already correct). | FIXED |
 | J5 | P2 | images.js:398 | **Alt text sanitized**: HTML tags stripped before passing to WASM. | FIXED |
@@ -173,9 +173,9 @@
 ### DOCX Partial
 | # | Sev | Area | Description | Status |
 |---|-----|------|-------------|--------|
-| Q1 | P2 | DOCX | **Namespace extensions (w14/w15)**: Office 2016+ features detected but not modeled. Raw XML preserved. | OPEN |
-| Q2 | P1 | DOCX | **Complex table merges**: gridSpan OK but vMerge basic — irregular merges lose structure. | OPEN |
-| Q3 | P2 | DOCX | **Text effects**: Shadow, glow, outline stored but not rendered in editor. | OPEN |
+| Q1 | P3 | DOCX | **Namespace extensions (w14/w15)**: Raw XML preserved for round-trip. Semantic modeling deferred — low ROI vs raw preservation. | DEFERRED |
+| Q2 | — | DOCX | ~~Complex table vMerge~~ — ALREADY IMPLEMENTED: Parser + writer handle vMerge restart/continue via RowSpan attribute. | NOT AN ISSUE |
+| Q3 | P2 | DOCX | **Text effects**: TextGlow + TextReflection now rendered as CSS filter/reflect. | FIXED |
 | Q4 | P1 | DOCX | **Equations (OMML)**: Preserved as raw XML, not converted to LaTeX or rendered. | OPEN |
 | Q5 | P2 | DOCX | **Form controls (w:sdt)**: Preserved as raw XML, not interactive. | OPEN |
 

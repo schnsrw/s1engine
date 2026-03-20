@@ -1075,7 +1075,9 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
 
 /// Write a property change element (`pPrChange`, `tcPrChange`, `trPrChange`, `tblPrChange`).
 ///
-/// Emits `<w:{tag} w:id="..." w:author="..." w:date="..."><w:{inner_tag}/></w:{tag}>`.
+/// Emits `<w:{tag} w:id="..." w:author="..." w:date="..."><w:{inner_tag}>...</w:{inner_tag}></w:{tag}>`.
+/// If `RevisionOriginalFormatting` is available, it is used as the inner content;
+/// otherwise an empty `<w:{inner_tag}/>` is written as fallback.
 fn write_property_change_element(
     tag: &str,
     inner_tag: &str,
@@ -1095,8 +1097,13 @@ fn write_property_change_element(
         escape_xml(author),
         escape_xml(date),
     ));
-    // Write empty old properties element (original formatting not stored)
-    xml.push_str(&format!("<w:{inner_tag}/>"));
+    // Write the original (pre-change) properties if stored; otherwise fallback
+    // to an empty element.
+    if let Some(orig) = attrs.get_string(&AttributeKey::RevisionOriginalFormatting) {
+        xml.push_str(orig);
+    } else {
+        xml.push_str(&format!("<w:{inner_tag}/>"));
+    }
     xml.push_str(&format!("</w:{tag}>"));
 }
 
@@ -1337,7 +1344,15 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         if let Some(date) = attrs.get_string(&AttributeKey::RevisionDate) {
             rpr_change.push_str(&format!(r#" w:date="{}""#, escape_xml(date)));
         }
-        rpr_change.push_str("><w:rPr/></w:rPrChange>");
+        rpr_change.push('>');
+        // Write the original (pre-change) run properties if stored; otherwise
+        // emit an empty <w:rPr/> as a fallback.
+        if let Some(orig) = attrs.get_string(&AttributeKey::RevisionOriginalFormatting) {
+            rpr_change.push_str(orig);
+        } else {
+            rpr_change.push_str("<w:rPr/>");
+        }
+        rpr_change.push_str("</w:rPrChange>");
         rpr.push_str(&rpr_change);
     }
 

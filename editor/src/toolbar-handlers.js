@@ -2593,9 +2593,26 @@ function initTableContextMenu() {
 
   // UXP-12: Merge cells — uses existing WASM merge_cells API
   cmAction('cmMergeCells', () => {
+    // J2: Validate that row/col indices are valid numbers before merging
+    if (typeof state.ctxRow !== 'number' || typeof state.ctxCol !== 'number'
+        || isNaN(state.ctxRow) || isNaN(state.ctxCol)
+        || state.ctxRow < 0 || state.ctxCol < 0) {
+      showToast('Select a valid cell before merging', 'error');
+      return;
+    }
+    // J2: Validate rectangular selection if multi-cell selection is tracked
+    if (state.selectionCells
+        && (!state.selectionCells.rowSpan || !state.selectionCells.colSpan)) {
+      showToast('Select a rectangular range of cells to merge', 'error');
+      return;
+    }
     // Merge a 2x2 block starting from the right-clicked cell.
     // If cell is at the last row/col, merge just the available range.
     const dims = JSON.parse(state.doc.get_table_dimensions(state.ctxTable));
+    if (state.ctxRow >= dims.rows || state.ctxCol >= dims.cols) {
+      showToast('Cell position is out of table bounds', 'error');
+      return;
+    }
     const endRow = Math.min(state.ctxRow + 1, dims.rows - 1);
     const endCol = Math.min(state.ctxCol + 1, dims.cols - 1);
     state.doc.merge_cells(state.ctxTable, state.ctxRow, state.ctxCol, endRow, endCol);
