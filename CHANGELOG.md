@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Paste: blank lines no longer dropped (removed 3 faulty filters)
 - Paste: MAX_PASTE_PARAGRAPHS raised 1K->10K with user feedback on failure
 - Paste: nested list depth recursively detected, table cell formatting preserved
-- Paste: Google Docs multi-paragraph wrapper splitting, footnote detection
+- Paste: multi-paragraph wrapper splitting, footnote detection
 - PDF: text layer selection visibility (opacity 0.25->1)
 - PDF: comment tool single-shot mode, outside-click race condition fixed
 - PDF: signature typed tab renders with script font + subtle underline
@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inline comment input (replaces browser `prompt()`)
 - Rich paste with formatting preservation (bold, italic, underline, font, size, color)
 - Three-tier paste strategy: batch WASM paste, per-run formatting fallback, plain text fallback
-- Paste support for content from external sources (Word, Google Docs)
+- Paste support for content from external sources (other office applications)
 - Shapes drawing tools (rectangle, ellipse, line, arrow, text box)
 
 **WASM API**
@@ -106,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Paste formatting preservation** — `set_paragraph_text` rewritten with diff-based editing; typing after paste no longer destroys multi-run formatting
 - **Underline paste value** — fixed `pasteWithManualFormatting` to use `'underline', 'true'` (was `'single'`, which WASM didn't recognize)
-- **Google Docs paste** — fixed inline content from Google Docs `<b id="docs-internal-guid-...">` wrapper creating separate paragraphs per span
+- **External paste** — fixed inline content from external editor `<b id="docs-internal-guid-...">` wrapper creating separate paragraphs per span
 - **Consecutive inline paste** — fixed `walkBlockElements` merging adjacent inline elements into single paragraph instead of splitting
 - PDF.js `standardFontDataUrl` warning resolved
 - ArrayBuffer detach error when opening PDFs

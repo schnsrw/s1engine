@@ -451,7 +451,7 @@ function applyFormatPair(clearKey, clearVal, setKey, setVal, info, startEl, endE
 }
 
 // ─── Floating Selection Toolbar ──────────────────────────
-// Shows a compact formatting bar above the selection, similar to Google Docs.
+// Shows a compact formatting bar above the selection.
 
 let _floatingEl = null;
 let _floatingHideTimer = null;
@@ -608,7 +608,7 @@ function hideFloatingToolbar() {
   }
 }
 
-// Show floating toolbar after a small delay on mouseup (like Google Docs)
+// Show floating toolbar after a small delay on mouseup
 let _floatingMouseUpTimer = null;
 document.addEventListener('mouseup', () => {
   clearTimeout(_floatingMouseUpTimer);

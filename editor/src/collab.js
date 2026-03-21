@@ -505,6 +505,11 @@ function applyRemoteOp(dataStr, fromPeerId) {
     const op = JSON.parse(dataStr);
     applyingRemote = true;
 
+    // Track peer typing activity for presence indicator
+    if (fromPeerId && fromPeerId !== peerId) {
+      trackPeerTyping(fromPeerId);
+    }
+
     // Flash the affected paragraph for visual feedback (no toast — too noisy)
     if (fromPeerId && fromPeerId !== peerId) {
       const affectedNodeId = op.nodeId || op.startNode;
@@ -911,6 +916,19 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      // S4.1: Spreadsheet collaboration ops — forwarded to the active SpreadsheetView
+      case 'ssSetCell':
+      case 'ssFormat':
+      case 'ssSync':
+      case 'ssCursor': {
+        try {
+          if (state.spreadsheetView && typeof state.spreadsheetView._applyRemoteSSop === 'function') {
+            state.spreadsheetView._applyRemoteSSop(op, fromPeerId);
+          }
+        } catch (e) { console.debug('[collab] spreadsheet op error:', e); }
+        break;
+      }
+
       default:
         console.warn('Unknown remote op:', op.action);
     }
@@ -1050,11 +1068,68 @@ function addPeer(pid, name, color) {
 function removePeer(pid) {
   peers.delete(pid);
   removePeerCursor(pid);
+  // Clean up typing state for this peer
+  peerOpTimestamps.delete(pid);
+  if (peerTypingTimers.has(pid)) {
+    clearTimeout(peerTypingTimers.get(pid));
+    peerTypingTimers.delete(pid);
+  }
   updatePeerCount();
 }
 
 // Track last known cursor state per peer to avoid unnecessary DOM updates
 const peerCursorState = new Map();
+
+// ─── Typing Activity Tracker ─────────────────────────
+// Track op timestamps per peer to detect rapid typing (>2 ops in 3 seconds)
+const peerOpTimestamps = new Map(); // peerId -> [timestamps]
+const peerTypingTimers = new Map(); // peerId -> clearTimeout handle
+const TYPING_OP_THRESHOLD = 2;     // ops needed to trigger "typing..."
+const TYPING_WINDOW_MS = 3000;     // time window to measure ops
+const TYPING_DISPLAY_MS = 3000;    // how long to show "typing..." after last op
+
+function trackPeerTyping(pid) {
+  if (pid === peerId) return;
+  const now = Date.now();
+  let timestamps = peerOpTimestamps.get(pid);
+  if (!timestamps) {
+    timestamps = [];
+    peerOpTimestamps.set(pid, timestamps);
+  }
+  timestamps.push(now);
+  // Remove timestamps outside the window
+  const cutoff = now - TYPING_WINDOW_MS;
+  while (timestamps.length > 0 && timestamps[0] < cutoff) timestamps.shift();
+
+  if (timestamps.length > TYPING_OP_THRESHOLD) {
+    showPeerTyping(pid, true);
+    // Clear any existing timer and set a new one to hide after inactivity
+    if (peerTypingTimers.has(pid)) clearTimeout(peerTypingTimers.get(pid));
+    peerTypingTimers.set(pid, setTimeout(() => {
+      showPeerTyping(pid, false);
+      peerTypingTimers.delete(pid);
+    }, TYPING_DISPLAY_MS));
+  }
+}
+
+function showPeerTyping(pid, isTyping) {
+  const cursorEl = document.getElementById(`peer-cursor-${pid}`);
+  if (!cursorEl) return;
+  let typingEl = cursorEl.querySelector('.peer-cursor-typing');
+  if (isTyping) {
+    if (!typingEl) {
+      typingEl = document.createElement('span');
+      typingEl.className = 'peer-cursor-typing';
+      typingEl.textContent = 'typing...';
+      const label = cursorEl.querySelector('.peer-cursor-label');
+      if (label) {
+        label.appendChild(typingEl);
+      }
+    }
+  } else {
+    if (typingEl) typingEl.remove();
+  }
+}
 
 function renderPeerCursor(cursor) {
   if (!cursor || !cursor.nodeId) return;
@@ -1214,6 +1289,10 @@ function clearPeerCursors() {
   document.querySelectorAll('.peer-selection-highlight').forEach(el => el.remove());
   peers.clear();
   peerCursorState.clear();
+  // Clear typing state
+  for (const timer of peerTypingTimers.values()) clearTimeout(timer);
+  peerTypingTimers.clear();
+  peerOpTimestamps.clear();
   updatePeerCount();
 }
 
@@ -1295,6 +1374,9 @@ function updatePeerCount() {
   // Update status bar peer dots
   renderStatusBarPeers();
 
+  // Update title bar avatar circles
+  renderTitleBarAvatars();
+
   // Update share modal peer list if open
   updateSharePeerList();
 }
@@ -1322,6 +1404,48 @@ function renderStatusBarPeers() {
     dot.title = peerTitle;
     dot.setAttribute('aria-label', peerTitle);
     container.appendChild(dot);
+  }
+}
+
+/**
+ * Render colored avatar circles in the title bar for each connected peer.
+ * Shows up to 5 peers with initial letters, then "+N more" overflow.
+ */
+const MAX_VISIBLE_AVATARS = 5;
+
+function renderTitleBarAvatars() {
+  const container = $('collabAvatars');
+  if (!container) return;
+
+  container.innerHTML = '';
+  if (!roomId || peers.size === 0) {
+    container.classList.remove('visible');
+    return;
+  }
+
+  container.classList.add('visible');
+  const peerEntries = Array.from(peers.entries());
+  const visible = peerEntries.slice(0, MAX_VISIBLE_AVATARS);
+  const overflow = peerEntries.length - MAX_VISIBLE_AVATARS;
+
+  for (const [pid, p] of visible) {
+    const avatar = document.createElement('span');
+    avatar.className = 'collab-avatar';
+    avatar.style.backgroundColor = p.userColor || '#999';
+    const name = p.userName || 'Peer';
+    avatar.textContent = name.charAt(0).toUpperCase();
+    avatar.title = name;
+    avatar.setAttribute('aria-label', name);
+    container.appendChild(avatar);
+  }
+
+  if (overflow > 0) {
+    const more = document.createElement('span');
+    more.className = 'collab-avatar-overflow';
+    more.textContent = '+' + overflow;
+    more.title = peerEntries.slice(MAX_VISIBLE_AVATARS).map(([, p]) => p.userName || 'Peer').join(', ');
+    more.setAttribute('aria-label', overflow + ' more collaborators');
+    container.appendChild(more);
   }
 }
 
@@ -1578,6 +1702,37 @@ export async function checkAutoJoin() {
   const params = new URLSearchParams(window.location.search);
   const fileId = params.get('file');
   const room = params.get('room');
+  const docType = params.get('type'); // S4.2: 'sheet' for spreadsheet
+
+  // S4.2: If type=sheet and we have a spreadsheet view, use spreadsheet collab
+  if (fileId && docType === 'sheet') {
+    try {
+      const apiBase = window.S1_CONFIG?.apiUrl || '/api/v1';
+      const resp = await fetch(`${apiBase}/files/${encodeURIComponent(fileId)}/download`);
+      if (!resp.ok) {
+        showCollabToast('Shared spreadsheet not found or session expired');
+        return false;
+      }
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      // Open in spreadsheet view if available
+      if (state.spreadsheetView) {
+        let filename = 'Shared Spreadsheet.xlsx';
+        try {
+          const infoResp = await fetch(`${apiBase}/files/${encodeURIComponent(fileId)}`);
+          if (infoResp.ok) { const info = await infoResp.json(); filename = info.filename || filename; }
+        } catch (_) {}
+        state.spreadsheetView.loadWorkbook(bytes, filename);
+        const name = 'User ' + Math.floor(Math.random() * 100);
+        const relay = params.get('relay') || DEFAULT_RELAY_URL;
+        state.spreadsheetView.startCollab(fileId, name, relay);
+        return true;
+      }
+    } catch (e) {
+      console.error('Failed to open shared spreadsheet:', e);
+      showCollabToast('Failed to open shared spreadsheet');
+      return false;
+    }
+  }
 
   if (fileId) {
     // Server-based share: fetch document from server, open it, then join collab

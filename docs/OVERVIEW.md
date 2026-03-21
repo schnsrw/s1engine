@@ -27,13 +27,10 @@ A modern, modular document engine SDK built in Rust (with C++ interop where nece
 
 ### Problems with Existing Engines
 
-| Engine | Problem |
+| Approach | Problem |
 |---|---|
-| **LibreOffice** | Monolithic C++ codebase, can't embed just the document engine, not WASM-friendly |
-| **OnlyOffice** | Large, tightly coupled, JS-heavy client, not a clean embeddable SDK |
-| **Google Docs** | Proprietary, not self-hostable, no SDK |
-| **Typst** | Typesetting only — no DOCX/ODT, not an editing engine |
-| **Pandoc** | Conversion tool, not an editing engine, no layout |
+| **Typesetting tools** | No DOCX/ODT, not an editing engine |
+| **Conversion tools** | Conversion only, not an editing engine, no layout |
 
 ### What s1engine Offers
 
@@ -48,7 +45,7 @@ A modern, modular document engine SDK built in Rust (with C++ interop where nece
 
 1. **Application developers** building document editors (web, desktop, mobile)
 2. **Backend services** that need to generate, convert, or process documents
-3. **Platform teams** building collaborative editing products (like a self-hosted Google Docs alternative)
+3. **Platform teams** building collaborative editing products (self-hosted document editors)
 
 ## Relationship to Larger Product
 

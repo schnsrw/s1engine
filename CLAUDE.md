@@ -138,13 +138,13 @@ This eliminates all C/C++ dependencies while providing full Unicode support.
 
 **CRITICAL**: Every feature MUST follow this process:
 
-1. **Research** — Study the standard (OOXML, ODF, PDF) + analyze competitors
+1. **Research** — Study the standard (OOXML, ODF, PDF) + analyze existing implementations
 2. **Specify** — Write spec with happy path + numbered edge cases + error handling
 3. **Break** — Think adversarially: what breaks this? Race conditions? Resource limits?
 4. **Fix spec** — Update spec to handle discovered breaks
 5. **Implement** — Code to spec (spec items = test cases)
 6. **Test** — Unit + integration + E2E tests for every spec item
-7. **Verify** — Test against real documents from Word, LibreOffice, Google Docs
+7. **Verify** — Test against real documents from various office applications
 
 Specs live in `docs/specs/`. Index at `docs/SPECIFICATIONS_INDEX.md`.
 
@@ -164,10 +164,10 @@ Specs live in `docs/specs/`. Index at `docs/SPECIFICATIONS_INDEX.md`.
 
 All UI modifications to the editor (`editor/src/`, `editor/index.html`, `demo/`) must follow these rules:
 
-1. **Clean & Professional** — No funky/bright/neon colors. Use neutral, professional palettes (grays, whites, subtle blues). Match the look of Google Docs, Microsoft Word Online, or OnlyOffice.
+1. **Clean & Professional** — No funky/bright/neon colors. Use neutral, professional palettes (grays, whites, subtle blues). Follow professional, production-grade UI standards.
 2. **No Emojis in Layout** — Never use emoji characters as icons or labels in the UI. Use text labels or Unicode symbols (like checkmark/cross) sparingly and only when they look professional.
 3. **Tooltips Required** — Every toolbar button, dropdown, and interactive element must have a descriptive `title` attribute tooltip (e.g., `title="Bold (Ctrl+B)"`).
-4. **Competitor Parity** — The editor should look and feel like a real document editor. Reference Google Docs / Word Online / OnlyOffice for toolbar layout, color schemes, dropdown styling, font choices, spacing.
+4. **Professional Parity** — The editor should look and feel like a real document editor. Follow industry-standard conventions for toolbar layout, color schemes, dropdown styling, font choices, spacing.
 5. **Production Grade** — No placeholder styling, no TODO colors, no debug borders. Every element should look finished and polished.
 
 ## Collaboration Relay Server

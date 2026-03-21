@@ -27,8 +27,8 @@ version = "1.0.1"
 edition = "2021"
 rust-version = "1.88"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/schnsrw/s1engine"
-homepage = "https://github.com/schnsrw/s1engine"
+repository = "https://github.com/Rudra-Office/Rudra-Editor"
+homepage = "https://github.com/Rudra-Office/Rudra-Editor"
 keywords = ["document", "docx", "odt", "collaborative-editing", "wasm"]
 categories = ["parsing", "text-processing", "web-programming"]
 

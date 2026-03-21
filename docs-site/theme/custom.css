@@ -1,0 +1,413 @@
+/* ═══════════════════════════════════════════════════
+   Rudra Code — Custom mdbook Theme
+   Professional docs styling matching product branding
+   ═══════════════════════════════════════════════════ */
+
+/* ─── Brand Colors ────────────────────────────────── */
+:root {
+    --rudra-accent: #1a73e8;
+    --rudra-accent-hover: #1557b0;
+    --rudra-accent-light: #e8f0fe;
+    --rudra-accent-dark: #8ab4f8;
+    --rudra-text: #202124;
+    --rudra-text-secondary: #5f6368;
+    --rudra-bg: #fff;
+    --rudra-bg-alt: #f8f9fa;
+    --rudra-border: #dadce0;
+    --rudra-success: #34a853;
+    --rudra-warning: #f9ab00;
+    --rudra-error: #ea4335;
+    --rudra-radius: 8px;
+    --rudra-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --rudra-shadow-lg: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* ─── Global Overrides ────────────────────────────── */
+.light, .rust {
+    --bg: #fff;
+    --fg: #202124;
+    --sidebar-bg: #f8f9fa;
+    --sidebar-fg: #5f6368;
+    --sidebar-active: #1a73e8;
+    --sidebar-spacer: #dadce0;
+    --links: #1a73e8;
+    --inline-code-color: #c7254e;
+    --theme-popup-bg: #fff;
+    --theme-popup-border: #dadce0;
+    --quote-bg: #f8f9fa;
+    --quote-border: #1a73e8;
+    --table-border-color: #dadce0;
+    --table-header-bg: #f8f9fa;
+    --table-alternate-bg: #fafbfc;
+    --searchresults-header-fg: #1a73e8;
+    --searchbar-border-color: #dadce0;
+    --searchbar-bg: #fff;
+    --searchbar-fg: #202124;
+}
+
+.ayu, .navy, .coal {
+    --sidebar-active: #8ab4f8;
+    --links: #8ab4f8;
+    --quote-border: #8ab4f8;
+    --searchresults-header-fg: #8ab4f8;
+}
+
+/* ─── Typography ──────────────────────────────────── */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.content main {
+    max-width: 820px;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+}
+
+.content main h1 {
+    font-size: 2.2em;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-top: 0;
+    margin-bottom: 0.6em;
+    padding-bottom: 0.3em;
+    border-bottom: 2px solid var(--rudra-accent);
+}
+
+.content main h2 {
+    font-size: 1.6em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-top: 2em;
+    margin-bottom: 0.5em;
+    padding-bottom: 0.2em;
+    border-bottom: 1px solid var(--table-border-color);
+}
+
+.content main h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    margin-top: 1.6em;
+    margin-bottom: 0.4em;
+}
+
+.content main h4 {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-top: 1.4em;
+    color: var(--rudra-text-secondary);
+}
+
+/* ─── Sidebar ─────────────────────────────────────── */
+.sidebar {
+    font-size: 14px;
+    padding-top: 16px;
+}
+
+.sidebar .sidebar-scrollbox {
+    padding: 0 16px;
+}
+
+.sidebar ol.chapter li.chapter-item {
+    margin-top: 4px;
+}
+
+.sidebar ol.chapter li.chapter-item a {
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background 0.15s ease, color 0.15s ease;
+    display: block;
+    color: var(--sidebar-fg);
+    text-decoration: none;
+}
+
+.sidebar ol.chapter li.chapter-item a:hover {
+    background: rgba(26, 115, 232, 0.08);
+    color: var(--sidebar-active);
+}
+
+.sidebar ol.chapter li.chapter-item.active > a {
+    background: rgba(26, 115, 232, 0.12);
+    color: var(--sidebar-active);
+    font-weight: 600;
+}
+
+.sidebar ol.chapter li.part-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--rudra-text-secondary);
+    margin-top: 20px;
+    margin-bottom: 4px;
+    padding: 0 12px;
+}
+
+/* ─── Links ───────────────────────────────────────── */
+.content main a {
+    color: var(--links);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+}
+
+.content main a:hover {
+    border-bottom-color: var(--links);
+}
+
+/* ─── Code Blocks ─────────────────────────────────── */
+.content main code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', monospace;
+    font-size: 0.875em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--quote-bg);
+}
+
+.content main pre {
+    border-radius: var(--rudra-radius);
+    border: 1px solid var(--table-border-color);
+    box-shadow: var(--rudra-shadow);
+    padding: 16px 20px;
+    margin: 1.2em 0;
+    overflow-x: auto;
+}
+
+.content main pre code {
+    padding: 0;
+    background: transparent;
+    border: none;
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+/* Copy button styling */
+.content main pre .buttons {
+    top: 8px;
+    right: 8px;
+}
+
+.content main pre .buttons button {
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.content main pre:hover .buttons button {
+    opacity: 0.7;
+}
+
+.content main pre .buttons button:hover {
+    opacity: 1;
+    background: rgba(26, 115, 232, 0.1);
+}
+
+/* ─── Tables ──────────────────────────────────────── */
+.content main table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: var(--rudra-radius);
+    border: 1px solid var(--table-border-color);
+    overflow: hidden;
+    margin: 1.2em 0;
+    font-size: 14px;
+}
+
+.content main table th {
+    background: var(--table-header-bg);
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--rudra-text-secondary);
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 2px solid var(--table-border-color);
+}
+
+.content main table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--table-border-color);
+    vertical-align: top;
+}
+
+.content main table tr:last-child td {
+    border-bottom: none;
+}
+
+.content main table tr:nth-child(even) {
+    background: var(--table-alternate-bg);
+}
+
+/* ─── Blockquotes / Callouts ──────────────────────── */
+.content main blockquote {
+    border-left: 4px solid var(--quote-border);
+    background: var(--quote-bg);
+    border-radius: 0 var(--rudra-radius) var(--rudra-radius) 0;
+    padding: 12px 20px;
+    margin: 1.2em 0;
+    color: var(--rudra-text-secondary);
+}
+
+.content main blockquote p {
+    margin: 0.4em 0;
+}
+
+/* ─── Admonitions (via blockquote convention) ─────── */
+/* Use: > **Note:** or > **Warning:** or > **Tip:** */
+.content main blockquote strong {
+    display: inline;
+}
+
+/* ─── Navigation Buttons ──────────────────────────── */
+.nav-chapters {
+    font-size: 14px;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.nav-chapters:hover {
+    opacity: 1;
+    color: var(--sidebar-active);
+}
+
+/* Previous/Next page links */
+.content .previous, .content .next {
+    text-decoration: none;
+}
+
+/* ─── Search ──────────────────────────────────────── */
+#searchbar {
+    border-radius: var(--rudra-radius);
+    padding: 8px 16px;
+    font-size: 14px;
+    border: 1px solid var(--searchbar-border-color);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#searchbar:focus {
+    border-color: var(--rudra-accent);
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15);
+    outline: none;
+}
+
+.searchresults a {
+    border-radius: 6px;
+    padding: 8px 12px;
+    transition: background 0.15s ease;
+}
+
+.searchresults a:hover {
+    background: rgba(26, 115, 232, 0.06);
+}
+
+/* ─── Top Menu Bar ────────────────────────────────── */
+#menu-bar {
+    border-bottom: 1px solid var(--table-border-color);
+    padding: 0 8px;
+}
+
+#menu-bar .icon-button {
+    border-radius: 6px;
+    transition: background 0.15s ease;
+    padding: 6px;
+}
+
+#menu-bar .icon-button:hover {
+    background: rgba(26, 115, 232, 0.08);
+}
+
+/* ─── Theme Popup ─────────────────────────────────── */
+#theme-list {
+    border-radius: var(--rudra-radius);
+    border: 1px solid var(--theme-popup-border);
+    box-shadow: var(--rudra-shadow-lg);
+    overflow: hidden;
+}
+
+#theme-list li {
+    padding: 8px 16px;
+    transition: background 0.15s ease;
+}
+
+#theme-list li:hover {
+    background: rgba(26, 115, 232, 0.08);
+}
+
+/* ─── Lists ───────────────────────────────────────── */
+.content main ul, .content main ol {
+    padding-left: 24px;
+}
+
+.content main li {
+    margin: 0.3em 0;
+}
+
+.content main li > p {
+    margin: 0.3em 0;
+}
+
+/* ─── Horizontal Rules ────────────────────────────── */
+.content main hr {
+    border: none;
+    border-top: 1px solid var(--table-border-color);
+    margin: 2em 0;
+}
+
+/* ─── Images ──────────────────────────────────────── */
+.content main img {
+    max-width: 100%;
+    border-radius: var(--rudra-radius);
+    box-shadow: var(--rudra-shadow);
+    margin: 1em 0;
+}
+
+/* ─── Badges / Status Labels ──────────────────────── */
+/* For use in tables: DONE, NOT STARTED, etc */
+.content main td code {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+/* ─── Print Styles ────────────────────────────────── */
+@media print {
+    .sidebar, #menu-bar, .nav-chapters {
+        display: none !important;
+    }
+    .content main {
+        max-width: 100%;
+    }
+}
+
+/* ─── Mobile Responsive ───────────────────────────── */
+@media (max-width: 768px) {
+    .content main {
+        font-size: 15px;
+        padding: 0 16px;
+    }
+    .content main h1 {
+        font-size: 1.8em;
+    }
+    .content main table {
+        font-size: 13px;
+    }
+    .content main table th,
+    .content main table td {
+        padding: 8px 10px;
+    }
+}
+
+/* ─── Reduced Motion ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}

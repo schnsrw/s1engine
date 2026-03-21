@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="sbg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34a853" />
+      <stop offset="100%" stop-color="#1e8e3e" />
+    </linearGradient>
+    <linearGradient id="sfold" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#81c995" />
+      <stop offset="100%" stop-color="#a8dab5" />
+    </linearGradient>
+  </defs>
+  <!-- Sheet body -->
+  <path d="M72 56 C72 44 82 34 94 34 L356 34 L440 118 L440 458 C440 470 430 480 418 480 L94 480 C82 480 72 470 72 458 Z" fill="url(#sbg)" />
+  <!-- Corner fold -->
+  <path d="M356 34 L356 86 C356 102 368 118 386 118 L440 118 Z" fill="url(#sfold)" />
+  <!-- Grid: column headers row -->
+  <rect x="120" y="152" width="72" height="32" rx="2" fill="#fff" opacity="0.3" />
+  <rect x="200" y="152" width="72" height="32" rx="2" fill="#fff" opacity="0.3" />
+  <rect x="280" y="152" width="72" height="32" rx="2" fill="#fff" opacity="0.3" />
+  <rect x="360" y="152" width="52" height="32" rx="2" fill="#fff" opacity="0.3" />
+  <!-- Grid rows -->
+  <rect x="120" y="192" width="72" height="28" rx="2" fill="#fff" opacity="0.18" />
+  <rect x="200" y="192" width="72" height="28" rx="2" fill="#fff" opacity="0.18" />
+  <rect x="280" y="192" width="72" height="28" rx="2" fill="#fff" opacity="0.18" />
+  <rect x="360" y="192" width="52" height="28" rx="2" fill="#fff" opacity="0.18" />
+
+  <rect x="120" y="228" width="72" height="28" rx="2" fill="#fff" opacity="0.12" />
+  <rect x="200" y="228" width="72" height="28" rx="2" fill="#fff" opacity="0.12" />
+  <rect x="280" y="228" width="72" height="28" rx="2" fill="#fff" opacity="0.12" />
+  <rect x="360" y="228" width="52" height="28" rx="2" fill="#fff" opacity="0.12" />
+
+  <rect x="120" y="264" width="72" height="28" rx="2" fill="#fff" opacity="0.09" />
+  <rect x="200" y="264" width="72" height="28" rx="2" fill="#fff" opacity="0.09" />
+  <rect x="280" y="264" width="72" height="28" rx="2" fill="#fff" opacity="0.09" />
+  <rect x="360" y="264" width="52" height="28" rx="2" fill="#fff" opacity="0.09" />
+
+  <rect x="120" y="300" width="72" height="28" rx="2" fill="#fff" opacity="0.06" />
+  <rect x="200" y="300" width="72" height="28" rx="2" fill="#fff" opacity="0.06" />
+  <rect x="280" y="300" width="72" height="28" rx="2" fill="#fff" opacity="0.06" />
+  <rect x="360" y="300" width="52" height="28" rx="2" fill="#fff" opacity="0.06" />
+  <!-- Grid lines (horizontal) -->
+  <line x1="120" y1="184" x2="412" y2="184" stroke="#fff" stroke-width="1.5" opacity="0.35" />
+  <line x1="120" y1="220" x2="412" y2="220" stroke="#fff" stroke-width="1" opacity="0.2" />
+  <line x1="120" y1="256" x2="412" y2="256" stroke="#fff" stroke-width="1" opacity="0.15" />
+  <line x1="120" y1="292" x2="412" y2="292" stroke="#fff" stroke-width="1" opacity="0.1" />
+  <!-- Grid lines (vertical) -->
+  <line x1="192" y1="152" x2="192" y2="328" stroke="#fff" stroke-width="1" opacity="0.2" />
+  <line x1="272" y1="152" x2="272" y2="328" stroke="#fff" stroke-width="1" opacity="0.15" />
+  <line x1="352" y1="152" x2="352" y2="328" stroke="#fff" stroke-width="1" opacity="0.1" />
+</svg>

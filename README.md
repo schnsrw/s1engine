@@ -1,6 +1,6 @@
 # Rudra Code
 
-[![CI](https://github.com/schnsrw/s1engine/actions/workflows/ci.yml/badge.svg)](https://github.com/schnsrw/s1engine/actions)
+[![CI](https://github.com/Rudra-Office/Rudra-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/Rudra-Office/Rudra-Editor/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a browser-based editor (**Rudra Office**).
@@ -24,19 +24,19 @@ Rudra Code is a modular Rust SDK that powers document workflows across desktop, 
 
 ## Why Rudra Code?
 
-| | Rudra Code | LibreOffice | OnlyOffice | Collabora | Google Docs |
-|---|---|---|---|---|---|
-| **Embeddable SDK** | Yes — Rust, WASM, C FFI | No (monolithic) | Partial (JS client) | Partial (LibreOffice fork) | No |
-| **Pure Rust** | Yes — zero C/C++ deps | C++ | C++/JS | C++ | Proprietary |
-| **WASM support** | Native | No | No | No | No |
-| **CRDT collaboration** | Built-in (Fugue) | No | OT-based | No | Proprietary |
-| **Self-hostable** | Single Docker image | Yes | Yes | Yes | No |
-| **Document model** | CRDT-ready tree with unique IDs | Legacy DOM | Custom | Legacy DOM | Proprietary |
-| **License** | AGPL-3.0 | MPL-2.0 | AGPL-3.0 | MPL-2.0 | Proprietary |
+| Feature | Rudra Code |
+|---|---|
+| **Embeddable SDK** | Yes — Rust, WASM, C FFI |
+| **Pure Rust** | Yes — zero C/C++ deps |
+| **WASM support** | Native |
+| **CRDT collaboration** | Built-in (Fugue) |
+| **Self-hostable** | Single Docker image |
+| **Document model** | CRDT-ready tree with unique IDs |
+| **License** | AGPL-3.0 |
 
 **Use Rudra Code if you need:**
 - A Rust library for reading/writing DOCX, ODT, PDF, or Markdown
-- A self-hosted document editor you can embed in your product (like OnlyOffice Document Server, but in Rust)
+- A self-hosted document editor you can embed in your product
 - WASM-powered document editing in the browser without server-side rendering
 - CRDT-based real-time collaboration without external dependencies
 - A format conversion pipeline (DOCX to PDF, ODT to DOCX, DOC to DOCX, etc.)

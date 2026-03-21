@@ -26,7 +26,7 @@ pub enum ConvertWarning {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SourceFormat {
-    /// Legacy Microsoft Word binary format (.doc).
+    /// Legacy Word binary format (.doc).
     Doc,
     /// Office Open XML (.docx).
     Docx,
@@ -181,7 +181,7 @@ pub fn detect_format(data: &[u8]) -> Option<SourceFormat> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FileType {
-    /// Microsoft Word DOCX (Office Open XML).
+    /// DOCX (Office Open XML).
     Docx,
     /// Microsoft Excel XLSX (Office Open XML Spreadsheet).
     Xlsx,
@@ -195,7 +195,7 @@ pub enum FileType {
     Odp,
     /// Portable Document Format (.pdf).
     Pdf,
-    /// Legacy Microsoft Word binary (.doc).
+    /// Legacy Word binary (.doc).
     Doc,
     /// Plain text (.txt).
     Txt,

@@ -24,6 +24,9 @@
       enableCollab: true,
       enablePdfViewer: true,
       enableTemplates: true,
+      // AI assistant — set to llama.cpp sidecar URL
+      aiUrl: '', // e.g., 'http://localhost:8081'
+      enableAI: true,
     };
   </script>
   <link rel="stylesheet" href="/src/styles.css">
@@ -45,10 +48,11 @@
     <div class="sep"></div>
     <input class="doc-name" id="docName" value="Untitled Document" spellcheck="false" title="Document name — click to rename">
     <div class="spacer"></div>
-    <button class="menu-btn menubar-collapsible-1024" id="btnPages" title="Toggle pages panel"><span class="msi">view_sidebar</span></button>
+    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnPages" title="Toggle pages panel"><span class="msi">view_sidebar</span></button>
     <button class="menu-btn menubar-collapsible-1024" id="btnPropsPanel" title="Toggle properties panel"><span class="msi">tune</span></button>
     <button class="menu-btn menubar-collapsible-1024" id="btnCommentsToggle" title="Toggle comments panel"><span class="msi">comment</span></button>
-    <button class="menu-btn menubar-collapsible-1024" id="btnHistory" title="Version History"><span class="msi">history</span></button>
+    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnHistory" title="Version History"><span class="msi">history</span></button>
+    <div class="collab-avatars" id="collabAvatars" title="Connected collaborators"></div>
     <button class="menu-btn menubar-collapsible-1024" id="btnShare" title="Start a collaboration session"><span class="msi">share</span> Share</button>
     <div class="collab-status" id="collabStatus" style="display:none">
       <div class="collab-indicator" id="collabIndicator" title="Connection status"></div>
@@ -70,7 +74,7 @@
         <button class="app-menu-entry" id="btnOpen" role="menuitem" tabindex="-1" title="Open a file from disk (Ctrl+O)"><span class="msi">folder_open</span> Open <span class="shortcut">Ctrl+O</span></button>
         <button class="app-menu-entry" id="btnTemplate" role="menuitem" tabindex="-1" title="Create a new document from a template"><span class="msi">description</span> New from Template...</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" data-fmt="docx" role="menuitem" tabindex="-1" title="Export document as Microsoft Word format"><span class="msi">download</span> Export as DOCX</button>
+        <button class="app-menu-entry" data-fmt="docx" role="menuitem" tabindex="-1" title="Export document as DOCX format"><span class="msi">download</span> Export as DOCX</button>
         <button class="app-menu-entry" data-fmt="odt" role="menuitem" tabindex="-1" title="Export document as OpenDocument format"><span class="msi">download</span> Export as ODT</button>
         <button class="app-menu-entry" data-fmt="pdf" role="menuitem" tabindex="-1" title="Export document as PDF"><span class="msi">download</span> Export as PDF</button>
         <button class="app-menu-entry" data-fmt="txt" role="menuitem" tabindex="-1" title="Export document as plain text"><span class="msi">download</span> Export as Plain Text</button>
@@ -84,26 +88,26 @@
     <div class="app-menu-item" data-menu="editMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Edit</button>
       <div class="app-menu-dropdown" id="editMenu" role="menu" aria-label="Edit">
-        <button class="app-menu-entry" id="menuUndo" role="menuitem" tabindex="-1"><span class="msi">undo</span> Undo <span class="shortcut">Ctrl+Z</span></button>
-        <button class="app-menu-entry" id="menuRedo" role="menuitem" tabindex="-1"><span class="msi">redo</span> Redo <span class="shortcut">Ctrl+Y</span></button>
+        <button class="app-menu-entry" id="menuUndo" role="menuitem" tabindex="-1" title="Undo the last action (Ctrl+Z)"><span class="msi">undo</span> Undo <span class="shortcut">Ctrl+Z</span></button>
+        <button class="app-menu-entry" id="menuRedo" role="menuitem" tabindex="-1" title="Redo the last undone action (Ctrl+Y)"><span class="msi">redo</span> Redo <span class="shortcut">Ctrl+Y</span></button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuFind" role="menuitem" tabindex="-1"><span class="msi">search</span> Find & Replace <span class="shortcut">Ctrl+F</span></button>
+        <button class="app-menu-entry" id="menuFind" role="menuitem" tabindex="-1" title="Open Find and Replace dialog (Ctrl+F)"><span class="msi">search</span> Find & Replace <span class="shortcut">Ctrl+F</span></button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="viewMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">View</button>
       <div class="app-menu-dropdown" id="viewMenu" role="menu" aria-label="View">
-        <button class="app-menu-entry tab-menu-entry" data-view="editor" role="menuitem" tabindex="-1"><span class="msi">edit</span> Editor</button>
+        <button class="app-menu-entry tab-menu-entry" data-view="editor" role="menuitem" tabindex="-1" title="Switch to document editor view"><span class="msi">edit</span> Editor</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuShowPages" role="menuitem" tabindex="-1"><span class="msi">view_sidebar</span> Pages Panel</button>
-        <button class="app-menu-entry" id="menuShowOutline" role="menuitem" tabindex="-1"><span class="msi">toc</span> Document Outline <span class="shortcut">Ctrl+Shift+O</span></button>
-        <button class="app-menu-entry" id="menuShowComments" role="menuitem" tabindex="-1"><span class="msi">comment</span> Comments Panel</button>
-        <button class="app-menu-entry" id="menuShowPropsPanel" role="menuitem" tabindex="-1"><span class="msi">tune</span> Properties Panel</button>
+        <button class="app-menu-entry" id="menuShowPages" role="menuitem" tabindex="-1" title="Toggle page thumbnails sidebar"><span class="msi">view_sidebar</span> Pages Panel</button>
+        <button class="app-menu-entry" id="menuShowOutline" role="menuitem" tabindex="-1" title="Toggle document outline panel (Ctrl+Shift+O)"><span class="msi">toc</span> Document Outline <span class="shortcut">Ctrl+Shift+O</span></button>
+        <button class="app-menu-entry" id="menuShowComments" role="menuitem" tabindex="-1" title="Toggle comments panel"><span class="msi">comment</span> Comments Panel</button>
+        <button class="app-menu-entry" id="menuShowPropsPanel" role="menuitem" tabindex="-1" title="Toggle properties panel"><span class="msi">tune</span> Properties Panel</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuZoomIn" role="menuitem" tabindex="-1"><span class="msi">zoom_in</span> Zoom In <span class="shortcut">Ctrl++</span></button>
-        <button class="app-menu-entry" id="menuZoomOut" role="menuitem" tabindex="-1"><span class="msi">zoom_out</span> Zoom Out <span class="shortcut">Ctrl+-</span></button>
+        <button class="app-menu-entry" id="menuZoomIn" role="menuitem" tabindex="-1" title="Zoom in (Ctrl++)"><span class="msi">zoom_in</span> Zoom In <span class="shortcut">Ctrl++</span></button>
+        <button class="app-menu-entry" id="menuZoomOut" role="menuitem" tabindex="-1" title="Zoom out (Ctrl+-)"><span class="msi">zoom_out</span> Zoom Out <span class="shortcut">Ctrl+-</span></button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuPrintPreview" role="menuitem" tabindex="-1"><span class="msi">preview</span> Print Preview</button>
+        <button class="app-menu-entry" id="menuPrintPreview" role="menuitem" tabindex="-1" title="Preview document layout before printing"><span class="msi">preview</span> Print Preview</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuReadOnly" role="menuitem" tabindex="-1" title="Toggle read-only viewer mode (disables all editing)"><span class="msi">lock</span> Read-Only Mode</button>
         <div class="app-menu-sep" role="separator"></div>
@@ -126,7 +130,7 @@
         <button class="app-menu-entry" id="miPageBreak" role="menuitem" tabindex="-1" title="Insert a page break at the cursor"><span class="msi">insert_page_break</span> Page Break</button>
         <button class="app-menu-entry" id="miColumnBreak" role="menuitem" tabindex="-1" title="Insert a column break at the cursor position"><span class="msi">view_column</span> Column Break</button>
         <div class="app-menu-item app-menu-submenu" role="menuitem" aria-haspopup="true" tabindex="-1">
-          <button class="app-menu-entry app-menu-submenu-trigger" tabindex="-1"><span class="msi">view_week</span> Section Break <span class="submenu-arrow">&#9656;</span></button>
+          <button class="app-menu-entry app-menu-submenu-trigger" tabindex="-1" title="Insert a section break"><span class="msi">view_week</span> Section Break <span class="submenu-arrow">&#9656;</span></button>
           <div class="app-menu-dropdown app-submenu-dropdown" role="menu" aria-label="Section Break">
             <button class="app-menu-entry" id="miSectionNextPage" role="menuitem" tabindex="-1" title="Start next section on a new page">Next Page</button>
             <button class="app-menu-entry" id="miSectionContinuous" role="menuitem" tabindex="-1" title="Start next section on the same page">Continuous</button>
@@ -137,11 +141,11 @@
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="miHeaderFooter" role="menuitem" tabindex="-1" title="Configure page headers and footers"><span class="msi">vertical_split</span> Headers &amp; Footers...</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="miFootnote" role="menuitem" tabindex="-1"><span class="msi">format_size</span> Footnote <span class="shortcut">Ctrl+Alt+F</span></button>
-        <button class="app-menu-entry" id="miEndnote" role="menuitem" tabindex="-1"><span class="msi">format_size</span> Endnote <span class="shortcut">Ctrl+Alt+D</span></button>
+        <button class="app-menu-entry" id="miFootnote" role="menuitem" tabindex="-1" title="Insert a footnote at the cursor position (Ctrl+Alt+F)"><span class="msi">format_size</span> Footnote <span class="shortcut">Ctrl+Alt+F</span></button>
+        <button class="app-menu-entry" id="miEndnote" role="menuitem" tabindex="-1" title="Insert an endnote at the cursor position (Ctrl+Alt+D)"><span class="msi">format_size</span> Endnote <span class="shortcut">Ctrl+Alt+D</span></button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="miEquation" role="menuitem" tabindex="-1"><span class="msi">functions</span> Equation... <span class="shortcut">Ctrl+Shift+E</span></button>
-        <button class="app-menu-entry" id="miBookmark" role="menuitem" tabindex="-1"><span class="msi">bookmark</span> Bookmark... <span class="shortcut">Ctrl+Shift+B</span></button>
+        <button class="app-menu-entry" id="miEquation" role="menuitem" tabindex="-1" title="Insert a LaTeX equation (Ctrl+Shift+E)"><span class="msi">functions</span> Equation... <span class="shortcut">Ctrl+Shift+E</span></button>
+        <button class="app-menu-entry" id="miBookmark" role="menuitem" tabindex="-1" title="Insert a bookmark at the cursor position (Ctrl+Shift+B)"><span class="msi">bookmark</span> Bookmark... <span class="shortcut">Ctrl+Shift+B</span></button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="miDrawing" role="menuitem" tabindex="-1" title="Insert a drawing"><span class="msi">draw</span> Drawing...</button>
         <div class="app-menu-sep" role="separator"></div>
@@ -151,60 +155,62 @@
     <div class="app-menu-item" data-menu="formatMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Format</button>
       <div class="app-menu-dropdown" id="formatMenu" role="menu" aria-label="Format">
-        <button class="app-menu-entry" id="menuBold" role="menuitem" tabindex="-1"><span class="msi">format_bold</span> Bold <span class="shortcut">Ctrl+B</span></button>
-        <button class="app-menu-entry" id="menuItalic" role="menuitem" tabindex="-1"><span class="msi">format_italic</span> Italic <span class="shortcut">Ctrl+I</span></button>
-        <button class="app-menu-entry" id="menuUnderline" role="menuitem" tabindex="-1"><span class="msi">format_underlined</span> Underline <span class="shortcut">Ctrl+U</span></button>
-        <button class="app-menu-entry" id="menuStrike" role="menuitem" tabindex="-1"><span class="msi">strikethrough_s</span> Strikethrough</button>
+        <button class="app-menu-entry" id="menuBold" role="menuitem" tabindex="-1" title="Toggle bold formatting (Ctrl+B)"><span class="msi">format_bold</span> Bold <span class="shortcut">Ctrl+B</span></button>
+        <button class="app-menu-entry" id="menuItalic" role="menuitem" tabindex="-1" title="Toggle italic formatting (Ctrl+I)"><span class="msi">format_italic</span> Italic <span class="shortcut">Ctrl+I</span></button>
+        <button class="app-menu-entry" id="menuUnderline" role="menuitem" tabindex="-1" title="Toggle underline formatting (Ctrl+U)"><span class="msi">format_underlined</span> Underline <span class="shortcut">Ctrl+U</span></button>
+        <button class="app-menu-entry" id="menuStrike" role="menuitem" tabindex="-1" title="Toggle strikethrough formatting"><span class="msi">strikethrough_s</span> Strikethrough</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuClearFormat" role="menuitem" tabindex="-1"><span class="msi">format_clear</span> Clear formatting</button>
-        <button class="app-menu-entry" id="menuFormatPainter" role="menuitem" tabindex="-1"><span class="msi">format_paint</span> Format Painter</button>
+        <button class="app-menu-entry" id="menuClearFormat" role="menuitem" tabindex="-1" title="Remove all formatting from selection (Ctrl+\\)"><span class="msi">format_clear</span> Clear formatting <span class="shortcut">Ctrl+\</span></button>
+        <button class="app-menu-entry" id="menuFormatPainter" role="menuitem" tabindex="-1" title="Copy formatting and apply to another selection"><span class="msi">format_paint</span> Format Painter</button>
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuBordersShading" role="menuitem" tabindex="-1" title="Configure paragraph borders and shading"><span class="msi">border_all</span> Borders &amp; Shading...</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuPageSetup" role="menuitem" tabindex="-1"><span class="msi">description</span> Page Setup...</button>
-        <button class="app-menu-entry" id="menuColumns" role="menuitem" tabindex="-1"><span class="msi">view_column</span> Columns...</button>
+        <button class="app-menu-entry" id="menuPageSetup" role="menuitem" tabindex="-1" title="Configure page size, margins, and orientation"><span class="msi">description</span> Page Setup...</button>
+        <button class="app-menu-entry" id="menuColumns" role="menuitem" tabindex="-1" title="Configure text column layout"><span class="msi">view_column</span> Columns...</button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="reviewMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Review</button>
       <div class="app-menu-dropdown" id="reviewMenu" role="menu" aria-label="Review">
-        <button class="app-menu-entry" id="menuModeEditing" role="menuitem" tabindex="-1"><span class="msi">edit</span> Editing Mode</button>
-        <button class="app-menu-entry" id="menuModeSuggesting" role="menuitem" tabindex="-1"><span class="msi">rate_review</span> Suggesting Mode</button>
-        <button class="app-menu-entry" id="menuModeViewing" role="menuitem" tabindex="-1"><span class="msi">visibility</span> Viewing Mode</button>
+        <button class="app-menu-entry" id="menuModeEditing" role="menuitem" tabindex="-1" title="Switch to normal editing mode"><span class="msi">edit</span> Editing Mode</button>
+        <button class="app-menu-entry" id="menuModeSuggesting" role="menuitem" tabindex="-1" title="Switch to suggesting mode (changes are tracked)"><span class="msi">rate_review</span> Suggesting Mode</button>
+        <button class="app-menu-entry" id="menuModeViewing" role="menuitem" tabindex="-1" title="Switch to view-only mode (no editing)"><span class="msi">visibility</span> Viewing Mode</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuAcceptAll" role="menuitem" tabindex="-1"><span class="msi">done_all</span> Accept All Changes</button>
-        <button class="app-menu-entry" id="menuRejectAll" role="menuitem" tabindex="-1"><span class="msi">close</span> Reject All Changes</button>
+        <button class="app-menu-entry" id="menuAcceptAll" role="menuitem" tabindex="-1" title="Accept all tracked changes in the document"><span class="msi">done_all</span> Accept All Changes</button>
+        <button class="app-menu-entry" id="menuRejectAll" role="menuitem" tabindex="-1" title="Reject all tracked changes in the document"><span class="msi">close</span> Reject All Changes</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuPrevChange" role="menuitem" tabindex="-1"><span class="msi">arrow_upward</span> Previous Change <span class="shortcut">Ctrl+Shift+[</span></button>
-        <button class="app-menu-entry" id="menuNextChange" role="menuitem" tabindex="-1"><span class="msi">arrow_downward</span> Next Change <span class="shortcut">Ctrl+Shift+]</span></button>
+        <button class="app-menu-entry" id="menuPrevChange" role="menuitem" tabindex="-1" title="Navigate to the previous tracked change (Ctrl+Shift+[)"><span class="msi">arrow_upward</span> Previous Change <span class="shortcut">Ctrl+Shift+[</span></button>
+        <button class="app-menu-entry" id="menuNextChange" role="menuitem" tabindex="-1" title="Navigate to the next tracked change (Ctrl+Shift+])"><span class="msi">arrow_downward</span> Next Change <span class="shortcut">Ctrl+Shift+]</span></button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuShowChangesPanel" role="menuitem" tabindex="-1"><span class="msi">checklist</span> Track Changes Panel</button>
+        <button class="app-menu-entry" id="menuShowChangesPanel" role="menuitem" tabindex="-1" title="Toggle the track changes panel"><span class="msi">checklist</span> Track Changes Panel</button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="toolsMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Tools</button>
       <div class="app-menu-dropdown" id="toolsMenu" role="menu" aria-label="Tools">
-        <button class="app-menu-entry" id="btnSpellCheck" role="menuitem" tabindex="-1"><span class="msi">spellcheck</span> Spell check</button>
-        <button class="app-menu-entry" id="menuCustomDict" role="menuitem" tabindex="-1"><span class="msi">book</span> Custom Dictionary...</button>
-        <button class="app-menu-entry" id="menuAutoCorrect" role="menuitem" tabindex="-1"><span class="msi">auto_fix_high</span> Auto-Correct...</button>
+        <button class="app-menu-entry" id="btnSpellCheck" role="menuitem" tabindex="-1" title="Toggle spell check on the document"><span class="msi">spellcheck</span> Spell check</button>
+        <button class="app-menu-entry" id="menuCustomDict" role="menuitem" tabindex="-1" title="Manage custom dictionary words"><span class="msi">book</span> Custom Dictionary...</button>
+        <button class="app-menu-entry" id="menuAutoCorrect" role="menuitem" tabindex="-1" title="Configure auto-correct rules"><span class="msi">auto_fix_high</span> Auto-Correct...</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="btnComments" role="menuitem" tabindex="-1"><span class="msi">comment</span> Comments</button>
+        <button class="app-menu-entry" id="btnComments" role="menuitem" tabindex="-1" title="Toggle comments panel"><span class="msi">comment</span> Comments</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuDarkMode" role="menuitem" tabindex="-1"><span class="msi">dark_mode</span> Dark mode</button>
+        <button class="app-menu-entry" id="menuDarkMode" role="menuitem" tabindex="-1" title="Toggle dark mode theme"><span class="msi">dark_mode</span> Dark mode</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuSignDocument" role="menuitem" tabindex="-1"><span class="msi">verified_user</span> Sign Document...</button>
+        <button class="app-menu-entry" id="menuSignDocument" role="menuitem" tabindex="-1" title="Add a digital signature to the document"><span class="msi">verified_user</span> Sign Document...</button>
+        <div class="app-menu-sep" role="separator"></div>
+        <button class="app-menu-entry" id="menuAIAssist" role="menuitem" tabindex="-1" title="Open AI writing assistant (Ctrl+Shift+A)"><span class="msi">auto_awesome</span> AI Assistant <span class="shortcut">Ctrl+Shift+A</span></button>
       </div>
     </div>
     <div class="app-menu-item" data-menu="helpMenu">
       <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Help</button>
       <div class="app-menu-dropdown" id="helpMenu" role="menu" aria-label="Help">
-        <button class="app-menu-entry" id="menuShortcuts" role="menuitem" tabindex="-1"><span class="msi">keyboard</span> Keyboard Shortcuts <span class="shortcut">Ctrl+/</span></button>
-        <button class="app-menu-entry" id="menuFeatureTour" role="menuitem" tabindex="-1"><span class="msi">explore</span> Feature Tour</button>
-        <button class="app-menu-entry" id="menuWhatsNew" role="menuitem" tabindex="-1"><span class="msi">new_releases</span> What's New</button>
+        <button class="app-menu-entry" id="menuShortcuts" role="menuitem" tabindex="-1" title="View all keyboard shortcuts (Ctrl+/)"><span class="msi">keyboard</span> Keyboard Shortcuts <span class="shortcut">Ctrl+/</span></button>
+        <button class="app-menu-entry" id="menuFeatureTour" role="menuitem" tabindex="-1" title="Take a guided tour of editor features"><span class="msi">explore</span> Feature Tour</button>
+        <button class="app-menu-entry" id="menuWhatsNew" role="menuitem" tabindex="-1" title="See recent changes and new features"><span class="msi">new_releases</span> What's New</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuUsageStats" role="menuitem" tabindex="-1"><span class="msi">bar_chart</span> Usage Statistics</button>
+        <button class="app-menu-entry" id="menuUsageStats" role="menuitem" tabindex="-1" title="View session usage statistics"><span class="msi">bar_chart</span> Usage Statistics</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuAbout" role="menuitem" tabindex="-1"><span class="msi">info</span> About Rudra Office</button>
+        <button class="app-menu-entry" id="menuAbout" role="menuitem" tabindex="-1" title="About Rudra Office"><span class="msi">info</span> About Rudra Office</button>
       </div>
     </div>
   </div>
@@ -326,7 +332,7 @@
     </div>
 
     <!-- Clear formatting -->
-    <button class="tb-btn tb-collapsible-1024" id="btnClearFormat" title="Clear formatting" aria-label="Clear formatting"><span class="msi">format_clear</span></button>
+    <button class="tb-btn tb-collapsible-1024" id="btnClearFormat" title="Clear formatting (Ctrl+\)" aria-label="Clear formatting"><span class="msi">format_clear</span></button>
     <div class="tb-sep tb-collapsible-1024" role="separator"></div>
 
     <!-- Alignment -->
@@ -352,8 +358,8 @@
     <div class="tb-sep tb-collapsible-1024" role="separator"></div>
 
     <!-- Lists -->
-    <button class="tb-btn tb-collapsible-480" id="btnBulletList" title="Bulleted list" aria-label="Bulleted list" aria-pressed="false"><span class="msi">format_list_bulleted</span></button>
-    <button class="tb-btn tb-collapsible-480" id="btnNumberList" title="Numbered list" aria-label="Numbered list" aria-pressed="false"><span class="msi">format_list_numbered</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnBulletList" title="Bulleted list (Ctrl+Shift+8)" aria-label="Bulleted list" aria-pressed="false"><span class="msi">format_list_bulleted</span></button>
+    <button class="tb-btn tb-collapsible-480" id="btnNumberList" title="Numbered list (Ctrl+Shift+7)" aria-label="Numbered list" aria-pressed="false"><span class="msi">format_list_numbered</span></button>
     <div class="tb-sep tb-collapsible-480" role="separator"></div>
 
     <!-- Insert (toolbar shortcut) -->
@@ -362,14 +368,14 @@
         <span class="msi">add</span> Insert
       </button>
       <div class="insert-menu" id="insertMenu" role="menu">
-        <button class="ctx-item" data-action="table" role="menuitem"><span class="msi ctx-icon">table</span> Table...</button>
-        <button class="ctx-item" data-action="image" role="menuitem"><span class="msi ctx-icon">image</span> Image...</button>
-        <button class="ctx-item" data-action="link" role="menuitem"><span class="msi ctx-icon">link</span> Hyperlink...</button>
-        <button class="ctx-item" data-action="comment" role="menuitem"><span class="msi ctx-icon">add_comment</span> Comment...</button>
+        <button class="ctx-item" data-action="table" role="menuitem" title="Insert a table"><span class="msi ctx-icon">table</span> Table...</button>
+        <button class="ctx-item" data-action="image" role="menuitem" title="Insert an image from file"><span class="msi ctx-icon">image</span> Image...</button>
+        <button class="ctx-item" data-action="link" role="menuitem" title="Insert a hyperlink (Ctrl+K)"><span class="msi ctx-icon">link</span> Hyperlink...</button>
+        <button class="ctx-item" data-action="comment" role="menuitem" title="Add a comment to the selection (Ctrl+Alt+M)"><span class="msi ctx-icon">add_comment</span> Comment...</button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" data-action="toc" role="menuitem"><span class="msi ctx-icon">toc</span> Table of Contents</button>
-        <button class="ctx-item" data-action="hr" role="menuitem"><span class="msi ctx-icon">horizontal_rule</span> Horizontal Rule</button>
-        <button class="ctx-item" data-action="pagebreak" role="menuitem"><span class="msi ctx-icon">insert_page_break</span> Page Break</button>
+        <button class="ctx-item" data-action="toc" role="menuitem" title="Insert a table of contents based on headings"><span class="msi ctx-icon">toc</span> Table of Contents</button>
+        <button class="ctx-item" data-action="hr" role="menuitem" title="Insert a horizontal rule"><span class="msi ctx-icon">horizontal_rule</span> Horizontal Rule</button>
+        <button class="ctx-item" data-action="pagebreak" role="menuitem" title="Insert a page break at the cursor"><span class="msi ctx-icon">insert_page_break</span> Page Break</button>
         <button class="ctx-item" data-action="columnbreak" role="menuitem" title="Insert a column break"><span class="msi ctx-icon">view_column</span> Column Break</button>
         <div class="ctx-item ctx-submenu-wrapper" role="menuitem" aria-haspopup="true">
           <span class="msi ctx-icon">view_week</span> Section Break <span class="submenu-arrow">&#9656;</span>
@@ -381,7 +387,7 @@
           </div>
         </div>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" data-action="headerfooter" role="menuitem"><span class="msi ctx-icon">vertical_split</span> Headers &amp; Footers...</button>
+        <button class="ctx-item" data-action="headerfooter" role="menuitem" title="Configure page headers and footers"><span class="msi ctx-icon">vertical_split</span> Headers &amp; Footers...</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" data-action="footnote" role="menuitem" title="Insert footnote (Ctrl+Alt+F)"><span class="msi ctx-icon">format_size</span> Footnote</button>
         <button class="ctx-item" data-action="endnote" role="menuitem" title="Insert endnote (Ctrl+Alt+D)"><span class="msi ctx-icon">format_size</span> Endnote</button>
@@ -389,7 +395,7 @@
         <button class="ctx-item" data-action="equation" role="menuitem" title="Insert equation (Ctrl+Shift+E)"><span class="msi ctx-icon">functions</span> Equation...</button>
         <button class="ctx-item" data-action="bookmark" role="menuitem" title="Insert bookmark (Ctrl+Shift+B)"><span class="msi ctx-icon">bookmark</span> Bookmark...</button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" data-action="drawing" role="menuitem"><span class="msi ctx-icon">draw</span> Drawing...</button>
+        <button class="ctx-item" data-action="drawing" role="menuitem" title="Insert a drawing or shape"><span class="msi ctx-icon">draw</span> Drawing...</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" data-action="specialchars" role="menuitem" title="Insert a special character or symbol"><span class="msi ctx-icon">special_character</span> Special Characters...</button>
       </div>
@@ -854,23 +860,157 @@
 
   <!-- Spreadsheet View -->
   <div class="spreadsheet-view" id="spreadsheetView">
+    <!-- S1.1: Spreadsheet Menu Bar -->
+    <div class="app-menubar ss-menubar" id="ssMenubar" role="menubar" aria-label="Spreadsheet menu bar">
+      <div class="app-menu-item" data-menu="ssFileMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="0">File</button>
+        <div class="app-menu-dropdown" id="ssFileMenu" role="menu" aria-label="File">
+          <button class="app-menu-entry" id="ssMenuNewSheet" role="menuitem" tabindex="-1" title="Create a new blank spreadsheet"><span class="msi">note_add</span> New Sheet</button>
+          <button class="app-menu-entry" id="ssMenuOpen" role="menuitem" tabindex="-1" title="Open a spreadsheet file from disk"><span class="msi">folder_open</span> Open</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuSaveXLSX" role="menuitem" tabindex="-1" title="Export spreadsheet as Microsoft Excel format"><span class="msi">download</span> Save as XLSX</button>
+          <button class="app-menu-entry" id="ssMenuSaveCSV" role="menuitem" tabindex="-1" title="Export spreadsheet as CSV"><span class="msi">download</span> Save as CSV</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuPrint" role="menuitem" tabindex="-1" title="Print spreadsheet to PDF"><span class="msi">print</span> Print</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuClose" role="menuitem" tabindex="-1" title="Close the spreadsheet and return to the welcome screen"><span class="msi">close</span> Close</button>
+        </div>
+      </div>
+      <div class="app-menu-item" data-menu="ssEditMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Edit</button>
+        <div class="app-menu-dropdown" id="ssEditMenu" role="menu" aria-label="Edit">
+          <button class="app-menu-entry" id="ssMenuUndo" role="menuitem" tabindex="-1" title="Undo last action"><span class="msi">undo</span> Undo <span class="shortcut">Ctrl+Z</span></button>
+          <button class="app-menu-entry" id="ssMenuRedo" role="menuitem" tabindex="-1" title="Redo last undone action"><span class="msi">redo</span> Redo <span class="shortcut">Ctrl+Y</span></button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuCut" role="menuitem" tabindex="-1" title="Cut selected cells"><span class="msi">content_cut</span> Cut <span class="shortcut">Ctrl+X</span></button>
+          <button class="app-menu-entry" id="ssMenuCopy" role="menuitem" tabindex="-1" title="Copy selected cells"><span class="msi">content_copy</span> Copy <span class="shortcut">Ctrl+C</span></button>
+          <button class="app-menu-entry" id="ssMenuPaste" role="menuitem" tabindex="-1" title="Paste from clipboard"><span class="msi">content_paste</span> Paste <span class="shortcut">Ctrl+V</span></button>
+          <button class="app-menu-entry" id="ssMenuPasteSpecial" role="menuitem" tabindex="-1" title="Paste special — choose what to paste"><span class="msi">content_paste_go</span> Paste Special...</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuFind" role="menuitem" tabindex="-1" title="Find and replace cell values"><span class="msi">search</span> Find &amp; Replace <span class="shortcut">Ctrl+F</span></button>
+          <button class="app-menu-entry" id="ssMenuSelectAll" role="menuitem" tabindex="-1" title="Select all cells in the sheet"><span class="msi">select_all</span> Select All <span class="shortcut">Ctrl+A</span></button>
+        </div>
+      </div>
+      <div class="app-menu-item" data-menu="ssViewMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">View</button>
+        <div class="app-menu-dropdown" id="ssViewMenu" role="menu" aria-label="View">
+          <button class="app-menu-entry" id="ssMenuFreezePanes" role="menuitem" tabindex="-1" title="Freeze rows and columns at the selected cell"><span class="msi">push_pin</span> Freeze Panes</button>
+          <button class="app-menu-entry" id="ssMenuGridlines" role="menuitem" tabindex="-1" title="Toggle gridline visibility"><span class="msi">grid_on</span> Gridlines</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry disabled" role="menuitem" tabindex="-1" title="Zoom is not available yet" aria-disabled="true"><span class="msi">zoom_in</span> Zoom</button>
+          <button class="app-menu-entry" id="ssMenuFullScreen" role="menuitem" tabindex="-1" title="Toggle full screen mode"><span class="msi">fullscreen</span> Full Screen</button>
+        </div>
+      </div>
+      <div class="app-menu-item" data-menu="ssInsertMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Insert</button>
+        <div class="app-menu-dropdown" id="ssInsertMenu" role="menu" aria-label="Insert">
+          <button class="app-menu-entry" id="ssMenuInsertChart" role="menuitem" tabindex="-1" title="Insert a chart from selected data"><span class="msi">bar_chart</span> Chart...</button>
+          <button class="app-menu-entry disabled" role="menuitem" tabindex="-1" title="Image insertion is not available yet" aria-disabled="true"><span class="msi">image</span> Image</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuFunction" role="menuitem" tabindex="-1" title="Insert a function into the selected cell"><span class="msi">functions</span> Function</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuInsertComment" role="menuitem" tabindex="-1" title="Add a comment to the selected cell"><span class="msi">comment</span> Comment</button>
+          <button class="app-menu-entry" id="ssMenuShowComments" role="menuitem" tabindex="-1" title="Show all comments in a panel"><span class="msi">chat</span> Comments Panel</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry disabled" role="menuitem" tabindex="-1" title="Named ranges are not available yet" aria-disabled="true"><span class="msi">label</span> Named Range</button>
+        </div>
+      </div>
+      <div class="app-menu-item" data-menu="ssFormatMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Format</button>
+        <div class="app-menu-dropdown" id="ssFormatMenu" role="menu" aria-label="Format">
+          <button class="app-menu-entry" id="ssMenuNumberFormat" role="menuitem" tabindex="-1" title="Change the number format of selected cells"><span class="msi">tag</span> Number Format</button>
+          <button class="app-menu-entry" id="ssMenuCellStyle" role="menuitem" tabindex="-1" title="Apply a cell style to selected cells"><span class="msi">style</span> Cell Style</button>
+          <button class="app-menu-entry" id="ssMenuConditionalFormat" role="menuitem" tabindex="-1" title="Apply conditional formatting rules to cells"><span class="msi">format_color_fill</span> Conditional Format...</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuMergeCellsMenu" role="menuitem" tabindex="-1" title="Merge or unmerge selected cells"><span class="msi">call_merge</span> Merge Cells</button>
+        </div>
+      </div>
+      <div class="app-menu-item" data-menu="ssDataMenu">
+        <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Data</button>
+        <div class="app-menu-dropdown" id="ssDataMenu" role="menu" aria-label="Data">
+          <button class="app-menu-entry" id="ssMenuSortAZ" role="menuitem" tabindex="-1" title="Sort selected column ascending (A to Z)"><span class="msi">arrow_upward</span> Sort A-Z</button>
+          <button class="app-menu-entry" id="ssMenuSortZA" role="menuitem" tabindex="-1" title="Sort selected column descending (Z to A)"><span class="msi">arrow_downward</span> Sort Z-A</button>
+          <button class="app-menu-entry" id="ssMenuSortDialog" role="menuitem" tabindex="-1" title="Sort by multiple columns"><span class="msi">sort</span> Sort...</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuFilter" role="menuitem" tabindex="-1" title="Toggle filter on the selected column"><span class="msi">filter_list</span> Filter</button>
+          <div class="app-menu-sep" role="separator"></div>
+          <button class="app-menu-entry" id="ssMenuRemoveDuplicates" role="menuitem" tabindex="-1" title="Find and remove duplicate rows"><span class="msi">delete_sweep</span> Remove Duplicates...</button>
+          <button class="app-menu-entry" id="ssMenuDataValidation" role="menuitem" tabindex="-1" title="Set data validation rules for cells"><span class="msi">verified</span> Data Validation...</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- S1.2: Spreadsheet Formatting Toolbar -->
     <div class="ss-toolbar" id="ssToolbar">
       <button class="tb-btn" id="ssUndo" title="Undo (Ctrl+Z)"><span class="msi">undo</span></button>
       <button class="tb-btn" id="ssRedo" title="Redo (Ctrl+Y)"><span class="msi">redo</span></button>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssCut" title="Cut (Ctrl+X)"><span class="msi">content_cut</span></button>
-      <button class="tb-btn" id="ssCopy" title="Copy (Ctrl+C)"><span class="msi">content_copy</span></button>
-      <button class="tb-btn" id="ssPaste" title="Paste (Ctrl+V)"><span class="msi">content_paste</span></button>
+      <select class="ss-tb-select" id="ssFontFamily" title="Font family">
+        <option value="Arial, sans-serif">Arial</option>
+        <option value="'Times New Roman', serif">Times New Roman</option>
+        <option value="'Courier New', monospace">Courier New</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="Verdana, sans-serif">Verdana</option>
+        <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+        <option value="'Comic Sans MS', cursive">Comic Sans MS</option>
+        <option value="Impact, sans-serif">Impact</option>
+      </select>
+      <select class="ss-tb-select ss-tb-select-sm" id="ssFontSize" title="Font size">
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+        <option value="11">11</option>
+        <option value="12">12</option>
+        <option value="13" selected>13</option>
+        <option value="14">14</option>
+        <option value="16">16</option>
+        <option value="18">18</option>
+        <option value="20">20</option>
+        <option value="24">24</option>
+        <option value="28">28</option>
+        <option value="36">36</option>
+        <option value="48">48</option>
+        <option value="72">72</option>
+      </select>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssSortAsc" title="Sort ascending (A-Z)"><span class="msi">arrow_upward</span></button>
-      <button class="tb-btn" id="ssSortDesc" title="Sort descending (Z-A)"><span class="msi">arrow_downward</span></button>
-      <button class="tb-btn" id="ssFilter" title="Toggle filter"><span class="msi">filter_list</span></button>
+      <button class="tb-btn" id="ssBold" title="Bold (Ctrl+B)"><b>B</b></button>
+      <button class="tb-btn" id="ssItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+      <button class="tb-btn" id="ssUnderline" title="Underline (Ctrl+U)"><u>U</u></button>
+      <button class="tb-btn" id="ssStrikethrough" title="Strikethrough"><s>S</s></button>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssFreeze" title="Freeze panes at selected cell"><span class="msi">push_pin</span></button>
+      <label class="tb-btn ss-color-btn" title="Font color" id="ssFontColorWrap">
+        <span class="msi">format_color_text</span>
+        <input type="color" id="ssFontColor" value="#000000" class="ss-color-input">
+        <span class="ss-color-indicator" id="ssFontColorBar" style="background:#000000"></span>
+      </label>
+      <label class="tb-btn ss-color-btn" title="Fill color" id="ssFillColorWrap">
+        <span class="msi">format_color_fill</span>
+        <input type="color" id="ssFillColor" value="#ffffff" class="ss-color-input">
+        <span class="ss-color-indicator" id="ssFillColorBar" style="background:#ffffff"></span>
+      </label>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssExportCSV" title="Export as CSV"><span class="msi">download</span></button>
-      <span class="tb-label" id="ssExportLabel">Export CSV</span>
+      <button class="tb-btn" id="ssBorders" title="Borders" disabled><span class="msi">border_all</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssAlignLeft" title="Align left"><span class="msi">format_align_left</span></button>
+      <button class="tb-btn" id="ssAlignCenter" title="Align center"><span class="msi">format_align_center</span></button>
+      <button class="tb-btn" id="ssAlignRight" title="Align right"><span class="msi">format_align_right</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssMergeCells" title="Merge cells"><span class="msi">call_merge</span></button>
+      <button class="tb-btn" id="ssTextWrap" title="Toggle text wrap"><span class="msi">wrap_text</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <select class="ss-tb-select" id="ssNumberFormat" title="Number format">
+        <option value="general">General</option>
+        <option value="number">Number</option>
+        <option value="currency">Currency</option>
+        <option value="percentage">Percentage</option>
+        <option value="date">Date</option>
+        <option value="time">Time</option>
+        <option value="scientific">Scientific</option>
+      </select>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssFindReplace" title="Find & Replace (Ctrl+F)"><span class="msi">search</span></button>
     </div>
+
     <div class="spreadsheet-container" id="spreadsheetContainer">
       <!-- SpreadsheetView renders here -->
     </div>
@@ -891,6 +1031,71 @@
     </div>
     <div class="history-tab-content" id="versionsTab" style="display:none">
       <div class="history-list" id="historyList"></div>
+    </div>
+  </div>
+
+  <!-- AI Floating Selection Toolbar -->
+  <div class="ai-floating-bar" id="aiFloatingBar" style="display:none" role="toolbar" aria-label="AI quick actions">
+    <span class="ai-floating-context" id="aiFloatingContext" title="Selection context"></span>
+    <div class="ai-floating-actions" id="aiFloatingActions">
+      <button class="ai-floating-btn" data-ai-action="improve" title="Improve writing">Improve</button>
+      <button class="ai-floating-btn" data-ai-action="shorter" title="Make more concise">Shorten</button>
+      <button class="ai-floating-btn" data-ai-action="longer" title="Expand with more detail">Expand</button>
+      <button class="ai-floating-btn" data-ai-action="grammar" title="Fix grammar and spelling">Grammar</button>
+      <button class="ai-floating-btn" data-ai-action="translate" title="Translate text">Translate</button>
+    </div>
+  </div>
+
+  <!-- AI Hint Bubble -->
+  <div class="ai-hint-bubble" id="aiHintBubble" style="display:none" role="alert" aria-live="polite"></div>
+
+  <!-- AI Inline Prompt (appears at cursor for /ai command) -->
+  <div class="ai-inline-prompt" id="aiInlinePrompt" style="display:none">
+    <input class="ai-inline-prompt-input" id="aiInlinePromptInput" type="text" placeholder="Tell AI what to do..." title="Type an instruction for AI" autocomplete="off">
+    <span class="ai-inline-prompt-hint">Enter to submit, Esc to cancel</span>
+  </div>
+
+  <!-- AI Inline Suggestion (diff view with accept/reject) -->
+  <div class="ai-inline-suggestion" id="aiInlineSuggestion" style="display:none">
+    <div class="ai-inline-diff" id="aiInlineDiff"></div>
+    <div class="ai-inline-actions">
+      <button class="ai-inline-accept" id="aiInlineAccept" title="Accept suggestion (Enter)"><span class="msi" style="font-size:16px">check</span> Accept</button>
+      <button class="ai-inline-reject" id="aiInlineReject" title="Reject suggestion (Escape)"><span class="msi" style="font-size:16px">close</span> Reject</button>
+      <button class="ai-inline-retry" id="aiInlineRetry" title="Try again with same prompt"><span class="msi" style="font-size:16px">refresh</span> Retry</button>
+    </div>
+  </div>
+
+  <!-- AI Assistant Panel (right, docked) -->
+  <div class="ai-panel" id="aiPanel" role="complementary" aria-label="AI Assistant" style="display:none">
+    <div class="ai-panel-header">
+      <h3>AI Assistant</h3>
+      <span class="ai-context-chip" id="aiContextLabel" title="Current editing context">Document</span>
+      <button class="ai-clear-btn" id="aiClearBtn" title="Clear conversation"><span class="msi" style="font-size:16px">delete_sweep</span></button>
+      <div class="ai-panel-status" id="aiPanelStatus" title="AI connection status"></div>
+      <button class="ai-panel-close" id="aiPanelClose" aria-label="Close AI panel" title="Close panel"><span class="msi">close</span></button>
+    </div>
+    <div class="ai-panel-mode">
+      <select class="ai-mode-select" id="aiModeSelect" title="Choose AI task">
+        <option value="writer">Writing Assist</option>
+        <option value="grammar">Grammar Check</option>
+        <option value="summarize">Summarize</option>
+        <option value="translate">Translate</option>
+        <option value="formula">Formula Help</option>
+        <option value="data_analysis">Analyze Data</option>
+      </select>
+    </div>
+    <div class="ai-panel-messages" id="aiMessages">
+      <div class="ai-welcome">
+        <p>Select text in your document, then ask the AI to help.</p>
+        <p class="ai-welcome-hint">Or type a question below.</p>
+      </div>
+    </div>
+    <div class="ai-panel-input">
+      <textarea class="ai-input" id="aiInput" rows="2" placeholder="Ask AI to help with your document..." title="Type your request for the AI assistant"></textarea>
+      <div class="ai-input-actions">
+        <button class="ai-send-btn" id="aiSendBtn" title="Send request to AI (Enter)"><span class="msi">send</span></button>
+        <button class="ai-stop-btn" id="aiStopBtn" title="Stop AI generation" style="display:none"><span class="msi">stop</span></button>
+      </div>
     </div>
   </div>
 
@@ -1046,22 +1251,22 @@
 
 <!-- Table Context Menu -->
 <div class="ctx-menu" id="tableContextMenu">
-  <button class="ctx-item" id="cmInsertRowAbove"><span class="msi ctx-icon">add</span> Insert Row Above</button>
-  <button class="ctx-item" id="cmInsertRowBelow"><span class="msi ctx-icon">add</span> Insert Row Below</button>
-  <button class="ctx-item" id="cmDeleteRow"><span class="msi ctx-icon">delete</span> Delete Row</button>
+  <button class="ctx-item" id="cmInsertRowAbove" title="Insert a new row above the current row"><span class="msi ctx-icon">add</span> Insert Row Above</button>
+  <button class="ctx-item" id="cmInsertRowBelow" title="Insert a new row below the current row"><span class="msi ctx-icon">add</span> Insert Row Below</button>
+  <button class="ctx-item" id="cmDeleteRow" title="Delete the current row"><span class="msi ctx-icon">delete</span> Delete Row</button>
   <div class="ctx-sep"></div>
-  <button class="ctx-item" id="cmInsertColLeft"><span class="msi ctx-icon">add</span> Insert Column Left</button>
-  <button class="ctx-item" id="cmInsertColRight"><span class="msi ctx-icon">add</span> Insert Column Right</button>
-  <button class="ctx-item" id="cmDeleteCol"><span class="msi ctx-icon">delete</span> Delete Column</button>
+  <button class="ctx-item" id="cmInsertColLeft" title="Insert a new column to the left"><span class="msi ctx-icon">add</span> Insert Column Left</button>
+  <button class="ctx-item" id="cmInsertColRight" title="Insert a new column to the right"><span class="msi ctx-icon">add</span> Insert Column Right</button>
+  <button class="ctx-item" id="cmDeleteCol" title="Delete the current column"><span class="msi ctx-icon">delete</span> Delete Column</button>
   <div class="ctx-sep"></div>
   <button class="ctx-item" id="cmMergeCells" title="Merge selected cells into one"><span class="msi ctx-icon">merge</span> Merge Cells</button>
   <button class="ctx-item" id="cmSplitCell" title="Split the current cell back to individual cells"><span class="msi ctx-icon">call_split</span> Split Cell</button>
   <div class="ctx-sep"></div>
-  <button class="ctx-item" id="cmCellBg"><span class="msi ctx-icon">format_color_fill</span> Cell Background...
+  <button class="ctx-item" id="cmCellBg" title="Change cell background color"><span class="msi ctx-icon">format_color_fill</span> Cell Background...
     <input type="color" id="cmCellBgPicker" value="#ffffff" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
   </button>
   <div class="ctx-sep"></div>
-  <button class="ctx-item" id="cmTableProps"><span class="msi ctx-icon">settings</span> Table Properties...</button>
+  <button class="ctx-item" id="cmTableProps" title="Open table properties dialog"><span class="msi ctx-icon">settings</span> Table Properties...</button>
   <div class="ctx-sep"></div>
   <button class="ctx-item" id="cmDeleteTable" title="Delete the entire table"><span class="msi ctx-icon">delete_forever</span> Delete Table</button>
 </div>
@@ -1074,7 +1279,7 @@
       <fieldset style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
         <legend style="font-size:12px;color:var(--text-secondary);padding:0 4px">Table Width</legend>
         <div style="display:flex;align-items:center;gap:8px">
-          <select id="tpWidthMode" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+          <select id="tpWidthMode" title="Table width mode" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
             <option value="auto">Auto</option>
             <option value="percent">Percentage</option>
             <option value="fixed">Fixed (px)</option>
@@ -1094,7 +1299,7 @@
           <label style="font-size:12px;color:var(--text-secondary);min-width:50px">Color:</label>
           <input type="color" id="tpBorderColor" value="#000000" style="width:32px;height:24px;border:1px solid var(--border);border-radius:2px;cursor:pointer">
           <label style="font-size:12px;color:var(--text-secondary);margin-left:8px">Width:</label>
-          <select id="tpBorderWidth" style="padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
+          <select id="tpBorderWidth" title="Border width" style="padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--bg-white);color:var(--text-primary)">
             <option value="1">1px</option>
             <option value="2">2px</option>
             <option value="3">3px</option>
@@ -1210,6 +1415,7 @@
         <div class="shortcut-row"><span>Copy</span><kbd>Ctrl+C</kbd></div>
         <div class="shortcut-row"><span>Paste</span><kbd>Ctrl+V</kbd></div>
         <div class="shortcut-row"><span>Select All</span><kbd>Ctrl+A</kbd></div>
+        <div class="shortcut-row"><span>Paste without Formatting</span><kbd>Ctrl+Shift+V</kbd></div>
         <div class="shortcut-row"><span>Find & Replace</span><kbd>Ctrl+F</kbd></div>
         <div class="shortcut-row"><span>Line Break</span><kbd>Shift+Enter</kbd></div>
         <div class="shortcut-row"><span>Delete Word Left</span><kbd>Ctrl+Backspace</kbd></div>
@@ -1229,6 +1435,8 @@
         <div class="shortcut-row"><span>Strikethrough</span><kbd>Alt+Shift+5</kbd></div>
         <div class="shortcut-row"><span>Superscript</span><kbd>Ctrl+.</kbd></div>
         <div class="shortcut-row"><span>Subscript</span><kbd>Ctrl+,</kbd></div>
+        <div class="shortcut-row"><span>Increase Font Size</span><kbd>Ctrl+Shift+&gt;</kbd></div>
+        <div class="shortcut-row"><span>Decrease Font Size</span><kbd>Ctrl+Shift+&lt;</kbd></div>
         <div class="shortcut-row"><span>Clear Formatting</span><kbd>Ctrl+\</kbd></div>
       </div>
       <div class="shortcuts-section">
@@ -1239,6 +1447,8 @@
         <div class="shortcut-row"><span>Justify</span><kbd>Ctrl+J</kbd></div>
         <div class="shortcut-row"><span>Indent</span><kbd>Tab</kbd></div>
         <div class="shortcut-row"><span>Outdent</span><kbd>Shift+Tab</kbd></div>
+        <div class="shortcut-row"><span>Numbered List</span><kbd>Ctrl+Shift+7</kbd></div>
+        <div class="shortcut-row"><span>Bulleted List</span><kbd>Ctrl+Shift+8</kbd></div>
         <div class="shortcut-row"><span>Normal Style</span><kbd>Ctrl+Alt+0</kbd></div>
         <div class="shortcut-row"><span>Heading 1-6</span><kbd>Ctrl+Alt+1..6</kbd></div>
       </div>
@@ -1863,6 +2073,26 @@
   </div>
   <div class="print-preview-body" id="printPreviewBody">
     <!-- Cloned pages rendered here -->
+  </div>
+</div>
+
+<!-- Chart Type Picker Modal (S3) -->
+<div class="modal-overlay" id="chartTypeModal" role="dialog" aria-modal="true" aria-label="Insert Chart" style="display:none">
+  <div class="modal" style="max-width:400px">
+    <h3><span class="msi modal-icon">bar_chart</span> Insert Chart</h3>
+    <p style="font-size:13px;color:#5f6368;margin:0 0 4px">Select a chart type for the current data range:</p>
+    <div class="chart-type-grid">
+      <button data-chart-type="column" title="Column Chart"><span class="chart-type-icon msi">bar_chart</span>Column</button>
+      <button data-chart-type="bar" title="Bar Chart (horizontal)"><span class="chart-type-icon msi">align_horizontal_left</span>Bar</button>
+      <button data-chart-type="line" title="Line Chart"><span class="chart-type-icon msi">show_chart</span>Line</button>
+      <button data-chart-type="area" title="Area Chart"><span class="chart-type-icon msi">area_chart</span>Area</button>
+      <button data-chart-type="pie" title="Pie Chart"><span class="chart-type-icon msi">pie_chart</span>Pie</button>
+      <button data-chart-type="doughnut" title="Doughnut Chart"><span class="chart-type-icon msi">donut_large</span>Doughnut</button>
+    </div>
+    <div class="modal-actions">
+      <button id="chartCancelBtn">Cancel</button>
+      <button class="primary" id="chartInsertBtn" disabled>Insert</button>
+    </div>
   </div>
 </div>
 

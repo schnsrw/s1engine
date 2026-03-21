@@ -5,7 +5,7 @@
 
 ## Vision
 
-Rudra Code becomes the open-source alternative to OnlyOffice/Collabora — a single Docker image that any product can embed for document editing, collaboration, and conversion. AGPL-3.0 licensed (with commercial dual-license), pure Rust, sub-200MB image.
+Rudra Code becomes a production-grade open-source document editing platform — a single Docker image that any product can embed for document editing, collaboration, and conversion. AGPL-3.0 licensed (with commercial dual-license), pure Rust, sub-200MB image.
 
 ---
 
@@ -17,7 +17,7 @@ Single binary serving everything: static editor + REST API + WebSocket collab.
 **Phases A-D** (see `UNIFIED_SERVER_PLAN.md`):
 - A: File sessions with TTL + static file serving
 - B: Server-authoritative WebSocket editing
-- C: JWT integration mode (like OnlyOffice Document Server API)
+- C: JWT integration mode (document server API)
 - D: Single Docker image
 
 ### Documentation Wiki
@@ -196,7 +196,7 @@ Editor → Plugin API → LLM Provider Interface
 1. **Format-per-WASM**: Each document type is a separate WASM module. Browser loads only what's needed.
 2. **Single binary server**: No sidecar processes, no separate relay, no nginx. One binary does everything.
 3. **Stateless-ready**: In-memory by default for simplicity, but every state component has a shared-storage backend for clustering.
-4. **AGPL-3.0 + commercial dual-license**: Same model as OnlyOffice. Free for open-source use; commercial license for proprietary embedding.
+4. **AGPL-3.0 + commercial dual-license**: Free for open-source use; commercial license for proprietary embedding.
 5. **Pure Rust**: No C/C++ dependencies in the core. Compiles anywhere Rust does.
 6. **Progressive features**: Basic editing works immediately. Advanced features (collab, AI, forms) load on demand.
 

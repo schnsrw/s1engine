@@ -763,6 +763,46 @@ export function initInput() {
         return;
       }
 
+      // Ctrl+Shift+> (Ctrl+Shift+.) — Increase font size by 1pt
+      if (e.shiftKey && (e.key === '>' || e.key === '.')) {
+        e.preventDefault();
+        if (state.doc && info) {
+          try {
+            const fmt = JSON.parse(state.doc.get_formatting_json(info.startNodeId));
+            const current = parseFloat(fmt.fontSize) || 12;
+            const next = Math.min(current + 1, 96);
+            applyFormat('fontSize', String(next));
+            const fsInput = $('fontSize');
+            if (fsInput) fsInput.value = next;
+          } catch (err) { console.error('increase font size:', err); }
+        }
+        return;
+      }
+
+      // Ctrl+Shift+< (Ctrl+Shift+,) — Decrease font size by 1pt
+      if (e.shiftKey && (e.key === '<' || e.key === ',')) {
+        e.preventDefault();
+        if (state.doc && info) {
+          try {
+            const fmt = JSON.parse(state.doc.get_formatting_json(info.startNodeId));
+            const current = parseFloat(fmt.fontSize) || 12;
+            const next = Math.max(current - 1, 6);
+            applyFormat('fontSize', String(next));
+            const fsInput = $('fontSize');
+            if (fsInput) fsInput.value = next;
+          } catch (err) { console.error('decrease font size:', err); }
+        }
+        return;
+      }
+
+      // Ctrl+\ — Clear formatting
+      if (e.key === '\\') {
+        e.preventDefault();
+        const clearBtn = $('btnClearFormat');
+        if (clearBtn) clearBtn.click();
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case 'b': e.preventDefault(); toggleFormat('bold'); return;
         case 'i': e.preventDefault(); toggleFormat('italic'); return;
@@ -2001,19 +2041,19 @@ function parseClipboardHtml(html) {
     const body = doc.body;
     if (!body || !body.childNodes.length) return null;
 
-    // Google Docs wraps pasted content in a <b> with id="docs-internal-guid-..."
+    // Some web editors wrap pasted content in a <b> with id="docs-internal-guid-..."
     // Unwrap it so the actual paragraphs inside get processed correctly
     const gdocsWrapper = body.querySelector('b[id^="docs-internal-guid-"]');
     const walkRoot = gdocsWrapper || body;
 
-    // Remove style tags (MS Word injects <style> blocks into clipboard HTML)
+    // Remove style tags (some editors inject <style> blocks into clipboard HTML)
     walkRoot.querySelectorAll('style').forEach(s => s.remove());
 
     const elements = [];
 
-    // Google Docs: if the wrapper contains block elements (<p>, <h*>), walk normally.
+    // If the wrapper contains block elements (<p>, <h*>), walk normally.
     // If it only has inline children (<span>, text, etc.), treat the whole thing as one paragraph.
-    // Also check for <br> separators — Google Docs often uses <br> between spans for multi-paragraph content.
+    // Also check for <br> separators — some editors use <br> between spans for multi-paragraph content.
     const hasBlockChildren = walkRoot.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, ul, ol, li, blockquote, pre, hr');
     if (gdocsWrapper && !hasBlockChildren) {
       // Check if there are <br> tags indicating multiple paragraphs
@@ -2045,7 +2085,7 @@ function parseClipboardHtml(html) {
           elements.push(para);
         }
       } else {
-        // All-inline Google Docs content: extract as a single paragraph with formatted runs
+        // All-inline wrapper content: extract as a single paragraph with formatted runs
         const runs = extractRunsFromElement(walkRoot);
         if (runs.length > 0) {
           const para = { type: 'paragraph', runs };
@@ -2096,7 +2136,7 @@ function _hasPageBreakStyle(el) {
   // Check style properties directly
   if (style.pageBreakBefore === 'always' || style.pageBreakAfter === 'always') return true;
   if (style.breakBefore === 'page' || style.breakAfter === 'page') return true;
-  // Check cssText for various page-break patterns (MS Word uses inline styles)
+  // Check cssText for various page-break patterns (some editors use inline styles)
   if (/page-break-(?:before|after)\s*:\s*always/i.test(cssText)) return true;
   if (/break-(?:before|after)\s*:\s*page/i.test(cssText)) return true;
   return false;
@@ -2286,7 +2326,7 @@ function walkBlockElements(container, elements) {
         const para = { type: 'paragraph', runs };
         extractParagraphFormat(child, para);
 
-        // MS Word list paragraph detection (class="MsoListParagraph" or mso-list style)
+        // Office list paragraph detection (class="MsoListParagraph" or mso-list style)
         const cls = typeof child.className === 'string' ? child.className : '';
         const cssText = child.style?.cssText || '';
         if (cls.includes('MsoListParagraph') || cssText.includes('mso-list')) {
@@ -2314,7 +2354,7 @@ function walkBlockElements(container, elements) {
           para.listLevel = parseInt(child.dataset.listLevel || '0');
         }
 
-        // MS Word heading detection (class="MsoTitle", "MsoHeading1", etc.)
+        // Office heading detection (class="MsoTitle", "MsoHeading1", etc.)
         if (tag === 'p') {
           const hClassMatch = cls.match(/MsoHeading(\d)/i);
           if (hClassMatch) para.headingLevel = parseInt(hClassMatch[1]);
@@ -3214,7 +3254,7 @@ function walkInline(node, inherited, runs) {
   if (style) {
     const fw = style.fontWeight;
     if (fw === 'bold' || fw === 'bolder' || (parseInt(fw) >= 700 && !isNaN(parseInt(fw)))) fmt.bold = true;
-    // Allow style to override tag-based bold (e.g. Google Docs <b> with font-weight:normal)
+    // Allow style to override tag-based bold (e.g. <b> with font-weight:normal)
     if (fw === 'normal' || fw === '400') fmt.bold = inherited.bold || false;
     if (style.fontStyle === 'italic') fmt.italic = true;
     if (style.fontStyle === 'normal' && (tag === 'i' || tag === 'em')) fmt.italic = false;
@@ -3246,7 +3286,7 @@ function walkInline(node, inherited, runs) {
     if (style.verticalAlign === 'sub') fmt.subscript = true;
   }
 
-  // MS Word specific: mso-bidi-* styles in cssText
+  // Office-specific: mso-bidi-* styles in cssText
   if (style && style.cssText) {
     if (/mso-bidi-font-weight\s*:\s*bold/i.test(style.cssText)) fmt.bold = true;
     if (/mso-bidi-font-style\s*:\s*italic/i.test(style.cssText)) fmt.italic = true;
@@ -3592,12 +3632,24 @@ const SLASH_COMMANDS = [
   { id: 'sectionbreak', label: 'Section Break', icon: '\u2500',  keywords: 'section break next page continuous' },
   { id: 'quote',      label: 'Quote',           icon: '\u201C',  keywords: 'quote blockquote' },
   { id: 'code',       label: 'Code Block',      icon: '</>',keywords: 'code block monospace' },
+  // AI commands
+  { id: 'ai',           label: 'AI: Ask anything',      icon: 'AI', keywords: 'ai ask help assistant' },
+  { id: 'ai-improve',   label: 'AI: Improve writing',   icon: 'AI', keywords: 'ai improve rewrite better' },
+  { id: 'ai-grammar',   label: 'AI: Fix grammar',       icon: 'AI', keywords: 'ai grammar spelling fix' },
+  { id: 'ai-summarize', label: 'AI: Summarize',         icon: 'AI', keywords: 'ai summarize summary brief' },
+  { id: 'ai-translate', label: 'AI: Translate',         icon: 'AI', keywords: 'ai translate language' },
+  { id: 'ai-fill',      label: 'AI: Fill sample text',  icon: 'AI', keywords: 'ai fill sample lorem placeholder' },
+  { id: 'ai-format',    label: 'AI: Format document',   icon: 'AI', keywords: 'ai format presentable professional' },
+  { id: 'ai-table',     label: 'AI: Generate table',    icon: 'AI', keywords: 'ai table create generate data' },
+  { id: 'ai-formula',   label: 'AI: Formula help',      icon: 'AI', keywords: 'ai formula spreadsheet', ssOnly: true },
 ];
 
 function filterSlashCommands(query) {
-  if (!query) return SLASH_COMMANDS;
+  const isSpreadsheet = !!state.spreadsheetView;
+  let commands = SLASH_COMMANDS.filter(cmd => !cmd.ssOnly || isSpreadsheet);
+  if (!query) return commands;
   const q = query.toLowerCase();
-  return SLASH_COMMANDS.filter(cmd =>
+  return commands.filter(cmd =>
     cmd.label.toLowerCase().includes(q) || cmd.keywords.includes(q)
   );
 }
@@ -3610,7 +3662,7 @@ function renderSlashMenu(commands) {
     return;
   }
   menu.innerHTML = commands.map((cmd, i) =>
-    `<div class="slash-menu-item${i === state.slashMenuIndex ? ' active' : ''}" data-cmd="${cmd.id}" role="option" aria-selected="${i === state.slashMenuIndex}">` +
+    `<div class="slash-menu-item${i === state.slashMenuIndex ? ' active' : ''}${cmd.id.startsWith('ai') ? ' slash-ai-item' : ''}" data-cmd="${cmd.id}" role="option" aria-selected="${i === state.slashMenuIndex}">` +
       `<span class="slash-menu-icon">${cmd.icon}</span>` +
       `<span class="slash-menu-label">${cmd.label}</span>` +
     `</div>`
@@ -3772,11 +3824,62 @@ function executeSlashCommand(cmdId) {
         renderDocument();
         break;
       }
+      // AI commands
+      case 'ai': {
+        import('./ai-inline.js').then(m => m.showInlineAIPrompt()).catch(() => {});
+        break;
+      }
+      case 'ai-improve': {
+        import('./ai-inline.js').then(m => m.triggerAIAction('improve')).catch(() => {});
+        break;
+      }
+      case 'ai-grammar': {
+        import('./ai-inline.js').then(m => m.triggerAIAction('grammar')).catch(() => {});
+        break;
+      }
+      case 'ai-summarize': {
+        import('./ai-inline.js').then(m => m.triggerAIAction('custom', 'Summarize this paragraph concisely')).catch(() => {});
+        break;
+      }
+      case 'ai-translate': {
+        import('./ai-inline.js').then(m => m.triggerAIAction('translate')).catch(() => {});
+        break;
+      }
+      case 'ai-fill': {
+        import('./ai-inline.js').then(m => {
+          m.showInlineAIPrompt();
+          const input = document.getElementById('aiInlinePromptInput');
+          if (input) input.value = 'Generate 2-3 sample paragraphs that continue naturally from this content';
+        }).catch(() => {});
+        break;
+      }
+      case 'ai-format': {
+        import('./ai-inline.js').then(m => m.triggerAIAction('custom', 'Reformat this text to be more presentable and professional. Add proper structure, fix formatting, and improve readability. Return only the improved text.')).catch(() => {});
+        break;
+      }
+      case 'ai-table': {
+        import('./ai-inline.js').then(m => {
+          m.showInlineAIPrompt();
+          const input = document.getElementById('aiInlinePromptInput');
+          if (input) { input.value = 'Create a table with: '; input.setSelectionRange(input.value.length, input.value.length); }
+        }).catch(() => {});
+        break;
+      }
+      case 'ai-formula': {
+        import('./ai-inline.js').then(m => {
+          m.showInlineAIPrompt();
+          const input = document.getElementById('aiInlinePromptInput');
+          if (input) { input.value = 'Write a formula that: '; input.setSelectionRange(input.value.length, input.value.length); }
+        }).catch(() => {});
+        break;
+      }
     }
     // E3.4: Record slash command in undo history
     const labels = { heading1: 'Set Heading 1', heading2: 'Set Heading 2', heading3: 'Set Heading 3',
       bullet: 'Insert bullet list', numbered: 'Insert numbered list', table: 'Insert table',
-      hr: 'Insert horizontal rule', pagebreak: 'Insert page break', sectionbreak: 'Insert section break', quote: 'Apply quote style', code: 'Apply code style' };
+      hr: 'Insert horizontal rule', pagebreak: 'Insert page break', sectionbreak: 'Insert section break', quote: 'Apply quote style', code: 'Apply code style',
+      ai: 'AI prompt', 'ai-improve': 'AI improve', 'ai-grammar': 'AI grammar', 'ai-summarize': 'AI summarize',
+      'ai-translate': 'AI translate', 'ai-fill': 'AI fill sample', 'ai-format': 'AI format', 'ai-table': 'AI table', 'ai-formula': 'AI formula' };
     if (labels[cmdId]) recordUndoAction(labels[cmdId]);
     updateToolbarState();
     updateUndoRedo();

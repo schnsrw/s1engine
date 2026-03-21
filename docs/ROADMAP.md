@@ -605,7 +605,7 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 
 #### DOCX Parsing (5 new tests)
 - [x] Non-self-closing `<w:fldChar>` elements (fixes footer page numbers)
-- [x] Paragraph-level `mc:AlternateContent` (fixes Google Docs images)
+- [x] Paragraph-level `mc:AlternateContent` (fixes alternate-content image handling)
 - [x] Fallback skipping (prevents duplicate images)
 
 #### WASM PDF Export (4 new tests)
@@ -684,7 +684,7 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 
 ### P.7: Demo Editor Rewrite (COMPLETE)
 - [x] WYSIWYG editor with contentEditable and WASM-backed operations
-- [x] Google Docs-style UI: menu bar, formatting toolbar, insert bar
+- [x] Professional UI: menu bar, formatting toolbar, insert bar
 - [x] Formatting via `format_selection()` WASM API (Bold, Italic, Underline, Strikethrough, Font, Size, Color, Highlight)
 - [x] Paragraph operations: Enter splits, Backspace merges, all via WASM
 - [x] Heading levels (Normal, H1-H6) via `set_heading_level()`

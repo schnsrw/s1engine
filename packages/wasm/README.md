@@ -1,6 +1,6 @@
 # @rudra/wasm
 
-WebAssembly bindings for [Rudra Code](https://github.com/schnsrw/s1engine) — a modular document engine built in Rust.
+WebAssembly bindings for [Rudra Code](https://github.com/Rudra-Office/Rudra-Editor) — a modular document engine built in Rust.
 
 ## Features
 
@@ -59,7 +59,7 @@ experiments: { asyncWebAssembly: true }
 
 ## API Reference
 
-See the [full documentation](https://github.com/schnsrw/s1engine) for the complete API.
+See the [full documentation](https://github.com/Rudra-Office/Rudra-Editor) for the complete API.
 
 ## License
 

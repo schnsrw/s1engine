@@ -1,0 +1,29 @@
+# Rudra AI Sidecar — standalone compose file
+# Usage: docker compose -f ai/docker-compose.yml up
+# Or include from the root docker-compose.yml
+
+services:
+  rudra-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${AI_PORT:-8081}:8081"
+    environment:
+      # Override thread count if needed (default: auto-detect)
+      - LLAMA_N_THREADS=${AI_THREADS:-0}
+    # CPU resource limits — tune to your hardware
+    deploy:
+      resources:
+        limits:
+          cpus: "${AI_CPUS:-4}"
+          memory: "${AI_MEMORY:-4G}"
+        reservations:
+          memory: "2G"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

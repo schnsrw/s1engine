@@ -722,7 +722,7 @@ function handleRemoteCrdtOp(opJson) {
 
 ### 14.1 Overview
 
-When a table spans multiple pages, the first row (designated as the header row) should repeat at the top of each continuation page. This improves readability for large tables, matching the behavior of Word, Google Docs, and the OOXML `<w:tblHeader/>` element.
+When a table spans multiple pages, the first row (designated as the header row) should repeat at the top of each continuation page. This improves readability for large tables, following the OOXML `<w:tblHeader/>` element specification.
 
 ### 14.2 Data Model
 

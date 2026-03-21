@@ -5,11 +5,11 @@
 
 set -euo pipefail
 
-REPO="schnsrw/s1engine"
+REPO="Rudra-Office/Rudra-Editor"
 
 echo "Setting repository description..."
 gh repo edit "$REPO" \
-  --description "Open-source document engine SDK in Rust — read, write, edit DOCX/ODT/PDF/Markdown with CRDT collaboration, WASM support, and a self-hosted web editor. Alternative to OnlyOffice/Collabora."
+  --description "Open-source document engine SDK in Rust — read, write, edit DOCX/ODT/PDF/Markdown with CRDT collaboration, WASM support, and a self-hosted web editor."
 
 echo "Setting repository topics..."
 gh repo edit "$REPO" \
@@ -26,8 +26,7 @@ gh repo edit "$REPO" \
   --add-topic document-conversion \
   --add-topic self-hosted \
   --add-topic text-processing \
-  --add-topic onlyoffice-alternative \
-  --add-topic google-docs-alternative \
+  --add-topic document-processing \
   --add-topic markdown \
   --add-topic rust-library \
   --add-topic document-sdk \
@@ -35,6 +34,6 @@ gh repo edit "$REPO" \
   --add-topic word-processor
 
 echo "Setting homepage..."
-gh repo edit "$REPO" --homepage "https://github.com/schnsrw/s1engine"
+gh repo edit "$REPO" --homepage "https://github.com/Rudra-Office/Rudra-Editor"
 
 echo "Done! Verify at https://github.com/$REPO"

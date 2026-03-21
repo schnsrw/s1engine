@@ -112,6 +112,15 @@ export const state = {
   autoCapitalizeEnabled: true,
   // E9.5: TOC style — 'default' | 'dotted' | 'dashed' | 'no-page-numbers'
   tocStyle: 'default',
+  // AI integration
+  aiAvailable: false,
+  aiPanelOpen: false,
+  aiGenerating: false,
+  aiInlineSuggestion: null,  // { nodeId, startOffset, endOffset, original, suggested, action }
+  aiConversation: [],        // rolling multi-turn context
+  aiFloatingBarVisible: false,
+  aiHintsShown: {},          // { selectionHint: bool, spreadsheetHint: bool }
+  aiLastSelectedText: '',
   // Spreadsheet view state
   spreadsheetView: null,
   // PDF viewer state

@@ -117,7 +117,7 @@ Every visual aspect is controlled via CSS custom properties. Consumers override 
 ```typescript
 // Built-in themes
 S1Editor.themes = {
-  default: { /* light theme, Google Docs-like */ },
+  default: { /* light theme, professional clean look */ },
   dark: {
     '--s1-background': '#1e1e1e',
     '--s1-surface': '#2d2d2d',
@@ -556,7 +556,7 @@ For consumers who need to use s1engine in proprietary/closed-source products wit
 - Custom feature development
 - Indemnification
 
-A commercial license removes all AGPL obligations. This is the same model used by OnlyOffice, MongoDB, and Qt.
+A commercial license removes all AGPL obligations.
 
 ### Licensing Tiers
 

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a73e8" />
+      <stop offset="100%" stop-color="#1557b0" />
+    </linearGradient>
+    <linearGradient id="fold" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#669df6" />
+      <stop offset="100%" stop-color="#a8c7fa" />
+    </linearGradient>
+  </defs>
+  <!-- Document body -->
+  <path d="M72 56 C72 44 82 34 94 34 L356 34 L440 118 L440 458 C440 470 430 480 418 480 L94 480 C82 480 72 470 72 458 Z" fill="url(#bg)" />
+  <!-- Corner fold -->
+  <path d="M356 34 L356 86 C356 102 368 118 386 118 L440 118 Z" fill="url(#fold)" />
+  <!-- Text lines -->
+  <rect x="128" y="170" width="228" height="14" rx="7" fill="#fff" opacity="0.85" />
+  <rect x="128" y="210" width="228" height="14" rx="7" fill="#fff" opacity="0.65" />
+  <rect x="128" y="250" width="180" height="14" rx="7" fill="#fff" opacity="0.5" />
+  <rect x="128" y="290" width="228" height="14" rx="7" fill="#fff" opacity="0.38" />
+  <rect x="128" y="330" width="200" height="14" rx="7" fill="#fff" opacity="0.26" />
+</svg>

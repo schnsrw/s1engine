@@ -10,7 +10,7 @@
 ## Clone & Build
 
 ```bash
-git clone https://github.com/schnsrw/s1engine.git
+git clone https://github.com/Rudra-Office/Rudra-Editor.git
 cd s1engine
 
 # Build and test all Rust crates

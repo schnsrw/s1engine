@@ -750,12 +750,12 @@ Steps:
 **Input**: `&DocumentModel`
 **Output**: `Result<Vec<u8>, DocxError>` (ZIP bytes)
 
-The writer produces a valid .docx that opens in Microsoft Word 2016+, LibreOffice 7+, and Google Docs.
+The writer produces a valid .docx that opens in all major office applications.
 
 Priorities:
 1. **Round-trip fidelity**: Read a DOCX, write it back → preserve as much as possible
 2. **Valid output**: Always produce a valid OOXML document (pass Open XML SDK validation)
-3. **Compatibility**: Target Word 2016+ and LibreOffice 7+
+3. **Compatibility**: Target major office applications (OOXML-compliant readers)
 
 ### 3.4 Rust Dependencies
 
@@ -862,9 +862,9 @@ DocumentModel → s1-layout (Layout Engine) → LayoutDocument → s1-format-pdf
 Legacy `.doc` files use Microsoft's OLE2 binary format.
 
 **Option A: External Tool (Recommended for Phase 1-2)**
-- Shell out to LibreOffice headless: `soffice --convert-to docx input.doc`
+- Shell out to an external conversion tool: `soffice --convert-to docx input.doc`
 - Pros: Excellent coverage, well-tested
-- Cons: Requires LibreOffice installed
+- Cons: Requires external tool installed
 
 **Option B: Native OLE2 Reader (Phase 3+)**
 - Parse OLE2 container using `cfb` crate

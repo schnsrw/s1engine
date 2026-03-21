@@ -6,7 +6,7 @@
 - Part 1: OpenDocument Schema
 - Part 3: Packages
 
-s1engine targets ODF 1.2 conformance as produced by LibreOffice and other major ODF implementations. The `office:version="1.2"` attribute is set on all generated content.
+s1engine targets ODF 1.2 conformance as produced by major ODF implementations. The `office:version="1.2"` attribute is set on all generated content.
 
 ## Implementation Overview
 
@@ -436,59 +436,13 @@ Current round-trip coverage:
 
 ### Recommended Additional Tests
 
-- Real-world ODT files from LibreOffice, Google Docs, and OpenOffice
+- Real-world ODT files from major office applications
 - ODT files with complex automatic style chains
 - Documents with multiple master pages (to verify graceful degradation)
 - Documents with embedded objects (math, charts)
 - Documents with drawings and shapes (to verify clean skipping)
 - Large documents with many auto-styles
 - Mixed-content scenarios (lists inside table cells, images in headers)
-
----
-
-## Competitor Comparison
-
-### vs. LibreOffice Writer
-
-| Area | s1engine | LibreOffice |
-|------|----------|-------------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent | Full |
-| Images | Equivalent (inline only) | Full (inline + anchored) |
-| Named styles | Equivalent | Full |
-| Auto styles | Equivalent (flatten/regenerate) | Full native |
-| Lists | Equivalent (flattened model) | Full native nesting |
-| Headers/Footers | Equivalent | Full |
-| Page layout | Equivalent (single section) | Full (multi-section) |
-| Track changes | Preserve only | Full editing |
-| Drawings/Shapes | Not supported | Full |
-| Equations (MathML) | Not supported | Full |
-| Embedded objects | Not supported | Full |
-| Columns | Not supported | Full |
-| Master pages (multiple) | Single only | Full |
-
-### vs. Google Docs (ODF export)
-
-| Area | s1engine | Google Docs |
-|------|----------|-------------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent | Partial (simplified) |
-| Images | Equivalent | Full |
-| Styles | Equivalent | Minimal |
-| Lists | Equivalent | Full |
-| Headers/Footers | Equivalent | Basic |
-| Track changes | Preserve | Converted to suggestions |
-
-### vs. OnlyOffice
-
-| Area | s1engine | OnlyOffice |
-|------|----------|------------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent | Full |
-| Images | Equivalent | Full |
-| Styles | Equivalent | Full |
-| Track changes | Preserve only | Full editing |
-| Drawings | Not supported | Full |
 
 ---
 

@@ -1,7 +1,7 @@
 # Editor UX Specification v1.0
 
 > Covers: cursor behavior, selection, typing, empty lines, images, clipboard, undo/redo.
-> Reference: Google Docs, Microsoft Word Online, OnlyOffice behavior.
+> Reference: industry-standard document editor behavior.
 
 ## 1. Cursor Behavior
 
@@ -114,7 +114,7 @@
 | 3.3.2 | Paste after cut-all | New paragraphs created from pasted content |
 | 3.3.3 | Paste multi-line text | Creates multiple paragraphs |
 | 3.3.4 | Paste HTML from Word | Formats preserved (bold, italic, etc.) |
-| 3.3.5 | Paste from Google Docs | Basic formatting preserved |
+| 3.3.5 | Paste from external sources | Basic formatting preserved |
 | 3.3.6 | Paste image from clipboard | Image inserted inline |
 | 3.3.7 | Paste on HTTP (no Clipboard API) | Falls back to `execCommand` + paste event |
 | 3.3.8 | Paste with pending formats | Pending formats applied to pasted text |

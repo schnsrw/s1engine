@@ -1325,7 +1325,7 @@ fn read_instr_text_content(reader: &mut Reader<&[u8]>) -> Result<String, DocxErr
 
 /// Parse `<mc:AlternateContent>` inside a run — descend into `<mc:Choice>` to find
 /// `<w:drawing>` elements. Skips `<mc:Fallback>` content to avoid duplicates.
-/// This is how some DOCX producers (Google Docs, etc.) wrap inline images.
+/// This is how some DOCX producers wrap inline images.
 fn parse_alternate_content(
     reader: &mut Reader<&[u8]>,
     content: &mut Vec<RunContent>,
@@ -4044,7 +4044,7 @@ mod tests {
 
     #[test]
     fn parse_image_in_alternate_content() {
-        // Drawing wrapped in mc:AlternateContent (common in Google Docs DOCX exports)
+        // Drawing wrapped in mc:AlternateContent (common in some DOCX exports)
         let xml = wrap_doc(
             r#"<w:p><w:r>
                 <mc:AlternateContent>

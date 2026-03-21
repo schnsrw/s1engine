@@ -6,7 +6,7 @@
 - Part 1: Fundamentals and Markup Language Reference
 - Part 4: Transitional Migration Features
 
-s1engine targets ECMA-376 Transitional conformance, which is what Microsoft Word, LibreOffice, and OnlyOffice produce by default.
+s1engine targets ECMA-376 Transitional conformance, which is the most widely used OOXML profile.
 
 ## Implementation Overview
 
@@ -469,7 +469,7 @@ Current round-trip coverage:
 
 ### Recommended Additional Tests
 
-- Real-world DOCX files from Microsoft Word, LibreOffice, Google Docs, and OnlyOffice
+- Real-world DOCX files from various office applications
 - Large documents (1000+ paragraphs, 100+ images)
 - Complex nested tables (3+ levels)
 - Documents with every supported feature combined
@@ -478,54 +478,24 @@ Current round-trip coverage:
 
 ---
 
-## Competitor Comparison
+## Feature Coverage Summary
 
-### vs. Microsoft Word
-
-| Area | s1engine | Word |
-|------|----------|------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent (minus conditional formatting) | Full |
-| Images | Equivalent (minus effects) | Full |
-| Track changes | Read/preserve (no accept/reject) | Full editing |
-| Comments | Full (minus threaded replies UI) | Full |
-| Equations | Preserve only | Full editing (OMML) |
-| Shapes | Basic properties + raw preservation | Full DrawingML |
-| SmartArt | Preserve only | Full editing |
-| Charts | Preserve only | Full editing |
-| Form controls | Preserve only | Full editing |
-| Macros | Preserve only | Full execution |
-| Themes | Not supported | Full |
-| Settings | Not supported | Full |
-
-### vs. LibreOffice Writer
-
-| Area | s1engine | LibreOffice |
-|------|----------|-------------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent | Full |
-| Images | Equivalent | Full (some conversion loss) |
-| Track changes | Read/preserve | Full editing |
-| Comments | Full | Full |
-| Equations | Preserve only | Converts to MathML |
-| Shapes | Basic + raw preservation | Converts to ODF draw |
-| Complex fields | Partial | Partial (some loss) |
-| Macros | Preserve only | VBA compatibility mode |
-| Themes | Not supported | Partial |
-
-### vs. OnlyOffice
-
-| Area | s1engine | OnlyOffice |
-|------|----------|------------|
-| Core text/paragraphs | Equivalent | Full |
-| Tables | Equivalent | Full |
-| Images | Equivalent | Full |
-| Track changes | Read/preserve | Full editing |
-| Comments | Full | Full |
-| Equations | Preserve only | LaTeX input |
-| Shapes | Basic + raw preservation | Full editing |
-| Form controls | Preserve only | Partial |
-| Macros | Preserve (no execution) | Plugin-based |
+| Area | s1engine Status |
+|------|----------------|
+| Core text/paragraphs | Full |
+| Tables | Full (minus conditional formatting) |
+| Images | Full (minus effects) |
+| Track changes | Read/preserve |
+| Comments | Full |
+| Equations | Preserve only |
+| Shapes | Basic properties + raw preservation |
+| SmartArt | Preserve only |
+| Charts | Preserve only |
+| Form controls | Preserve only |
+| Macros | Preserve only (no execution) |
+| Complex fields | Partial |
+| Themes | Not supported |
+| Settings | Not supported |
 
 ---
 

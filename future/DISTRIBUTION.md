@@ -71,7 +71,7 @@ edition = "2021"
 rust-version = "1.75"
 license = "AGPL-3.0-or-later"
 description = "Core document model for s1engine — document tree, nodes, attributes, styles"
-repository = "https://github.com/schnsrw/s1engine"
+repository = "https://github.com/Rudra-Office/Rudra-Editor"
 homepage = "https://s1engine.dev"
 documentation = "https://docs.rs/s1-model"
 readme = "README.md"
@@ -200,7 +200,7 @@ packages/
   "files": ["dist", "LICENSE", "README.md"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/schnsrw/s1engine",
+    "url": "https://github.com/Rudra-Office/Rudra-Editor",
     "directory": "packages/editor"
   },
   "homepage": "https://s1engine.dev",

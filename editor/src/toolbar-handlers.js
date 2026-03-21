@@ -240,7 +240,7 @@ export function initToolbar() {
   // Style gallery dropdown
   initStyleGallery();
 
-  // FS-21: Text color — Google Docs-style palette dropdown
+  // FS-21: Text color — palette dropdown
   const colorPicker = $('colorPicker');
   initColorPaletteDropdown(colorPicker, $('colorSwatch'), 'color');
 
@@ -709,6 +709,11 @@ export function initToolbar() {
   });
   // Comments panel toggle — toolbar icon button
   if ($('btnCommentsToggle')) $('btnCommentsToggle').addEventListener('click', () => {
+    // Route to spreadsheet comments panel when in sheet mode
+    if (state.currentView === 'spreadsheet' && state.spreadsheetView) {
+      state.spreadsheetView.showCommentsPanel();
+      return;
+    }
     $('commentsPanel').classList.toggle('show');
     if ($('commentsPanel').classList.contains('show')) refreshComments();
   });
@@ -3352,7 +3357,7 @@ function closeMoreMenu() {
 }
 
 // ── FS-21: Color Palette Dropdown ──────────────────
-// Google Docs-style 8x5 preset grid + recently used + custom button
+// 8x5 preset grid + recently used + custom button
 const _COLOR_PALETTE = [
   // Row 1: blacks/grays
   '000000','434343','666666','999999','B7B7B7','CCCCCC','D9D9D9','EFEFEF','F3F3F3','FFFFFF',

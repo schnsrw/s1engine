@@ -2,7 +2,7 @@
 
 ## One-Liner
 
-s1engine is the open-source document engine that lets any product add Google Docs-grade editing, collaboration, and format conversion — embeddable in hours, not months.
+s1engine is the open-source document engine that lets any product add professional-grade editing, collaboration, and format conversion — embeddable in hours, not months.
 
 ## The Problem
 
@@ -11,12 +11,10 @@ Building document editing into a product today is painful:
 | Approach | Problem |
 |----------|---------|
 | Build from scratch | 2-3 years of engineering, font rendering, format parsing, collaboration |
-| LibreOffice (LOOL/CODE) | Monolithic C++, runs as a separate process, not embeddable as a component |
-| OnlyOffice | Heavy JS client, AGPL license (forces open-sourcing your product or paying), tightly coupled |
-| CKEditor / TinyMCE | HTML-only editors, no real document model, no DOCX/PDF, no pagination |
-| Google Docs API | Proprietary, rate-limited, can't self-host, no white-labeling |
-| Collabora Online | LibreOffice wrapper, Docker container, not a library |
-| ProseMirror / TipTap | Great text editors, but no document format support, no layout engine, no PDF |
+| Monolithic office suites | Heavy C++ codebases, run as separate processes, not embeddable as a component |
+| HTML-only editors (CKEditor / TinyMCE) | No real document model, no DOCX/PDF, no pagination |
+| Proprietary cloud editors | Rate-limited, can't self-host, no white-labeling |
+| Rich text frameworks (ProseMirror / TipTap) | Great text editors, but no document format support, no layout engine, no PDF |
 
 **The gap**: There is no embeddable, open-source document engine that handles formats (DOCX, PDF), pagination, collaboration, AND provides a clean API for integration.
 
@@ -50,7 +48,7 @@ Each layer is independently usable:
 **Uses**: Core Engine (Layer 1) via Rust API or Server API (Layer 2).
 
 ### 3. Platform Builder ("Build a Docs product")
-**Profile**: Startup/team building a document editing product (alternative to Google Docs, Notion, etc.).
+**Profile**: Startup/team building a document editing product.
 **Need**: Full-featured editor with collaboration, white-labeling, custom branding.
 **Uses**: All 4 layers, heavily customized.
 
@@ -73,19 +71,19 @@ Each layer is independently usable:
 
 ## Positioning Statement
 
-**For** developers and product teams **who** need document editing capabilities in their applications, **s1engine is** an open-source document engine **that** provides format conversion, WYSIWYG editing, real-time collaboration, and PDF export as embeddable components. **Unlike** LibreOffice/OnlyOffice (monolithic), CKEditor/TinyMCE (HTML-only), or Google Docs (proprietary), **s1engine** is modular, self-hostable, format-native (DOCX/ODT), and designed for embedding from the ground up.
+**For** developers and product teams **who** need document editing capabilities in their applications, **s1engine is** an open-source document engine **that** provides format conversion, WYSIWYG editing, real-time collaboration, and PDF export as embeddable components. s1engine is modular, self-hostable, format-native (DOCX/ODT), and designed for embedding from the ground up.
 
 ## License Strategy
 
 | Component | License | Rationale |
 |-----------|---------|-----------|
-| Core engine (Rust crates) | AGPL-3.0-or-later | Protects against SaaS competitors |
+| Core engine (Rust crates) | AGPL-3.0-or-later | Ensures open-source usage under copyleft |
 | Server API | AGPL-3.0-or-later | Network use triggers copyleft |
 | Client SDK + Editor | AGPL-3.0-or-later | Consistent licensing |
 | Relay/Collaboration Server | AGPL-3.0-or-later | Self-hostable under AGPL |
 | Commercial License | Dual-license (proprietary) | Revenue stream — companies buy to avoid AGPL |
 
-**[DECISION]**: Use AGPL-3.0 with commercial dual-licensing for all components. This is the approach used by OnlyOffice, MongoDB, and similar successful open-source products. Companies that embed s1engine in proprietary SaaS products purchase a commercial license.
+**[DECISION]**: Use AGPL-3.0 with commercial dual-licensing for all components. Companies that embed s1engine in proprietary SaaS products purchase a commercial license.
 
 ## Non-Goals (Explicit)
 

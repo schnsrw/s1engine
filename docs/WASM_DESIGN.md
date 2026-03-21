@@ -351,7 +351,7 @@ WASM has no filesystem access. The layout engine needs font metrics for text sha
 
 When no fonts are loaded via `WasmFontDatabase`, the layout engine uses approximate character widths based on a monospace fallback model. This produces "good enough" layout for most documents -- text will be positioned reasonably, but character-level kerning and exact line breaks may differ from native rendering.
 
-This is the same approach used by Google Docs Lite and other lightweight document viewers.
+This is a common approach used by lightweight document viewers.
 
 ### Loading Fonts
 

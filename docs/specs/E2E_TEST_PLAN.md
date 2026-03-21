@@ -94,10 +94,10 @@ node tests/ws/test_concurrent.js   # 3 peers editing simultaneously
 |---|----------|-------|-----------------|
 | M-01 | Create new document | Open editor with no file | Empty document with one paragraph, cursor blinking |
 | M-02 | Open DOCX | Upload a Word-created DOCX | Document rendered with formatting preserved |
-| M-03 | Open ODT | Upload a LibreOffice ODT | Document rendered with formatting preserved |
+| M-03 | Open ODT | Upload an ODT file | Document rendered with formatting preserved |
 | M-04 | Open legacy DOC | Upload a .doc file | Converted to DOCX internally, content displayed |
 | M-05 | Export to DOCX | Edit document, click "Download DOCX" | Valid DOCX downloaded, opens in Word |
-| M-06 | Export to ODT | Edit document, click "Download ODT" | Valid ODT downloaded, opens in LibreOffice |
+| M-06 | Export to ODT | Edit document, click "Download ODT" | Valid ODT downloaded, opens in major office applications |
 | M-07 | Export to PDF | Click "Download PDF" | Valid PDF with correct layout |
 | M-08 | Export to TXT | Click "Download TXT" | Plain text, all formatting stripped |
 | M-09 | Auto-recovery | Edit document, close tab, reopen | Recovery prompt appears, content restored |
@@ -141,8 +141,8 @@ node tests/ws/test_concurrent.js   # 3 peers editing simultaneously
 |---|----------|-------|-----------------|
 | M-33 | Copy/paste plain text | Copy text, paste | Text pasted at cursor |
 | M-34 | Copy/paste formatted text | Copy bold text, paste | Formatting preserved |
-| M-35 | Paste from Word | Copy from MS Word, paste | Formatting mostly preserved |
-| M-36 | Paste from Google Docs | Copy from GDocs, paste | Basic formatting preserved |
+| M-35 | Paste from external editor | Copy from another editor, paste | Formatting mostly preserved |
+| M-36 | Paste from external source | Copy from external app, paste | Basic formatting preserved |
 | M-37 | Paste multi-line | Copy multiple paragraphs, paste | Multiple paragraphs created |
 | M-38 | Cut all content | Ctrl+A, Ctrl+X | All removed, empty paragraph, clipboard has content |
 | M-39 | Paste into empty doc | Ctrl+A, Ctrl+X, Ctrl+V | Content restored |
@@ -290,7 +290,7 @@ node tests/ws/test_concurrent.js   # 3 peers editing simultaneously
 | RT-09 | Track changes | DOCX with tracked changes -> export -> reopen | Changes preserved |
 | RT-10 | Comments | DOCX with comments -> export -> reopen | Comments preserved |
 | RT-11 | Edit then export | Open DOCX, edit text, export -> open in Word | Edits present, no corruption |
-| RT-12 | Word compatibility | Export DOCX, open in MS Word | No warnings, renders correctly |
+| RT-12 | OOXML compatibility | Export DOCX, open in OOXML-compliant reader | No warnings, renders correctly |
 
 ### 7.2 ODT Round-Trip
 
@@ -301,7 +301,7 @@ node tests/ws/test_concurrent.js   # 3 peers editing simultaneously
 | RT-15 | Tables | ODT with tables -> export -> reopen | Table structure preserved |
 | RT-16 | Images | ODT with images -> export -> reopen | Images preserved |
 | RT-17 | Styles | ODT with styles -> export -> reopen | Styles preserved |
-| RT-18 | LibreOffice compatibility | Export ODT, open in LibreOffice | No warnings, renders correctly |
+| RT-18 | ODT compatibility | Export ODT, open in office application | No warnings, renders correctly |
 
 ### 7.3 Cross-Format Conversion
 

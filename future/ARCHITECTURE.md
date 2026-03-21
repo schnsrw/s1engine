@@ -82,7 +82,7 @@ The REST API server should be horizontally scalable:
 
 ### 3. Client-First Rendering
 
-**[DECISION]**: Rendering happens on the client (WASM), not the server. This is different from LibreOffice/OnlyOffice (server-side tile rendering) and is a fundamental architectural choice:
+**[DECISION]**: Rendering happens on the client (WASM), not the server. This is a fundamental architectural choice (in contrast to server-side tile rendering approaches):
 
 | | Server-Side Rendering | Client-Side Rendering (s1engine) |
 |---|---|---|

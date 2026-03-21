@@ -1,6 +1,6 @@
 # @rudra/sdk
 
-Headless JavaScript/TypeScript SDK for [Rudra Code](https://github.com/schnsrw/s1engine). Manipulate documents (DOCX, ODT, PDF, TXT, Markdown) in the browser without any UI.
+Headless JavaScript/TypeScript SDK for [Rudra Code](https://github.com/Rudra-Office/Rudra-Editor). Manipulate documents (DOCX, ODT, PDF, TXT, Markdown) in the browser without any UI.
 
 ## Installation
 

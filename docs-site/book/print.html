@@ -1,0 +1,2912 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Rudra Code Documentation</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Open-source document engine SDK in Rust. Read, write, edit, and convert DOCX, ODT, PDF, Markdown with CRDT collaboration and WASM support.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="theme/custom.css">
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Rudra Code Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/Rudra-Office/Rudra-Editor" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="rudra-code"><a class="header" href="#rudra-code">Rudra Code</a></h1>
+<p><strong>The open-source document engine that lets any product add professional-grade editing, collaboration, and format conversion — embeddable in hours, not months.</strong></p>
+<hr />
+<h2 id="what-is-rudra-code"><a class="header" href="#what-is-rudra-code">What is Rudra Code?</a></h2>
+<p>Rudra Code is a modular, pure-Rust SDK for document workflows. It reads, writes, edits, and converts documents across <strong>DOCX, ODT, PDF, TXT, Markdown, XLSX, ODS, and CSV</strong> formats — with CRDT-based real-time collaboration, a page layout engine, and a production-ready web editor.</p>
+<div class="table-wrapper"><table><thead><tr><th>Capability</th><th>Description</th></tr></thead><tbody>
+<tr><td><strong>Multi-format</strong></td><td>DOCX, ODT, PDF, TXT, Markdown, XLSX, ODS, CSV, legacy DOC</td></tr>
+<tr><td><strong>Pure Rust</strong></td><td>Zero C/C++ dependencies. Compiles to native, WASM, and C FFI</td></tr>
+<tr><td><strong>Collaborative</strong></td><td>Fugue CRDT for conflict-free multi-user editing</td></tr>
+<tr><td><strong>Layout engine</strong></td><td>Pagination, text shaping (rustybuzz), font subsetting, PDF export</td></tr>
+<tr><td><strong>Web editor</strong></td><td>Production-grade browser editor with toolbar, comments, track changes</td></tr>
+<tr><td><strong>Spreadsheet</strong></td><td>Canvas-based spreadsheet with 60+ formulas, charts, and real-time collab</td></tr>
+<tr><td><strong>Embeddable</strong></td><td>Rust library, WASM module, C shared library, npm packages, or Docker</td></tr>
+</tbody></table>
+</div>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<pre><code>Layer 1: Core Engine (Rust)     — Format I/O, document model, operations, CRDT
+Layer 2: Server (Rust/Axum)     — REST API, WebSocket collab, storage, auth, admin
+Layer 3: Client SDK (JS/TS)     — Embeddable editor, headless API, React/Vue components
+Layer 4: Platform Features      — White-labeling, integration mode, webhooks
+</code></pre>
+<p>Each layer is independently usable:</p>
+<ul>
+<li><strong>Just need format conversion?</strong> Use Layer 1 as a Rust library or WASM module</li>
+<li><strong>Need a document API?</strong> Use Layers 1+2 — deploy the server via Docker</li>
+<li><strong>Need an embeddable editor?</strong> Use Layers 1+2+3 — npm install and embed</li>
+<li><strong>Need a full branded product?</strong> Use all 4 layers — white-label and self-host</li>
+</ul>
+<h2 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h2>
+<p><strong>Docker (fastest):</strong></p>
+<pre><code class="language-bash">docker run -p 8080:8080 rudra/server
+# Editor at http://localhost:8080
+# API at http://localhost:8080/api/v1
+</code></pre>
+<p><strong>Rust library:</strong></p>
+<pre><code class="language-bash">cargo add s1engine --features full
+</code></pre>
+<p><strong>npm (browser):</strong></p>
+<pre><code class="language-bash">npm install @rudra/sdk @rudra/wasm
+</code></pre>
+<blockquote>
+<p><strong>Tip:</strong> See the <a href="./getting-started/quick-start.html">Quick Start guide</a> for a complete walkthrough, or jump to <a href="./getting-started/docker.html">Docker deployment</a> for self-hosting.</p>
+</blockquote>
+<h2 id="distribution"><a class="header" href="#distribution">Distribution</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>I want to...</th><th>Install</th></tr></thead><tbody>
+<tr><td>Process documents in Rust</td><td><code>cargo add s1engine</code></td></tr>
+<tr><td>Process documents in JS (no UI)</td><td><code>npm install @rudra/sdk</code></td></tr>
+<tr><td>Embed an editor in React</td><td><code>npm install @rudra/react</code></td></tr>
+<tr><td>Embed an editor in Vue</td><td><code>npm install @rudra/vue</code></td></tr>
+<tr><td>Run a document API server</td><td><code>docker run rudra/server</code></td></tr>
+<tr><td>Self-host the full platform</td><td><code>docker compose up</code></td></tr>
+<tr><td>Convert DOCX to PDF (CLI)</td><td>Download from <a href="https://github.com/Rudra-Office/Rudra-Editor/releases">GitHub Releases</a></td></tr>
+</tbody></table>
+</div>
+<h2 id="crate-structure"><a class="header" href="#crate-structure">Crate Structure</a></h2>
+<pre><code>crates/
+  s1-model/          Core document model (zero dependencies)
+  s1-ops/            Operations, transactions, undo/redo
+  s1-format-docx/    DOCX (OOXML) reader/writer
+  s1-format-odt/     ODT (ODF) reader/writer
+  s1-format-pdf/     PDF export
+  s1-format-txt/     Plain text reader/writer
+  s1-format-xlsx/    XLSX/ODS/CSV spreadsheet reader/writer
+  s1-convert/        Format conversion pipelines
+  s1-crdt/           Fugue CRDT for collaboration
+  s1-layout/         Page layout, pagination, line breaking
+  s1-text/           Text shaping (rustybuzz), font discovery
+  s1engine/          Facade crate — high-level public API
+</code></pre>
+<h2 id="links"><a class="header" href="#links">Links</a></h2>
+<ul>
+<li><a href="https://github.com/Rudra-Office/Rudra-Editor">GitHub Repository</a></li>
+<li><a href="./getting-started/quick-start.html">Quick Start</a></li>
+<li><a href="./api/rust.html">API Reference</a></li>
+<li><a href="./guides/self-hosting.html">Self-Hosting Guide</a></li>
+<li><a href="./contributing/setup.html">Contributing</a></li>
+</ul>
+<h2 id="license"><a class="header" href="#license">License</a></h2>
+<p>AGPL-3.0-or-later. Commercial dual-licensing available — <a href="https://github.com/Rudra-Office/Rudra-Editor">contact us</a> for details.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="quick-start-1"><a class="header" href="#quick-start-1">Quick Start</a></h1>
+<p>Get up and running with Rudra Code in 5 minutes.</p>
+<h2 id="option-1-rust-library"><a class="header" href="#option-1-rust-library">Option 1: Rust Library</a></h2>
+<pre><code class="language-bash">cargo add s1engine
+</code></pre>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use s1engine::{Engine, DocumentBuilder, Format};
+
+// Open a DOCX file
+let engine = Engine::new();
+let data = std::fs::read("report.docx")?;
+let doc = engine.open(&amp;data)?;
+println!("{}", doc.to_plain_text());
+
+// Create a document programmatically
+let doc = DocumentBuilder::new()
+    .title("My Report")
+    .heading(1, "Introduction")
+    .text("Built with Rudra Code.")
+    .build();
+
+// Export to PDF
+let pdf_bytes = doc.export(Format::Pdf)?;
+std::fs::write("output.pdf", pdf_bytes)?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="option-2-npm--wasm-browser"><a class="header" href="#option-2-npm--wasm-browser">Option 2: npm / WASM (Browser)</a></h2>
+<pre><code class="language-bash">npm install @rudra/wasm
+</code></pre>
+<pre><code class="language-javascript">import init, { WasmEngine } from '@rudra/wasm';
+
+await init();
+const engine = new WasmEngine();
+const doc = engine.create();
+const html = doc.to_html();
+</code></pre>
+<h2 id="option-3-docker-full-editor"><a class="header" href="#option-3-docker-full-editor">Option 3: Docker (Full Editor)</a></h2>
+<pre><code class="language-bash">docker run -p 8787:8787 rudra/editor
+</code></pre>
+<p>Open <code>http://localhost:8787</code> in your browser.</p>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<ul>
+<li><a href="getting-started/./installation.html">Installation details</a></li>
+<li><a href="getting-started/../guides/react.html">Embed in React</a></li>
+<li><a href="getting-started/../guides/conversion.html">Format conversion guide</a></li>
+<li><a href="getting-started/../guides/collaboration.html">Collaboration setup</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<p>Rudra Code can be used as a Rust library, WASM npm package, or Docker container.</p>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Platform</th><th>Requirements</th></tr></thead><tbody>
+<tr><td>Rust</td><td>Rust 1.88+ via <a href="https://rustup.rs/">rustup</a></td></tr>
+<tr><td>WASM</td><td>Node.js 18+, <code>wasm-pack</code></td></tr>
+<tr><td>Docker</td><td>Docker 20+</td></tr>
+</tbody></table>
+</div>
+<h2 id="choose-your-path"><a class="header" href="#choose-your-path">Choose Your Path</a></h2>
+<ul>
+<li><strong><a href="getting-started/./rust.html">Rust Library</a></strong> — Server-side document processing</li>
+<li><strong><a href="getting-started/./npm.html">npm / WASM</a></strong> — Browser-based editing</li>
+<li><strong><a href="getting-started/./docker.html">Docker</a></strong> — Full editor, zero setup</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="rust-library"><a class="header" href="#rust-library">Rust Library</a></h1>
+<h2 id="install"><a class="header" href="#install">Install</a></h2>
+<pre><code class="language-toml">[dependencies]
+s1engine = "1.0.1"
+</code></pre>
+<h2 id="open-a-document"><a class="header" href="#open-a-document">Open a Document</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use s1engine::Engine;
+
+let engine = Engine::new();
+let data = std::fs::read("report.docx")?;
+let doc = engine.open(&amp;data)?;
+
+println!("Title: {:?}", doc.metadata().title);
+println!("Text: {}", doc.to_plain_text());
+println!("Words: {}", doc.to_plain_text().split_whitespace().count());
+<span class="boring">}</span></code></pre></pre>
+<h2 id="create-a-document"><a class="header" href="#create-a-document">Create a Document</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use s1engine::{DocumentBuilder, Format};
+
+let doc = DocumentBuilder::new()
+    .title("My Report")
+    .heading(1, "Introduction")
+    .text("Built with Rudra Code.")
+    .build();
+
+std::fs::write("output.docx", doc.export(Format::Docx)?)?;
+std::fs::write("output.pdf", doc.export(Format::Pdf)?)?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="convert-between-formats"><a class="header" href="#convert-between-formats">Convert Between Formats</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let doc = engine.open(&amp;std::fs::read("input.docx")?)?;
+std::fs::write("output.odt", doc.export(Format::Odt)?)?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="feature-flags"><a class="header" href="#feature-flags">Feature Flags</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Feature</th><th>Description</th><th>Default</th></tr></thead><tbody>
+<tr><td><code>docx</code></td><td>DOCX read/write</td><td>Yes</td></tr>
+<tr><td><code>odt</code></td><td>ODT read/write</td><td>Yes</td></tr>
+<tr><td><code>txt</code></td><td>Plain text</td><td>Yes</td></tr>
+<tr><td><code>md</code></td><td>Markdown (GFM)</td><td>Yes</td></tr>
+<tr><td><code>pdf</code></td><td>PDF export</td><td>No</td></tr>
+<tr><td><code>crdt</code></td><td>Collaboration</td><td>No</td></tr>
+<tr><td><code>convert</code></td><td>Format conversion</td><td>No</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="npm--wasm"><a class="header" href="#npm--wasm">npm / WASM</a></h1>
+<h2 id="install-1"><a class="header" href="#install-1">Install</a></h2>
+<pre><code class="language-bash">npm install @rudra/wasm
+</code></pre>
+<h2 id="quick-start-2"><a class="header" href="#quick-start-2">Quick Start</a></h2>
+<pre><code class="language-javascript">import init, { WasmEngine } from '@rudra/wasm';
+
+await init();
+const engine = new WasmEngine();
+
+// Create a document
+const doc = engine.create();
+const html = doc.to_html();
+
+// Open a DOCX file
+const response = await fetch('/report.docx');
+const bytes = new Uint8Array(await response.arrayBuffer());
+const doc2 = engine.open(bytes);
+console.log(doc2.to_plain_text());
+
+// Export to PDF
+const pdfBytes = doc2.to_pdf();
+</code></pre>
+<h2 id="with-vite"><a class="header" href="#with-vite">With Vite</a></h2>
+<pre><code class="language-javascript">import init, { WasmEngine } from '@rudra/wasm';
+const engine = await init().then(() =&gt; new WasmEngine());
+</code></pre>
+<h2 id="with-webpack-5"><a class="header" href="#with-webpack-5">With Webpack 5</a></h2>
+<pre><code class="language-javascript">// webpack.config.js
+module.exports = { experiments: { asyncWebAssembly: true } };
+</code></pre>
+<h2 id="bundle-size"><a class="header" href="#bundle-size">Bundle Size</a></h2>
+<ul>
+<li>Release: ~4.1 MB raw, ~1.6 MB gzipped</li>
+<li>Includes: DOCX, ODT, PDF, TXT, MD support + CRDT + layout engine</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="embed-in-react"><a class="header" href="#embed-in-react">Embed in React</a></h1>
+<h2 id="install-2"><a class="header" href="#install-2">Install</a></h2>
+<pre><code class="language-bash">npm install @rudra/react @rudra/editor @rudra/wasm
+</code></pre>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<pre><code class="language-tsx">import { S1EditorComponent } from '@rudra/react';
+import { useRef } from 'react';
+
+function MyEditor() {
+  const editorRef = useRef(null);
+
+  return (
+    &lt;div style={{ height: '100vh' }}&gt;
+      &lt;S1EditorComponent
+        ref={editorRef}
+        theme="default"
+        toolbar="standard"
+        onReady={() =&gt; console.log('Editor ready')}
+        onChange={(e) =&gt; console.log('Changed:', e.type)}
+      /&gt;
+    &lt;/div&gt;
+  );
+}
+</code></pre>
+<h2 id="open-a-file"><a class="header" href="#open-a-file">Open a File</a></h2>
+<pre><code class="language-tsx">const handleOpen = async (file: File) =&gt; {
+  const buffer = await file.arrayBuffer();
+  editorRef.current?.open(buffer);
+};
+</code></pre>
+<h2 id="export"><a class="header" href="#export">Export</a></h2>
+<pre><code class="language-tsx">const handleExport = async () =&gt; {
+  const blob = await editorRef.current?.exportDocument('pdf');
+  // Download or upload blob
+};
+</code></pre>
+<h2 id="with-collaboration"><a class="header" href="#with-collaboration">With Collaboration</a></h2>
+<pre><code class="language-tsx">&lt;S1EditorComponent
+  collab={{
+    serverUrl: 'ws://localhost:8787',
+    roomId: 'my-document',
+    userName: 'Alice',
+  }}
+/&gt;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="embed-in-vue"><a class="header" href="#embed-in-vue">Embed in Vue</a></h1>
+<h2 id="install-3"><a class="header" href="#install-3">Install</a></h2>
+<pre><code class="language-bash">npm install @rudra/vue @rudra/editor @rudra/wasm
+</code></pre>
+<h2 id="usage-1"><a class="header" href="#usage-1">Usage</a></h2>
+<pre><code class="language-vue">&lt;template&gt;
+  &lt;S1EditorVue
+    ref="editor"
+    theme="default"
+    toolbar="standard"
+    @ready="onReady"
+    @change="onChange"
+    style="height: 100vh"
+  /&gt;
+&lt;/template&gt;
+
+&lt;script setup&gt;
+import { ref } from 'vue';
+import { S1EditorVue } from '@rudra/vue';
+
+const editor = ref(null);
+const onReady = () =&gt; console.log('Ready');
+const onChange = (e) =&gt; console.log('Changed:', e.type);
+
+const openFile = async (file) =&gt; {
+  const buffer = await file.arrayBuffer();
+  editor.value?.open(buffer);
+};
+&lt;/script&gt;
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="format-conversion"><a class="header" href="#format-conversion">Format Conversion</a></h1>
+<h2 id="rust-api"><a class="header" href="#rust-api">Rust API</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use s1engine::{Engine, Format};
+
+let engine = Engine::new();
+let doc = engine.open(&amp;std::fs::read("input.docx")?)?;
+
+// Convert to any supported format
+std::fs::write("output.odt", doc.export(Format::Odt)?)?;
+std::fs::write("output.pdf", doc.export(Format::Pdf)?)?;
+std::fs::write("output.txt", doc.export(Format::Txt)?)?;
+std::fs::write("output.md", doc.export(Format::Md)?)?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="server-api"><a class="header" href="#server-api">Server API</a></h2>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/api/v1/convert \
+  -F file=@input.docx \
+  -F format=pdf \
+  -o output.pdf
+</code></pre>
+<h2 id="supported-conversions"><a class="header" href="#supported-conversions">Supported Conversions</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>From</th><th>DOCX</th><th>ODT</th><th>PDF</th><th>TXT</th><th>MD</th></tr></thead><tbody>
+<tr><td>DOCX</td><td>-</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>ODT</td><td>Yes</td><td>-</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>TXT</td><td>Yes</td><td>Yes</td><td>Yes</td><td>-</td><td>Yes</td></tr>
+<tr><td>MD</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>-</td></tr>
+<tr><td>DOC</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+</tbody></table>
+</div>
+<h2 id="fidelity-notes"><a class="header" href="#fidelity-notes">Fidelity Notes</a></h2>
+<ul>
+<li>DOCX ↔ ODT: Full formatting round-trip</li>
+<li>Any → PDF: Layout engine with font embedding</li>
+<li>Any → TXT: Text extraction (formatting lost)</li>
+<li>DOC → Any: Basic text extraction only</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="collaboration-setup"><a class="header" href="#collaboration-setup">Collaboration Setup</a></h1>
+<p>Rudra Code uses Fugue CRDT for conflict-free real-time editing.</p>
+<h2 id="architecture-1"><a class="header" href="#architecture-1">Architecture</a></h2>
+<pre><code>Client A ──→ WebSocket ──→ Relay Server ──→ WebSocket ──→ Client B
+              (operations broadcast to all peers)
+</code></pre>
+<h2 id="using-the-nodejs-relay"><a class="header" href="#using-the-nodejs-relay">Using the Node.js Relay</a></h2>
+<pre><code class="language-bash"># Start the relay server
+node scripts/relay.js
+# Serves editor at http://localhost:8787
+# WebSocket at ws://localhost:8787
+</code></pre>
+<h2 id="using-the-rust-server"><a class="header" href="#using-the-rust-server">Using the Rust Server</a></h2>
+<pre><code class="language-bash"># Start s1-server (includes WebSocket relay)
+cargo run -p s1-server
+# REST API at http://localhost:8080/api/v1/
+# WebSocket at ws://localhost:8080/ws/collab/{room_id}
+</code></pre>
+<h2 id="editor-integration"><a class="header" href="#editor-integration">Editor Integration</a></h2>
+<p>The editor auto-connects when given a relay URL:</p>
+<pre><code class="language-javascript">// In editor state
+state.collabUrl = 'ws://localhost:8787';
+state.collabRoom = 'my-document-id';
+state.userName = 'Alice';
+</code></pre>
+<h2 id="how-it-works"><a class="header" href="#how-it-works">How It Works</a></h2>
+<ol>
+<li>Each client maintains a local CRDT document</li>
+<li>Local edits generate operations with unique IDs</li>
+<li>Operations are broadcast to all peers via WebSocket</li>
+<li>Each peer applies remote operations to their local CRDT</li>
+<li>Fugue algorithm guarantees all peers converge to the same state</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="white-labeling-rudra-office"><a class="header" href="#white-labeling-rudra-office">White-Labeling Rudra Office</a></h1>
+<p>This guide covers how to rebrand, restyle, and configure Rudra Office for your own product. Whether you are embedding the editor in a SaaS platform or shipping it as a standalone product under your own name, every visible element can be customized without modifying the editor source code.</p>
+<hr />
+<h2 id="configuration-overview"><a class="header" href="#configuration-overview">Configuration Overview</a></h2>
+<p>All runtime configuration is provided through the <code>window.S1_CONFIG</code> object in your <code>index.html</code>. The editor reads this object on startup and adjusts its behavior accordingly. You can either set the object before the editor script loads, or merge your overrides into the default:</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = window.S1_CONFIG || {
+    apiUrl: '',
+    relayUrl: '',
+    mode: 'standalone',
+    autoCollab: true,
+    productName: 'Rudra Office',
+    enableCollab: true,
+    enablePdfViewer: true,
+    enableTemplates: true,
+    aiUrl: '',
+    enableAI: true,
+  };
+&lt;/script&gt;
+</code></pre>
+<p>Place this block <strong>before</strong> the editor stylesheet and script tags. Each option is documented in the sections below.</p>
+<hr />
+<h2 id="1-branding"><a class="header" href="#1-branding">1. Branding</a></h2>
+<h3 id="product-name"><a class="header" href="#product-name">Product Name</a></h3>
+<p>Set <code>productName</code> to replace all instances of "Rudra Office" in the UI (title bar, about dialogs, share links):</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    productName: 'Acme Docs',
+  };
+&lt;/script&gt;
+</code></pre>
+<p>Update the HTML <code>&lt;title&gt;</code> tag and the <code>.logo-text</code> element to match:</p>
+<pre><code class="language-html">&lt;title&gt;Acme Docs&lt;/title&gt;
+</code></pre>
+<pre><code class="language-html">&lt;div class="logo"&gt;
+  &lt;img src="/assets/my-logo.svg" alt="Acme" width="28" height="28"&gt;
+  &lt;span class="logo-text"&gt;Acme Docs&lt;/span&gt;
+&lt;/div&gt;
+</code></pre>
+<h3 id="logo"><a class="header" href="#logo">Logo</a></h3>
+<p>Replace the logo image at <code>/assets/logo.svg</code> with your own SVG or PNG. The default logo slot is 28x28 pixels. If your logo requires different dimensions, adjust the <code>width</code> and <code>height</code> attributes on the <code>&lt;img&gt;</code> element inside the <code>.logo</code> container.</p>
+<blockquote>
+<p><strong>Dark mode note:</strong> The editor applies <code>filter: brightness(0) invert(1)</code> to the logo in dark mode so that a dark-on-transparent SVG becomes light. If your logo already handles both themes (e.g., uses <code>currentColor</code>), override this filter:</p>
+<pre><code class="language-css">[data-theme="dark"] .logo img {
+  filter: none;
+}
+</code></pre>
+</blockquote>
+<h3 id="accent-color"><a class="header" href="#accent-color">Accent Color</a></h3>
+<p>The primary brand color is controlled by the <code>--accent</code> CSS custom property. Override it in a <code>&lt;style&gt;</code> block after the editor stylesheet:</p>
+<pre><code class="language-html">&lt;style&gt;
+  :root {
+    --accent: #6200ea;
+    --accent-light: #e8d5ff;
+    --accent-bg: #d1b3ff;
+  }
+&lt;/style&gt;
+</code></pre>
+<p>See the <a href="guides/white-label.html#2-theme-system">Theme System</a> section for the complete list of properties.</p>
+<h3 id="favicon-and-manifest"><a class="header" href="#favicon-and-manifest">Favicon and Manifest</a></h3>
+<p>Replace these files in your deployment:</p>
+<ul>
+<li><code>/icon-192.svg</code> -- favicon / PWA icon</li>
+<li><code>/manifest.json</code> -- PWA manifest (update <code>name</code>, <code>short_name</code>, <code>icons</code>, <code>theme_color</code>)</li>
+<li>Update <code>&lt;meta name="theme-color" content="#..."&gt;</code> in <code>index.html</code></li>
+</ul>
+<hr />
+<h2 id="2-theme-system"><a class="header" href="#2-theme-system">2. Theme System</a></h2>
+<p>The editor uses CSS custom properties (variables) defined on <code>:root</code> for all visual elements. Override any of these to change the editor's appearance without touching the source CSS.</p>
+<h3 id="light-theme-properties-defaults"><a class="header" href="#light-theme-properties-defaults">Light Theme Properties (defaults)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--bg-app</code></td><td><code>#f8f9fa</code></td><td>Application background (behind the document canvas)</td></tr>
+<tr><td><code>--bg-white</code></td><td><code>#fff</code></td><td>Surface background (panels, cards)</td></tr>
+<tr><td><code>--bg-toolbar</code></td><td><code>#edf2fa</code></td><td>Toolbar and menu bar background</td></tr>
+<tr><td><code>--bg-toolbar-hover</code></td><td><code>#d3e3fd</code></td><td>Toolbar button hover state</td></tr>
+<tr><td><code>--bg-active</code></td><td><code>#c2dbff</code></td><td>Active/pressed toolbar button background</td></tr>
+<tr><td><code>--bg-hover</code></td><td><code>#f1f3f4</code></td><td>General hover background for list items</td></tr>
+<tr><td><code>--accent-bg</code></td><td><code>#c2dbff</code></td><td>Accent background (selection highlights, badges)</td></tr>
+<tr><td><code>--border</code></td><td><code>#c4c7c5</code></td><td>Primary border color</td></tr>
+<tr><td><code>--border-light</code></td><td><code>#dadce0</code></td><td>Subtle border color (dividers, separators)</td></tr>
+<tr><td><code>--text-primary</code></td><td><code>#202124</code></td><td>Primary text color</td></tr>
+<tr><td><code>--text-secondary</code></td><td><code>#5f6368</code></td><td>Secondary text color (labels, descriptions)</td></tr>
+<tr><td><code>--text-muted</code></td><td><code>#80868b</code></td><td>Muted text (placeholders, disabled items)</td></tr>
+<tr><td><code>--accent</code></td><td><code>#1a73e8</code></td><td>Primary accent color (buttons, links, active states)</td></tr>
+<tr><td><code>--accent-light</code></td><td><code>#d2e3fc</code></td><td>Light accent (selected item backgrounds)</td></tr>
+<tr><td><code>--danger</code></td><td><code>#d93025</code></td><td>Error / destructive action color</td></tr>
+<tr><td><code>--success</code></td><td><code>#188038</code></td><td>Success / confirmation color</td></tr>
+</tbody></table>
+</div>
+<h3 id="layout-properties"><a class="header" href="#layout-properties">Layout Properties</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--radius-sm</code></td><td><code>4px</code></td><td>Small border radius (buttons, inputs)</td></tr>
+<tr><td><code>--radius-md</code></td><td><code>8px</code></td><td>Medium border radius (cards, panels, modals)</td></tr>
+<tr><td><code>--font-ui</code></td><td><code>'Google Sans', 'Segoe UI', Roboto, ...</code></td><td>UI font stack</td></tr>
+</tbody></table>
+</div>
+<h3 id="elevation-shadows"><a class="header" href="#elevation-shadows">Elevation (Shadows)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--shadow-sm</code></td><td><code>0 1px 2px rgba(60,64,67,.3), ...</code></td><td>Toolbar, small dropdowns</td></tr>
+<tr><td><code>--shadow-md</code></td><td><code>0 1px 3px rgba(60,64,67,.3), ...</code></td><td>Panels, menus</td></tr>
+<tr><td><code>--shadow-lg</code></td><td><code>0 1px 3px rgba(60,64,67,.3), ...</code></td><td>Modals, dialogs</td></tr>
+</tbody></table>
+</div>
+<h3 id="z-index-hierarchy"><a class="header" href="#z-index-hierarchy">Z-Index Hierarchy</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--z-toolbar</code></td><td><code>100</code></td><td>Toolbar and menu bar</td></tr>
+<tr><td><code>--z-dropdown</code></td><td><code>200</code></td><td>Dropdown menus</td></tr>
+<tr><td><code>--z-sidebar</code></td><td><code>300</code></td><td>Side panels (pages, properties, comments)</td></tr>
+<tr><td><code>--z-modal-backdrop</code></td><td><code>400</code></td><td>Modal backdrop overlay</td></tr>
+<tr><td><code>--z-modal</code></td><td><code>500</code></td><td>Modal dialogs</td></tr>
+<tr><td><code>--z-context-menu</code></td><td><code>600</code></td><td>Right-click context menus</td></tr>
+<tr><td><code>--z-toast</code></td><td><code>700</code></td><td>Toast notifications</td></tr>
+</tbody></table>
+</div>
+<h3 id="example-complete-brand-override"><a class="header" href="#example-complete-brand-override">Example: Complete Brand Override</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #0052cc;
+  --accent-light: #deebff;
+  --accent-bg: #b3d4ff;
+  --bg-toolbar: #f4f5f7;
+  --bg-toolbar-hover: #ebecf0;
+  --bg-active: #b3d4ff;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+</code></pre>
+<hr />
+<h2 id="3-dark-mode"><a class="header" href="#3-dark-mode">3. Dark Mode</a></h2>
+<p>The editor supports three dark mode behaviors:</p>
+<ol>
+<li><strong>Automatic</strong> -- Follows the operating system preference via <code>prefers-color-scheme: dark</code>.</li>
+<li><strong>Manual toggle</strong> -- Users click the dark mode button in the status bar, which sets <code>data-theme="dark"</code> on the <code>&lt;html&gt;</code> element.</li>
+<li><strong>Explicit override</strong> -- You can force a theme on page load.</li>
+</ol>
+<h3 id="how-it-works-1"><a class="header" href="#how-it-works-1">How It Works</a></h3>
+<ul>
+<li>The <code>[data-theme="dark"]</code> selector overrides all CSS custom properties with dark values.</li>
+<li>The <code>@media (prefers-color-scheme: dark)</code> block applies the same overrides, gated by <code>:root:not([data-theme="light"])</code> so that an explicit light preference wins.</li>
+<li>The user's choice is persisted in <code>localStorage</code> under the key <code>s1-theme</code>.</li>
+</ul>
+<h3 id="dark-theme-properties"><a class="header" href="#dark-theme-properties">Dark Theme Properties</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Dark Value</th><th>Light Value</th></tr></thead><tbody>
+<tr><td><code>--bg-app</code></td><td><code>#202124</code></td><td><code>#f8f9fa</code></td></tr>
+<tr><td><code>--bg-white</code></td><td><code>#292a2d</code></td><td><code>#fff</code></td></tr>
+<tr><td><code>--bg-toolbar</code></td><td><code>#35363a</code></td><td><code>#edf2fa</code></td></tr>
+<tr><td><code>--bg-toolbar-hover</code></td><td><code>#44454a</code></td><td><code>#d3e3fd</code></td></tr>
+<tr><td><code>--bg-active</code></td><td><code>#1a3a5c</code></td><td><code>#c2dbff</code></td></tr>
+<tr><td><code>--border</code></td><td><code>#5f6368</code></td><td><code>#c4c7c5</code></td></tr>
+<tr><td><code>--border-light</code></td><td><code>#3c4043</code></td><td><code>#dadce0</code></td></tr>
+<tr><td><code>--text-primary</code></td><td><code>#e8eaed</code></td><td><code>#202124</code></td></tr>
+<tr><td><code>--text-secondary</code></td><td><code>#bdc1c6</code></td><td><code>#5f6368</code></td></tr>
+<tr><td><code>--text-muted</code></td><td><code>#9aa0a6</code></td><td><code>#80868b</code></td></tr>
+<tr><td><code>--accent</code></td><td><code>#8ab4f8</code></td><td><code>#1a73e8</code></td></tr>
+<tr><td><code>--accent-light</code></td><td><code>#1a3a5c</code></td><td><code>#d2e3fc</code></td></tr>
+<tr><td><code>--danger</code></td><td><code>#f28b82</code></td><td><code>#d93025</code></td></tr>
+<tr><td><code>--success</code></td><td><code>#81c995</code></td><td><code>#188038</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="forcing-a-theme-programmatically"><a class="header" href="#forcing-a-theme-programmatically">Forcing a Theme Programmatically</a></h3>
+<pre><code class="language-javascript">// Force dark mode
+document.documentElement.setAttribute('data-theme', 'dark');
+localStorage.setItem('s1-theme', 'dark');
+
+// Force light mode
+document.documentElement.setAttribute('data-theme', 'light');
+localStorage.setItem('s1-theme', 'light');
+
+// Reset to OS preference
+document.documentElement.removeAttribute('data-theme');
+localStorage.removeItem('s1-theme');
+</code></pre>
+<h3 id="providing-custom-dark-theme-colors"><a class="header" href="#providing-custom-dark-theme-colors">Providing Custom Dark Theme Colors</a></h3>
+<p>Override the <code>[data-theme="dark"]</code> selector with your own palette:</p>
+<pre><code class="language-css">[data-theme="dark"] {
+  --bg-app: #1a1a2e;
+  --bg-white: #16213e;
+  --bg-toolbar: #1a1a2e;
+  --accent: #e94560;
+  --accent-light: #3a1528;
+}
+</code></pre>
+<hr />
+<h2 id="4-toolbar-customization"><a class="header" href="#4-toolbar-customization">4. Toolbar Customization</a></h2>
+<p>The toolbar is defined in <code>index.html</code> as a series of <code>&lt;button&gt;</code> and <code>&lt;select&gt;</code> elements with specific IDs. You can show or hide individual toolbar items using CSS, or remove them from the HTML entirely.</p>
+<h3 id="toolbar-button-reference"><a class="header" href="#toolbar-button-reference">Toolbar Button Reference</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Function</th><th>Collapsible Class</th></tr></thead><tbody>
+<tr><td><code>fontFamily</code></td><td>Font family dropdown</td><td><code>tb-collapsible-768</code></td></tr>
+<tr><td><code>fontSize</code></td><td>Font size input</td><td><code>tb-collapsible-768</code></td></tr>
+<tr><td><code>btnBold</code></td><td>Bold</td><td>--</td></tr>
+<tr><td><code>btnItalic</code></td><td>Italic</td><td>--</td></tr>
+<tr><td><code>btnUnderline</code></td><td>Underline</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnStrike</code></td><td>Strikethrough</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnFormatPainter</code></td><td>Format Painter</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnSuperscript</code></td><td>Superscript</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnSubscript</code></td><td>Subscript</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>colorPicker</code></td><td>Text color</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>highlightPicker</code></td><td>Highlight color</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnClearFormat</code></td><td>Clear formatting</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnAlignL</code></td><td>Align left</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignC</code></td><td>Align center</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignR</code></td><td>Align right</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignJ</code></td><td>Justify</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>lineSpacing</code></td><td>Line spacing dropdown</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnOutdent</code></td><td>Decrease indent</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnIndent</code></td><td>Increase indent</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnBulletList</code></td><td>Bulleted list</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnNumberList</code></td><td>Numbered list</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnInsertMenu</code></td><td>Insert dropdown menu</td><td>--</td></tr>
+</tbody></table>
+</div>
+<h3 id="hiding-toolbar-items-via-css"><a class="header" href="#hiding-toolbar-items-via-css">Hiding Toolbar Items via CSS</a></h3>
+<pre><code class="language-css">/* Hide the strikethrough button */
+#btnStrike { display: none !important; }
+
+/* Hide the format painter */
+#btnFormatPainter { display: none !important; }
+
+/* Hide the entire font selection area */
+#fontFamily, #fontSize { display: none !important; }
+</code></pre>
+<h3 id="responsive-collapsing"><a class="header" href="#responsive-collapsing">Responsive Collapsing</a></h3>
+<p>Toolbar items use <code>tb-collapsible-*</code> classes to automatically hide at specific viewport widths:</p>
+<ul>
+<li><code>tb-collapsible-1024</code> -- Hidden below 1024px</li>
+<li><code>tb-collapsible-768</code> -- Hidden below 768px</li>
+<li><code>tb-collapsible-480</code> -- Hidden below 480px</li>
+</ul>
+<p>You can adjust these breakpoints or assign different classes to control which items collapse first.</p>
+<h3 id="menu-bar-items"><a class="header" href="#menu-bar-items">Menu Bar Items</a></h3>
+<p>The menu bar (File, Edit, View, Insert, Format, Review, Tools) can be customized the same way:</p>
+<pre><code class="language-css">/* Hide the Review menu entirely */
+[data-menu="reviewMenu"] { display: none !important; }
+
+/* Hide the Tools menu */
+[data-menu="toolsMenu"] { display: none !important; }
+</code></pre>
+<hr />
+<h2 id="5-feature-flags"><a class="header" href="#5-feature-flags">5. Feature Flags</a></h2>
+<p>Feature flags in <code>S1_CONFIG</code> control the availability of major features. When a flag is set to <code>false</code>, the associated UI elements are hidden and the underlying functionality is not initialized.</p>
+<h3 id="available-flags"><a class="header" href="#available-flags">Available Flags</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Default</th><th>Effect</th></tr></thead><tbody>
+<tr><td><code>enableCollab</code></td><td><code>true</code></td><td>Enables the Share button, collaboration status indicator, and real-time editing.</td></tr>
+<tr><td><code>enablePdfViewer</code></td><td><code>true</code></td><td>Enables the built-in PDF viewer tab for opening PDF files.</td></tr>
+<tr><td><code>enableTemplates</code></td><td><code>true</code></td><td>Enables "New from Template" and "Save as Template" in the File menu.</td></tr>
+<tr><td><code>enableAI</code></td><td><code>true</code></td><td>Enables the AI assistant panel. Requires <code>aiUrl</code> to point to a running LLM endpoint.</td></tr>
+</tbody></table>
+</div>
+<h3 id="disabling-features"><a class="header" href="#disabling-features">Disabling Features</a></h3>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    enableCollab: false,
+    enableAI: false,
+    enableTemplates: false,
+  };
+&lt;/script&gt;
+</code></pre>
+<h3 id="ai-configuration"><a class="header" href="#ai-configuration">AI Configuration</a></h3>
+<p>The AI assistant connects to a local LLM sidecar (e.g., llama.cpp). Set <code>aiUrl</code> to the base URL of the sidecar and <code>enableAI</code> to <code>true</code>:</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    enableAI: true,
+    aiUrl: 'http://localhost:8081',
+  };
+&lt;/script&gt;
+</code></pre>
+<p>When <code>enableAI</code> is <code>false</code> or <code>aiUrl</code> is empty, the AI panel and its toolbar entry are not rendered.</p>
+<hr />
+<h2 id="6-custom-fonts"><a class="header" href="#6-custom-fonts">6. Custom Fonts</a></h2>
+<p>The font family dropdown is defined in <code>index.html</code> as a <code>&lt;select&gt;</code> element with id <code>fontFamily</code>. You can modify the available fonts by editing the <code>&lt;option&gt;</code> list directly.</p>
+<h3 id="default-font-list"><a class="header" href="#default-font-list">Default Font List</a></h3>
+<pre><code>Arial, Times New Roman, Georgia, Courier New, Verdana,
+Trebuchet MS, Garamond, Palatino, Tahoma, Comic Sans MS
+</code></pre>
+<h3 id="adding-custom-fonts"><a class="header" href="#adding-custom-fonts">Adding Custom Fonts</a></h3>
+<ol>
+<li>Load the font via a <code>&lt;link&gt;</code> tag or <code>@font-face</code> rule:</li>
+</ol>
+<pre><code class="language-html">&lt;link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&amp;display=swap" rel="stylesheet"&gt;
+</code></pre>
+<ol start="2">
+<li>Add the option to the <code>fontFamily</code> select in <code>index.html</code>:</li>
+</ol>
+<pre><code class="language-html">&lt;select id="fontFamily" ...&gt;
+  &lt;!-- existing options --&gt;
+  &lt;option value="Lora" style="font-family:Lora"&gt;Lora&lt;/option&gt;
+&lt;/select&gt;
+</code></pre>
+<h3 id="replacing-the-entire-font-list"><a class="header" href="#replacing-the-entire-font-list">Replacing the Entire Font List</a></h3>
+<p>Remove all existing <code>&lt;option&gt;</code> elements and add your own. Keep the first option as the default:</p>
+<pre><code class="language-html">&lt;select id="fontFamily" ...&gt;
+  &lt;option value=""&gt;Default&lt;/option&gt;
+  &lt;option value="Inter" style="font-family:Inter"&gt;Inter&lt;/option&gt;
+  &lt;option value="Source Serif Pro" style="font-family:'Source Serif Pro'"&gt;Source Serif Pro&lt;/option&gt;
+  &lt;option value="Fira Code" style="font-family:'Fira Code'"&gt;Fira Code&lt;/option&gt;
+&lt;/select&gt;
+</code></pre>
+<h3 id="changing-the-ui-font"><a class="header" href="#changing-the-ui-font">Changing the UI Font</a></h3>
+<p>The editor UI font is controlled by the <code>--font-ui</code> custom property:</p>
+<pre><code class="language-css">:root {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+</code></pre>
+<p>This affects all toolbar labels, menus, dialogs, and status bar text. It does not affect the document content font.</p>
+<hr />
+<h2 id="7-locale--i18n"><a class="header" href="#7-locale--i18n">7. Locale / i18n</a></h2>
+<p>Internationalization support is planned for a future release. The current architecture is prepared for it:</p>
+<ul>
+<li>All user-facing strings in the toolbar, menus, and dialogs are defined in the HTML and can be replaced.</li>
+<li>Tooltip text is set via <code>title</code> attributes on every interactive element.</li>
+<li>Right-to-left (RTL) layout support is available through the BiDi text processing in the engine.</li>
+</ul>
+<h3 id="preparing-for-i18n-today"><a class="header" href="#preparing-for-i18n-today">Preparing for i18n Today</a></h3>
+<p>If you need to localize the editor before the official i18n module ships, you can:</p>
+<ol>
+<li><strong>Replace HTML strings</strong> -- Edit <code>index.html</code> to translate menu labels, button text, and tooltips.</li>
+<li><strong>Override at runtime</strong> -- Use JavaScript to walk the DOM and replace text content after the editor loads:</li>
+</ol>
+<pre><code class="language-javascript">document.addEventListener('DOMContentLoaded', () =&gt; {
+  document.querySelector('#btnBold').title = 'Gras (Ctrl+B)';
+  document.querySelector('[data-menu="fileMenu"] .app-menu-btn').textContent = 'Fichier';
+  // ... other translations
+});
+</code></pre>
+<ol start="3">
+<li><strong>Use a translation map</strong> -- Maintain a JSON object mapping element IDs/selectors to translated strings, and apply them in a loop.</li>
+</ol>
+<hr />
+<h2 id="8-css-override-examples"><a class="header" href="#8-css-override-examples">8. CSS Override Examples</a></h2>
+<p>All customizations below should be placed in a <code>&lt;style&gt;</code> block after the editor stylesheet link, or in a separate CSS file loaded after <code>styles.css</code>.</p>
+<h3 id="change-the-accent-color-to-purple"><a class="header" href="#change-the-accent-color-to-purple">Change the Accent Color to Purple</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #7c3aed;
+  --accent-light: #ede9fe;
+  --accent-bg: #c4b5fd;
+}
+[data-theme="dark"] {
+  --accent: #a78bfa;
+  --accent-light: #2e1a5e;
+}
+</code></pre>
+<h3 id="rounded-toolbar-buttons"><a class="header" href="#rounded-toolbar-buttons">Rounded Toolbar Buttons</a></h3>
+<pre><code class="language-css">.tb-btn {
+  border-radius: 8px !important;
+}
+</code></pre>
+<h3 id="hide-the-status-bar-word-count"><a class="header" href="#hide-the-status-bar-word-count">Hide the Status Bar Word Count</a></h3>
+<pre><code class="language-css">.status-bar .word-count {
+  display: none;
+}
+</code></pre>
+<h3 id="custom-scrollbar-styling"><a class="header" href="#custom-scrollbar-styling">Custom Scrollbar Styling</a></h3>
+<pre><code class="language-css">/* Webkit browsers */
+.canvas::-webkit-scrollbar {
+  width: 8px;
+}
+.canvas::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+.canvas::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.canvas::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+</code></pre>
+<h3 id="compact-toolbar-reduced-height"><a class="header" href="#compact-toolbar-reduced-height">Compact Toolbar (Reduced Height)</a></h3>
+<pre><code class="language-css">.toolbar {
+  padding: 2px 8px !important;
+  min-height: 32px !important;
+}
+.tb-btn {
+  width: 28px !important;
+  height: 28px !important;
+}
+.tb-btn .msi {
+  font-size: 18px !important;
+}
+</code></pre>
+<h3 id="hide-the-ruler"><a class="header" href="#hide-the-ruler">Hide the Ruler</a></h3>
+<pre><code class="language-css">.ruler {
+  display: none !important;
+}
+</code></pre>
+<h3 id="full-width-document-no-page-margins"><a class="header" href="#full-width-document-no-page-margins">Full-Width Document (No Page Margins)</a></h3>
+<pre><code class="language-css">.doc-page {
+  max-width: 100% !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+</code></pre>
+<h3 id="custom-modal-styling"><a class="header" href="#custom-modal-styling">Custom Modal Styling</a></h3>
+<pre><code class="language-css">.modal {
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+.modal-header {
+  border-bottom: 1px solid var(--border-light);
+}
+</code></pre>
+<h3 id="hide-specific-menu-items"><a class="header" href="#hide-specific-menu-items">Hide Specific Menu Items</a></h3>
+<pre><code class="language-css">/* Hide "Export as ODT" from the File menu */
+[data-fmt="odt"] { display: none !important; }
+
+/* Hide the Templates menu entries */
+#btnTemplate, #btnSaveTemplate { display: none !important; }
+
+/* Hide the collaboration Share button */
+#btnShare { display: none !important; }
+</code></pre>
+<hr />
+<h2 id="9-integration-mode"><a class="header" href="#9-integration-mode">9. Integration Mode</a></h2>
+<p>The <code>mode</code> configuration option controls how the editor behaves within a host application.</p>
+<h3 id="standalone-mode-default"><a class="header" href="#standalone-mode-default">Standalone Mode (Default)</a></h3>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  mode: 'standalone',
+};
+</code></pre>
+<p>In standalone mode, the editor runs as a full-page application with its own file management, title bar, and menu system. This is the default for deployments where the editor is the primary application.</p>
+<h3 id="integrated-mode"><a class="header" href="#integrated-mode">Integrated Mode</a></h3>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  mode: 'integrated',
+  apiUrl: 'https://your-app.com/api/v1',
+  relayUrl: 'wss://your-app.com/ws/collab',
+};
+</code></pre>
+<p>In integrated mode, the editor is designed to be embedded within a larger application. Use this when:</p>
+<ul>
+<li>The editor is loaded inside an <code>&lt;iframe&gt;</code> within your application.</li>
+<li>File open/save operations are handled by your host application via the API.</li>
+<li>Collaboration is managed through your own WebSocket relay.</li>
+</ul>
+<h3 id="embedding-in-an-iframe"><a class="header" href="#embedding-in-an-iframe">Embedding in an iframe</a></h3>
+<pre><code class="language-html">&lt;iframe
+  src="https://editor.your-app.com?room=doc-123"
+  style="width: 100%; height: 100vh; border: none;"
+  allow="clipboard-read; clipboard-write"
+&gt;&lt;/iframe&gt;
+</code></pre>
+<h3 id="configuring-the-api-endpoint"><a class="header" href="#configuring-the-api-endpoint">Configuring the API Endpoint</a></h3>
+<p>When <code>apiUrl</code> is set, the editor uses it for document CRUD operations and format conversion:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  apiUrl: 'https://api.your-app.com/v1',
+};
+</code></pre>
+<h3 id="configuring-the-collaboration-relay"><a class="header" href="#configuring-the-collaboration-relay">Configuring the Collaboration Relay</a></h3>
+<p>When <code>relayUrl</code> is set along with <code>autoCollab: true</code>, the editor automatically connects to the WebSocket relay when a <code>room</code> parameter is present in the URL:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  relayUrl: 'wss://collab.your-app.com/ws',
+  autoCollab: true,
+};
+</code></pre>
+<hr />
+<h2 id="10-removing-branding"><a class="header" href="#10-removing-branding">10. Removing Branding</a></h2>
+<p>For commercial licensees with a white-label agreement, you can fully remove Rudra branding.</p>
+<h3 id="step-1-replace-visual-assets"><a class="header" href="#step-1-replace-visual-assets">Step 1: Replace Visual Assets</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>File</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>/assets/logo.svg</code></td><td>Title bar logo</td></tr>
+<tr><td><code>/icon-192.svg</code></td><td>Favicon and PWA icon</td></tr>
+<tr><td><code>/manifest.json</code></td><td>PWA name, icons, theme color</td></tr>
+</tbody></table>
+</div>
+<h3 id="step-2-update-html"><a class="header" href="#step-2-update-html">Step 2: Update HTML</a></h3>
+<p>In <code>index.html</code>, update these elements:</p>
+<pre><code class="language-html">&lt;!-- Page title --&gt;
+&lt;title&gt;Your Product Name&lt;/title&gt;
+
+&lt;!-- Theme color --&gt;
+&lt;meta name="theme-color" content="#your-brand-color"&gt;
+
+&lt;!-- Logo container --&gt;
+&lt;div class="logo"&gt;
+  &lt;img src="/assets/your-logo.svg" alt="Your Brand" width="28" height="28"&gt;
+  &lt;span class="logo-text"&gt;Your Product Name&lt;/span&gt;
+&lt;/div&gt;
+</code></pre>
+<h3 id="step-3-set-the-config"><a class="header" href="#step-3-set-the-config">Step 3: Set the Config</a></h3>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    productName: 'Your Product Name',
+  };
+&lt;/script&gt;
+</code></pre>
+<h3 id="step-4-override-brand-colors"><a class="header" href="#step-4-override-brand-colors">Step 4: Override Brand Colors</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #your-brand-color;
+  --accent-light: #your-brand-light;
+  --accent-bg: #your-brand-bg;
+}
+</code></pre>
+<h3 id="step-5-remove-powered-by-if-present"><a class="header" href="#step-5-remove-powered-by-if-present">Step 5: Remove "Powered By" (if present)</a></h3>
+<p>If any "Powered by Rudra" or attribution text is displayed, commercial licensees may remove it per the terms of their license agreement. Search the HTML for any such references and remove or replace them.</p>
+<h3 id="licensing-note"><a class="header" href="#licensing-note">Licensing Note</a></h3>
+<p>Rudra Office is licensed under AGPL-3.0. White-label redistribution without Rudra branding requires a separate commercial license. Contact the maintainers for licensing terms.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<p>This guide covers all configuration options for both the Rudra Office client (browser editor) and the rudra-server backend. Configuration is split into two layers: the client-side <code>window.S1_CONFIG</code> object and server-side environment variables (or the <code>s1.toml</code> file).</p>
+<hr />
+<h2 id="client-configuration"><a class="header" href="#client-configuration">Client Configuration</a></h2>
+<p>The editor reads its configuration from <code>window.S1_CONFIG</code> at startup. Set this object in a <code>&lt;script&gt;</code> tag <strong>before</strong> the editor script loads. Any property not provided falls back to the default shown below.</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    // Server API URL (REST endpoints for document CRUD, conversion).
+    // Empty string means the editor runs in offline/standalone mode.
+    apiUrl: '',              // e.g., 'http://localhost:8080/api/v1'
+
+    // WebSocket URL for real-time collaboration.
+    // Empty string disables automatic WebSocket connection.
+    relayUrl: '',            // e.g., 'ws://localhost:8080/ws/collab'
+
+    // Editor mode:
+    //   'standalone' — full local editor, no server dependency
+    //   'integrated' — expects a server backend for storage and collab
+    mode: 'standalone',
+
+    // Automatically connect to the collaboration room on page load.
+    // Requires relayUrl to be set and a ?room= parameter in the URL.
+    autoCollab: true,
+
+    // Branding — product name displayed in the title bar and dialogs.
+    productName: 'Rudra Office',
+
+    // ── Feature Flags ──────────────────────────────────
+    enableCollab: true,      // Show the Share button and collaboration UI
+    enablePdfViewer: true,   // Allow opening and viewing PDF files
+    enableTemplates: true,   // Show the template gallery on new document
+    enableAI: true,          // Enable AI writing assistant panel
+
+    // AI sidecar URL (llama.cpp HTTP server).
+    // The AI assistant calls this endpoint for completions.
+    aiUrl: '',               // e.g., 'http://localhost:8081'
+  };
+&lt;/script&gt;
+</code></pre>
+<h3 id="property-reference"><a class="header" href="#property-reference">Property Reference</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>apiUrl</code></td><td><code>string</code></td><td><code>''</code></td><td>Base URL for the REST API. When empty, the editor operates in standalone mode with no server calls.</td></tr>
+<tr><td><code>relayUrl</code></td><td><code>string</code></td><td><code>''</code></td><td>WebSocket URL for collaboration. When empty, real-time editing is disabled.</td></tr>
+<tr><td><code>mode</code></td><td><code>string</code></td><td><code>'standalone'</code></td><td><code>'standalone'</code> or <code>'integrated'</code>. Integrated mode enables server-backed file management.</td></tr>
+<tr><td><code>autoCollab</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Connect to the collaboration room automatically when the page loads.</td></tr>
+<tr><td><code>productName</code></td><td><code>string</code></td><td><code>'Rudra Office'</code></td><td>Display name used in the title bar, dialogs, and branding.</td></tr>
+<tr><td><code>enableCollab</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Show or hide collaboration controls (Share button, peer indicators).</td></tr>
+<tr><td><code>enablePdfViewer</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Allow PDF files to be opened in the viewer.</td></tr>
+<tr><td><code>enableTemplates</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Show the template gallery when creating a new document.</td></tr>
+<tr><td><code>enableAI</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Enable the AI writing assistant sidebar.</td></tr>
+<tr><td><code>aiUrl</code></td><td><code>string</code></td><td><code>''</code></td><td>HTTP endpoint for the AI sidecar (llama.cpp). When empty, AI features are unavailable even if <code>enableAI</code> is true.</td></tr>
+</tbody></table>
+</div>
+<h3 id="overriding-configuration-at-runtime"><a class="header" href="#overriding-configuration-at-runtime">Overriding Configuration at Runtime</a></h3>
+<p>Because <code>S1_CONFIG</code> is a plain JavaScript object on <code>window</code>, host applications can modify it before or after the editor loads:</p>
+<pre><code class="language-javascript">// Before editor init (in the embedding page)
+window.S1_CONFIG = {
+  apiUrl: 'https://docs-api.example.com/api/v1',
+  relayUrl: 'wss://docs-api.example.com/ws/collab',
+  mode: 'integrated',
+  productName: 'Acme Docs',
+  enableAI: false,
+};
+</code></pre>
+<p>For integration mode, the server typically injects this configuration into the HTML response before serving the editor.</p>
+<hr />
+<h2 id="server-configuration"><a class="header" href="#server-configuration">Server Configuration</a></h2>
+<p>The rudra-server binary reads configuration from two sources, in priority order:</p>
+<ol>
+<li><strong><code>s1.toml</code></strong> file in the working directory (TOML format)</li>
+<li><strong>Environment variables</strong> prefixed with <code>S1_</code> (fallback when no TOML file is found)</li>
+</ol>
+<p>Environment variables are the recommended approach for container deployments.</p>
+<h3 id="core-settings"><a class="header" href="#core-settings">Core Settings</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>TOML Key</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_PORT</code></td><td><code>port</code></td><td><code>8080</code></td><td>HTTP port the server listens on.</td></tr>
+<tr><td><code>S1_STORAGE</code></td><td><code>storage</code></td><td><code>local</code></td><td>Storage backend: <code>local</code>, <code>memory</code>, or <code>s3</code>.</td></tr>
+<tr><td><code>S1_DATA_DIR</code></td><td><code>data_dir</code></td><td><code>./data</code></td><td>Directory for local storage. Documents are stored as <code>{id}.bin</code> with <code>{id}.meta.json</code> sidecars.</td></tr>
+<tr><td><code>S1_STATIC_DIR</code></td><td>--</td><td><code>./public</code></td><td>Directory containing the built editor frontend (HTML, JS, CSS, WASM).</td></tr>
+<tr><td><code>RUST_LOG</code></td><td>--</td><td><code>s1_server=info,tower_http=info</code></td><td>Log level filter using the <code>tracing</code> EnvFilter syntax.</td></tr>
+</tbody></table>
+</div>
+<h4 id="example-s1toml"><a class="header" href="#example-s1toml">Example <code>s1.toml</code></a></h4>
+<pre><code class="language-toml">port = 8080
+storage = "local"
+data_dir = "/var/lib/rudra/data"
+max_upload_size = 67108864  # 64 MB
+</code></pre>
+<h3 id="authentication"><a class="header" href="#authentication">Authentication</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_AUTH_ENABLED</code></td><td><code>false</code></td><td>Enable authentication middleware. When <code>false</code>, all endpoints are public.</td></tr>
+<tr><td><code>S1_JWT_SECRET</code></td><td>--</td><td>HMAC-SHA256 secret for validating JWT tokens. Required for integration mode (<code>/edit?token=</code>).</td></tr>
+<tr><td><code>S1_REQUIRE_JWT_EXP</code></td><td><code>false</code></td><td>Reject JWT tokens that lack an <code>exp</code> (expiry) claim. Recommended for production.</td></tr>
+<tr><td><code>S1_ALLOW_ANONYMOUS</code></td><td><code>true</code></td><td>Allow unauthenticated requests (Viewer-level access).</td></tr>
+</tbody></table>
+</div>
+<p>When authentication is enabled, the server supports two credential methods:</p>
+<ul>
+<li><strong>JWT Bearer tokens</strong> -- <code>Authorization: Bearer &lt;token&gt;</code>. The token payload must include <code>sub</code> (user ID) and <code>name</code>. Optional claims: <code>role</code> (<code>admin</code> or <code>user</code>), <code>tenant_id</code>, <code>exp</code>.</li>
+<li><strong>API keys</strong> -- <code>X-API-Key: &lt;key&gt;</code>. Configured via the <code>api_keys</code> array in the auth config.</li>
+</ul>
+<h3 id="admin-panel"><a class="header" href="#admin-panel">Admin Panel</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_ADMIN_USER</code></td><td>--</td><td>Admin panel username. Both <code>S1_ADMIN_USER</code> and <code>S1_ADMIN_PASS</code> must be set to enable the admin panel.</td></tr>
+<tr><td><code>S1_ADMIN_PASS</code></td><td>--</td><td>Admin panel password.</td></tr>
+</tbody></table>
+</div>
+<p>The admin panel is served at <code>/admin/dashboard</code> and provides real-time monitoring of active sessions, connected editors, memory usage, and server configuration. Sessions are protected by a cookie with a 1-hour timeout. Login attempts are rate-limited to 5 per IP per 60 seconds.</p>
+<h3 id="integration-mode"><a class="header" href="#integration-mode">Integration Mode</a></h3>
+<p>Integration mode allows embedding Rudra Office in another product. The host application generates a signed JWT and redirects users to <code>/edit?token=&lt;jwt&gt;</code>.</p>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_JWT_SECRET</code></td><td>--</td><td>Shared secret between the host application and rudra-server for signing/validating integration JWTs.</td></tr>
+<tr><td><code>S1_CALLBACK_SECRET</code></td><td>--</td><td>HMAC-SHA256 key for signing callback request bodies. When set, the server includes an <code>X-S1-Signature: sha256=&lt;hex&gt;</code> header on all callback POST requests.</td></tr>
+</tbody></table>
+</div>
+<h4 id="integration-jwt-claims"><a class="header" href="#integration-jwt-claims">Integration JWT Claims</a></h4>
+<div class="table-wrapper"><table><thead><tr><th>Claim</th><th>Required</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>file_id</code></td><td>Yes</td><td>Unique identifier for the document.</td></tr>
+<tr><td><code>user_id</code></td><td>Yes</td><td>Identifier of the editing user.</td></tr>
+<tr><td><code>user_name</code></td><td>Yes</td><td>Display name shown in the collaboration UI.</td></tr>
+<tr><td><code>permissions</code></td><td>No</td><td>Access level: <code>edit</code> (default), <code>comment</code>, or <code>view</code>.</td></tr>
+<tr><td><code>download_url</code></td><td>No</td><td>URL from which the server fetches the document on first open. Subject to SSRF protection.</td></tr>
+<tr><td><code>callback_url</code></td><td>No</td><td>URL the server POSTs the final document to when the editing session closes.</td></tr>
+<tr><td><code>exp</code></td><td>No</td><td>Token expiry (Unix timestamp). Required if <code>S1_REQUIRE_JWT_EXP=true</code>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="collaboration-websocket"><a class="header" href="#collaboration-websocket">Collaboration (WebSocket)</a></h3>
+<p>WebSocket endpoints are available at two URL patterns:</p>
+<ul>
+<li><code>/ws/edit/{file_id}?user=NAME&amp;uid=ID&amp;mode=edit</code></li>
+<li><code>/ws/collab/{file_id}?user=NAME&amp;uid=ID&amp;mode=edit</code></li>
+</ul>
+<div class="table-wrapper"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>user</code></td><td>Random <code>User-XXXXXXXX</code></td><td>Display name for presence.</td></tr>
+<tr><td><code>uid</code></td><td>Random UUID (8 chars)</td><td>Unique peer identifier for this connection.</td></tr>
+<tr><td><code>mode</code></td><td><code>edit</code></td><td>Editing mode for this peer.</td></tr>
+<tr><td><code>access</code></td><td><code>edit</code></td><td>Access level: <code>edit</code> or <code>view</code>. View-only peers cannot send structural operations.</td></tr>
+</tbody></table>
+</div>
+<p>The server manages collaboration rooms automatically:</p>
+<ul>
+<li>Rooms are created on first connection and destroyed when the last peer leaves.</li>
+<li>Dirty rooms (with unsaved operations) are flushed to storage every 30 seconds.</li>
+<li>Operation logs are capped at 10,000 entries per room, with oldest entries truncated when the limit is reached.</li>
+<li>A ping is sent every 15 seconds to detect dead connections.</li>
+</ul>
+<h3 id="storage-backends"><a class="header" href="#storage-backends">Storage Backends</a></h3>
+<h4 id="local-filesystem-default"><a class="header" href="#local-filesystem-default">Local Filesystem (default)</a></h4>
+<pre><code class="language-bash">S1_STORAGE=local
+S1_DATA_DIR=/data
+</code></pre>
+<p>Documents are stored as <code>{id}.bin</code> files with <code>{id}.meta.json</code> metadata sidecars. The directory is created automatically if it does not exist.</p>
+<h4 id="in-memory"><a class="header" href="#in-memory">In-Memory</a></h4>
+<pre><code class="language-bash">S1_STORAGE=memory
+</code></pre>
+<p>All data is held in memory and lost on restart. Suitable for development, testing, and stateless CI environments.</p>
+<h4 id="s3-compatible-planned"><a class="header" href="#s3-compatible-planned">S3-Compatible (planned)</a></h4>
+<pre><code class="language-bash">S1_STORAGE=s3
+S1_S3_BUCKET=rudra-docs
+S1_S3_REGION=us-east-1
+S1_S3_ENDPOINT=https://s3.amazonaws.com
+</code></pre>
+<p>S3 storage uses the same <code>StorageBackend</code> trait interface. Any S3-compatible service (AWS S3, MinIO, DigitalOcean Spaces) can be used.</p>
+<hr />
+<h2 id="feature-flags-1"><a class="header" href="#feature-flags-1">Feature Flags</a></h2>
+<p>Feature flags control which UI components are visible and which server capabilities are active.</p>
+<h3 id="client-side-flags"><a class="header" href="#client-side-flags">Client-Side Flags</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Effect When Disabled</th></tr></thead><tbody>
+<tr><td><code>enableCollab</code></td><td>Hides the Share button, peer count indicator, and collaboration status bar. WebSocket connections are not initiated.</td></tr>
+<tr><td><code>enablePdfViewer</code></td><td>PDF files cannot be opened. The editor shows an "unsupported format" message instead.</td></tr>
+<tr><td><code>enableTemplates</code></td><td>The template gallery is hidden. New documents start with a blank page.</td></tr>
+<tr><td><code>enableAI</code></td><td>The AI assistant panel and toolbar button are hidden. No requests are made to the AI sidecar.</td></tr>
+</tbody></table>
+</div>
+<h3 id="server-side-flags"><a class="header" href="#server-side-flags">Server-Side Flags</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Effect</th></tr></thead><tbody>
+<tr><td><code>S1_AUTH_ENABLED=true</code></td><td>Enforces JWT/API key authentication on all API endpoints.</td></tr>
+<tr><td><code>S1_REQUIRE_JWT_EXP=true</code></td><td>Rejects tokens without an <code>exp</code> claim, preventing indefinitely-valid tokens.</td></tr>
+<tr><td><code>S1_ALLOW_ANONYMOUS=false</code></td><td>Returns <code>401 Unauthorized</code> for requests without credentials.</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="url-parameters"><a class="header" href="#url-parameters">URL Parameters</a></h2>
+<p>The editor reads several URL parameters to control its behavior on load.</p>
+<div class="table-wrapper"><table><thead><tr><th>Parameter</th><th>Example</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>file</code></td><td><code>?file=abc-123</code></td><td>Open an existing file session by ID. The editor fetches the document from the server and connects to the collaboration room.</td></tr>
+<tr><td><code>type</code></td><td><code>?type=sheet</code></td><td>Hint the editor to open in spreadsheet mode (for multi-app routing). Values: <code>doc</code>, <code>sheet</code>, <code>slide</code>.</td></tr>
+<tr><td><code>room</code></td><td><code>?room=my-room</code></td><td>Join a specific collaboration room. Used with <code>autoCollab: true</code>.</td></tr>
+<tr><td><code>mode</code></td><td><code>?mode=view</code></td><td>Set the editor to a specific access mode: <code>edit</code>, <code>comment</code>, or <code>view</code>.</td></tr>
+<tr><td><code>token</code></td><td><code>/edit?token=JWT</code></td><td>Integration mode entry point. The server validates the JWT and creates a file session.</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="integration-callbacks"><a class="header" href="#integration-callbacks">Integration Callbacks</a></h2>
+<p>When a document editing session closes (all editors leave and the TTL expires, or an explicit save is triggered), the server sends the final document bytes to the configured callback URL.</p>
+<h3 id="callback-flow"><a class="header" href="#callback-flow">Callback Flow</a></h3>
+<ol>
+<li>Host application creates a file session via <code>/edit?token=JWT</code> with a <code>callback_url</code> in the JWT claims.</li>
+<li>Users edit the document collaboratively.</li>
+<li>When the session ends, the server POSTs the final document bytes to the callback URL.</li>
+</ol>
+<h3 id="callback-request-headers"><a class="header" href="#callback-request-headers">Callback Request Headers</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Header</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>Content-Type</code></td><td><code>application/octet-stream</code></td></tr>
+<tr><td><code>X-S1-File-Id</code></td><td>The file session ID.</td></tr>
+<tr><td><code>X-S1-Event</code></td><td>Event type: <code>session.closed</code> (automatic) or <code>document.saved</code> (manual trigger via <code>POST /api/v1/files/{id}/save</code>).</td></tr>
+<tr><td><code>X-S1-Timestamp</code></td><td>Unix timestamp of the callback.</td></tr>
+<tr><td><code>X-S1-Signature</code></td><td><code>sha256=&lt;hex&gt;</code> HMAC signature of the request body. Only present when <code>S1_CALLBACK_SECRET</code> is configured.</td></tr>
+</tbody></table>
+</div>
+<h3 id="manual-save-trigger"><a class="header" href="#manual-save-trigger">Manual Save Trigger</a></h3>
+<p>To trigger a callback before the session expires:</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/api/v1/files/{file_id}/save
+</code></pre>
+<h3 id="ssrf-protection"><a class="header" href="#ssrf-protection">SSRF Protection</a></h3>
+<p>All callback URLs and <code>download_url</code> values are checked against a blocklist before any outbound request is made. The following address ranges are blocked:</p>
+<ul>
+<li>Loopback: <code>127.0.0.0/8</code>, <code>::1</code></li>
+<li>Private (RFC 1918): <code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code></li>
+<li>Link-local: <code>169.254.0.0/16</code>, <code>fe80::/10</code></li>
+<li>Cloud metadata endpoints: <code>169.254.169.254</code></li>
+<li>Hostnames: <code>localhost</code>, <code>*.local</code>, <code>*.internal</code></li>
+</ul>
+<h3 id="signature-verification"><a class="header" href="#signature-verification">Signature Verification</a></h3>
+<p>When <code>S1_CALLBACK_SECRET</code> is set, verify the callback authenticity on the receiving end:</p>
+<pre><code class="language-python">import hmac, hashlib
+
+def verify_signature(body: bytes, signature_header: str, secret: str) -&gt; bool:
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    received = signature_header.removeprefix("sha256=")
+    return hmac.compare_digest(expected, received)
+</code></pre>
+<hr />
+<h2 id="webhooks"><a class="header" href="#webhooks">Webhooks</a></h2>
+<p>The server supports registering webhook endpoints that receive notifications for document lifecycle events.</p>
+<h3 id="supported-events"><a class="header" href="#supported-events">Supported Events</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Event</th><th>Trigger</th></tr></thead><tbody>
+<tr><td><code>document.created</code></td><td>A new document is uploaded or created.</td></tr>
+<tr><td><code>document.deleted</code></td><td>A document is deleted from storage.</td></tr>
+<tr><td><code>document.exported</code></td><td>A document is converted/exported to another format.</td></tr>
+<tr><td><code>*</code></td><td>Wildcard: matches all events.</td></tr>
+</tbody></table>
+</div>
+<h3 id="registration"><a class="header" href="#registration">Registration</a></h3>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/api/v1/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/hook", "events": ["document.created"]}'
+</code></pre>
+<p>Webhook delivery is asynchronous and fire-and-forget. Failed deliveries are logged but not retried.</p>
+<hr />
+<h2 id="complete-production-example"><a class="header" href="#complete-production-example">Complete Production Example</a></h2>
+<p>Below is a complete environment configuration suitable for a production deployment:</p>
+<pre><code class="language-bash"># Core
+S1_PORT=8080
+S1_STORAGE=local
+S1_DATA_DIR=/data
+S1_STATIC_DIR=/app/public
+
+# Authentication
+S1_AUTH_ENABLED=true
+S1_JWT_SECRET=your-256-bit-secret-here
+S1_REQUIRE_JWT_EXP=true
+S1_ALLOW_ANONYMOUS=false
+
+# Admin panel
+S1_ADMIN_USER=admin
+S1_ADMIN_PASS=a-strong-password-here
+
+# Integration callbacks
+S1_CALLBACK_SECRET=your-callback-signing-secret
+
+# Logging
+RUST_LOG=s1_server=info,tower_http=warn
+</code></pre>
+<p>The corresponding client configuration, injected by the server or embedding page:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  apiUrl: '/api/v1',
+  relayUrl: 'wss://docs.example.com/ws/collab',
+  mode: 'integrated',
+  productName: 'Example Docs',
+  enableCollab: true,
+  enableAI: false,
+};
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="docker-deployment"><a class="header" href="#docker-deployment">Docker Deployment</a></h1>
+<p>This guide covers deploying Rudra Office using Docker, from a quick one-liner to a
+full production stack with persistent storage, collaboration, and an AI writing assistant.</p>
+<hr />
+<h2 id="quick-start-3"><a class="header" href="#quick-start-3">Quick Start</a></h2>
+<p>Run the all-in-one image to get a working editor in under a minute:</p>
+<pre><code class="language-bash">docker run -d --name rudra -p 8080:8080 rudra/server:latest
+</code></pre>
+<p>Open <a href="http://localhost:8080">http://localhost:8080</a> in your browser. The editor, REST API,
+and WebSocket collaboration server are all served from a single container on a single port.</p>
+<div class="table-wrapper"><table><thead><tr><th>Endpoint</th><th>URL</th></tr></thead><tbody>
+<tr><td>Editor UI</td><td><code>http://localhost:8080/</code></td></tr>
+<tr><td>REST API</td><td><code>http://localhost:8080/api/v1/</code></td></tr>
+<tr><td>WebSocket collab</td><td><code>ws://localhost:8080/ws/edit/{file_id}</code></td></tr>
+<tr><td>Admin panel</td><td><code>http://localhost:8080/admin/dashboard</code></td></tr>
+<tr><td>Health check</td><td><code>http://localhost:8080/health</code></td></tr>
+</tbody></table>
+</div>
+<p>To persist documents across container restarts, mount a data volume:</p>
+<pre><code class="language-bash">docker run -d --name rudra \
+  -p 8080:8080 \
+  -v rudra-data:/data \
+  rudra/server:latest
+</code></pre>
+<hr />
+<h2 id="docker-images"><a class="header" href="#docker-images">Docker Images</a></h2>
+<p>Rudra Office publishes three image variants to Docker Hub.</p>
+<h3 id="rudraserver-unified"><a class="header" href="#rudraserver-unified">rudra/server (Unified)</a></h3>
+<p>The recommended image for most deployments. A single Rust binary that serves the
+editor frontend, REST API, and WebSocket collaboration -- all on one port.</p>
+<pre><code class="language-bash">docker run -p 8080:8080 rudra/server
+</code></pre>
+<ul>
+<li><strong>Base:</strong> <code>debian:bookworm-slim</code></li>
+<li><strong>Size:</strong> ~40 MB (stripped Rust binary + static assets)</li>
+<li><strong>Ports:</strong> 8080</li>
+</ul>
+<h3 id="rudraeditor-static-frontend-only"><a class="header" href="#rudraeditor-static-frontend-only">rudra/editor (Static Frontend Only)</a></h3>
+<p>A lightweight image that serves only the editor UI as static files via nginx.
+Use this when you run the API server separately or want to serve the frontend
+from a CDN.</p>
+<pre><code class="language-bash">docker run -p 80:80 rudra/editor
+</code></pre>
+<ul>
+<li><strong>Base:</strong> <code>nginx:alpine</code></li>
+<li><strong>Size:</strong> ~15 MB</li>
+<li><strong>Ports:</strong> 80</li>
+</ul>
+<h3 id="rudraall-in-one-server--ai-sidecar"><a class="header" href="#rudraall-in-one-server--ai-sidecar">rudra/all-in-one (Server + AI Sidecar)</a></h3>
+<p>Includes the unified server and an AI writing assistant powered by a local LLM
+(Qwen2.5-3B via llama.cpp). Suitable for air-gapped environments where cloud
+AI APIs are not available.</p>
+<pre><code class="language-bash">docker compose -f docker-compose.yml up -d
+</code></pre>
+<ul>
+<li><strong>AI model:</strong> Qwen2.5-3B-Instruct (Q4_K_M quantization, ~2 GB)</li>
+<li><strong>Minimum RAM:</strong> 6 GB (4 GB for AI, 2 GB for server)</li>
+</ul>
+<hr />
+<h2 id="image-tags"><a class="header" href="#image-tags">Image Tags</a></h2>
+<p>All image variants follow the same tagging convention:</p>
+<div class="table-wrapper"><table><thead><tr><th>Tag</th><th>Description</th><th>Example</th></tr></thead><tbody>
+<tr><td><code>latest</code></td><td>Latest stable release</td><td><code>rudra/server:latest</code></td></tr>
+<tr><td><code>X.Y.Z</code></td><td>Specific version (immutable)</td><td><code>rudra/server:1.0.2</code></td></tr>
+<tr><td><code>X.Y</code></td><td>Latest patch within a minor release</td><td><code>rudra/server:1.0</code></td></tr>
+<tr><td><code>X</code></td><td>Latest minor within a major release</td><td><code>rudra/server:1</code></td></tr>
+<tr><td><code>edge</code></td><td>Latest commit on <code>main</code> (unstable)</td><td><code>rudra/server:edge</code></td></tr>
+</tbody></table>
+</div>
+<p>For production deployments, always pin to a specific <code>X.Y.Z</code> tag.</p>
+<hr />
+<h2 id="docker-compose"><a class="header" href="#docker-compose">Docker Compose</a></h2>
+<h3 id="minimal-single-container"><a class="header" href="#minimal-single-container">Minimal (Single Container)</a></h3>
+<p>For development and small teams. All state is stored on the local filesystem.</p>
+<pre><code class="language-yaml">services:
+  rudra:
+    image: rudra/server:1.0.2
+    ports:
+      - "8080:8080"
+    environment:
+      - S1_STORAGE=local
+      - S1_DATA_DIR=/data
+      - S1_ADMIN_USER=admin
+      - S1_ADMIN_PASS=${ADMIN_PASSWORD:-changeme}
+    volumes:
+      - rudra-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  rudra-data:
+</code></pre>
+<h3 id="production-full-stack"><a class="header" href="#production-full-stack">Production (Full Stack)</a></h3>
+<p>A production-grade deployment with PostgreSQL for document metadata, MinIO for
+S3-compatible document storage, Redis for multi-instance collaboration routing,
+and an optional AI sidecar.</p>
+<pre><code class="language-yaml">services:
+  # ── Rudra Server ─────────────────────────────────────
+  rudra-server:
+    image: rudra/server:1.0.2
+    ports:
+      - "${S1_PORT:-8080}:8080"
+    environment:
+      S1_PORT: "8080"
+      S1_STORAGE: "s3"
+      S1_DATA_DIR: "/data"
+      S1_STATIC_DIR: "/app/public"
+      S1_STORAGE_POSTGRES_URL: "postgresql://rudra:${POSTGRES_PASSWORD}@postgres:5432/rudra"
+      S1_STORAGE_S3_ENDPOINT: "http://minio:9000"
+      S1_STORAGE_S3_BUCKET: "rudra-documents"
+      S1_STORAGE_S3_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
+      S1_STORAGE_S3_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      S1_AUTH_ENABLED: "true"
+      S1_JWT_SECRET: "${JWT_SECRET}"
+      S1_REQUIRE_JWT_EXP: "true"
+      S1_CALLBACK_SECRET: "${CALLBACK_SECRET}"
+      S1_ALLOW_ANONYMOUS: "false"
+      S1_COLLAB_ENABLED: "true"
+      S1_COLLAB_REDIS_URL: "redis://redis:6379"
+      S1_ADMIN_USER: "${ADMIN_USER:-admin}"
+      S1_ADMIN_PASS: "${ADMIN_PASSWORD}"
+      RUST_LOG: "s1_server=info,tower_http=info"
+    volumes:
+      - rudra-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "2"
+
+  # ── PostgreSQL ───────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rudra
+      POSTGRES_USER: rudra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rudra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO (S3-compatible storage) ────────────────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9001:9001"   # MinIO Console (optional, remove in production)
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── AI Sidecar (optional) ────────────────────────────
+  rudra-ai:
+    image: rudra/ai:latest
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    ports:
+      - "${AI_PORT:-8081}:8081"
+    deploy:
+      resources:
+        limits:
+          cpus: "${AI_CPUS:-4}"
+          memory: "${AI_MEMORY:-4G}"
+        reservations:
+          memory: "2G"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  rudra-data:
+  pgdata:
+  redis-data:
+  minio-data:
+</code></pre>
+<p>Create a <code>.env</code> file alongside <code>docker-compose.yml</code>:</p>
+<pre><code class="language-bash"># .env
+JWT_SECRET=your-secret-key-min-32-chars-long-here
+CALLBACK_SECRET=your-callback-signing-secret
+ADMIN_USER=admin
+ADMIN_PASSWORD=a-strong-admin-password
+POSTGRES_PASSWORD=a-strong-postgres-password
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=a-strong-minio-password
+</code></pre>
+<p>Start the stack:</p>
+<pre><code class="language-bash">docker compose up -d
+</code></pre>
+<hr />
+<h2 id="environment-variables"><a class="header" href="#environment-variables">Environment Variables</a></h2>
+<h3 id="server-configuration-1"><a class="header" href="#server-configuration-1">Server Configuration</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_PORT</code></td><td><code>8080</code></td><td>TCP port the server listens on.</td></tr>
+<tr><td><code>S1_STORAGE</code></td><td><code>local</code></td><td>Storage backend. One of <code>local</code>, <code>memory</code>, or <code>s3</code>.</td></tr>
+<tr><td><code>S1_DATA_DIR</code></td><td><code>/data</code></td><td>Directory for local file storage. Only used when <code>S1_STORAGE=local</code>.</td></tr>
+<tr><td><code>S1_STATIC_DIR</code></td><td><code>/app/public</code></td><td>Directory containing the editor static files (HTML, JS, CSS, WASM).</td></tr>
+<tr><td><code>RUST_LOG</code></td><td><code>s1_server=info</code></td><td>Log level filter. Uses <a href="https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html"><code>tracing-subscriber</code> EnvFilter syntax</a>.</td></tr>
+</tbody></table>
+</div>
+<h3 id="storage-backends-1"><a class="header" href="#storage-backends-1">Storage Backends</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_STORAGE_POSTGRES_URL</code></td><td>--</td><td>PostgreSQL connection string for document metadata. Example: <code>postgresql://user:pass@host:5432/dbname</code>.</td></tr>
+<tr><td><code>S1_STORAGE_S3_ENDPOINT</code></td><td>--</td><td>S3-compatible endpoint URL. Example: <code>http://minio:9000</code> or <code>https://s3.amazonaws.com</code>.</td></tr>
+<tr><td><code>S1_STORAGE_S3_BUCKET</code></td><td>--</td><td>S3 bucket name for document storage.</td></tr>
+<tr><td><code>S1_STORAGE_S3_ACCESS_KEY</code></td><td>--</td><td>S3 access key ID.</td></tr>
+<tr><td><code>S1_STORAGE_S3_SECRET_KEY</code></td><td>--</td><td>S3 secret access key.</td></tr>
+<tr><td><code>S1_STORAGE_S3_REGION</code></td><td><code>us-east-1</code></td><td>S3 region (required by some providers).</td></tr>
+</tbody></table>
+</div>
+<h3 id="authentication-1"><a class="header" href="#authentication-1">Authentication</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_AUTH_ENABLED</code></td><td><code>false</code></td><td>Enable JWT and API key authentication. When <code>false</code>, all endpoints are public.</td></tr>
+<tr><td><code>S1_JWT_SECRET</code></td><td>--</td><td>HMAC-SHA256 secret for validating JWT tokens. Must be set when <code>S1_AUTH_ENABLED=true</code>. Also used for integration mode (<code>/edit?token=</code>).</td></tr>
+<tr><td><code>S1_REQUIRE_JWT_EXP</code></td><td><code>false</code></td><td>Reject JWT tokens that lack an <code>exp</code> (expiry) claim. Recommended for production.</td></tr>
+<tr><td><code>S1_ALLOW_ANONYMOUS</code></td><td><code>true</code></td><td>Allow unauthenticated requests with read-only (Viewer) access. Set to <code>false</code> in production.</td></tr>
+<tr><td><code>S1_CALLBACK_SECRET</code></td><td>--</td><td>HMAC-SHA256 key for signing callback request bodies. When set, outgoing callbacks include an <code>X-S1-Signature: sha256=...</code> header for verification.</td></tr>
+</tbody></table>
+</div>
+<h3 id="collaboration"><a class="header" href="#collaboration">Collaboration</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_COLLAB_ENABLED</code></td><td><code>true</code></td><td>Enable real-time collaborative editing via WebSocket.</td></tr>
+<tr><td><code>S1_COLLAB_REDIS_URL</code></td><td>--</td><td>Redis URL for cross-instance collab room routing. Required when running multiple server instances.</td></tr>
+</tbody></table>
+</div>
+<h3 id="admin-panel-1"><a class="header" href="#admin-panel-1">Admin Panel</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>S1_ADMIN_USER</code></td><td><code>admin</code></td><td>Username for the admin panel at <code>/admin/dashboard</code>.</td></tr>
+<tr><td><code>S1_ADMIN_PASS</code></td><td><code>admin</code></td><td>Password for the admin panel. <strong>Change this in production.</strong></td></tr>
+</tbody></table>
+</div>
+<h3 id="ai-sidecar"><a class="header" href="#ai-sidecar">AI Sidecar</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>AI_PORT</code></td><td><code>8081</code></td><td>Port for the AI sidecar HTTP API.</td></tr>
+<tr><td><code>AI_CPUS</code></td><td><code>4</code></td><td>CPU core limit for the AI container.</td></tr>
+<tr><td><code>AI_MEMORY</code></td><td><code>4G</code></td><td>Memory limit for the AI container.</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="volumes-and-data-persistence"><a class="header" href="#volumes-and-data-persistence">Volumes and Data Persistence</a></h2>
+<p>The following volumes should be persisted to avoid data loss:</p>
+<div class="table-wrapper"><table><thead><tr><th>Volume</th><th>Container Path</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>rudra-data</code></td><td><code>/data</code></td><td>Document files and metadata (when <code>S1_STORAGE=local</code>).</td></tr>
+<tr><td><code>pgdata</code></td><td><code>/var/lib/postgresql/data</code></td><td>PostgreSQL database.</td></tr>
+<tr><td><code>redis-data</code></td><td><code>/data</code></td><td>Redis AOF persistence (collaboration state).</td></tr>
+<tr><td><code>minio-data</code></td><td><code>/data</code></td><td>MinIO object storage (when <code>S1_STORAGE=s3</code> with MinIO).</td></tr>
+</tbody></table>
+</div>
+<p>Back up the <code>rudra-data</code> and <code>pgdata</code> volumes regularly. For S3-backed
+deployments, documents are stored in the S3 bucket and only metadata lives in
+PostgreSQL.</p>
+<h3 id="backup-example"><a class="header" href="#backup-example">Backup Example</a></h3>
+<pre><code class="language-bash"># Stop the stack gracefully
+docker compose stop
+
+# Back up PostgreSQL
+docker run --rm -v pgdata:/data -v $(pwd):/backup \
+  alpine tar czf /backup/pgdata-backup.tar.gz -C /data .
+
+# Back up local document storage
+docker run --rm -v rudra-data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/rudra-data-backup.tar.gz -C /data .
+
+# Restart
+docker compose start
+</code></pre>
+<hr />
+<h2 id="health-checks"><a class="header" href="#health-checks">Health Checks</a></h2>
+<p>The server exposes a health endpoint at <code>/health</code>:</p>
+<pre><code class="language-bash">curl http://localhost:8080/health
+</code></pre>
+<p>Response:</p>
+<pre><code class="language-json">{
+  "status": "ok",
+  "version": "1.0.2"
+}
+</code></pre>
+<p>The admin panel provides a more detailed health endpoint at <code>/admin/api/health</code>
+(requires admin authentication):</p>
+<pre><code class="language-json">{
+  "status": "ok",
+  "uptime_secs": 86400,
+  "memory_mb": 48.3,
+  "active_sessions": 5,
+  "active_rooms": 3,
+  "total_editors": 12,
+  "pid": 1
+}
+</code></pre>
+<p>Docker Compose health checks are configured to poll <code>/health</code> every 30 seconds
+with a 15-second start period, 5-second timeout, and 3 retries. Dependent
+services wait for the health check to pass before starting.</p>
+<hr />
+<h2 id="build-from-source"><a class="header" href="#build-from-source">Build from Source</a></h2>
+<h3 id="prerequisites-1"><a class="header" href="#prerequisites-1">Prerequisites</a></h3>
+<ul>
+<li>Docker 20.10+ with BuildKit enabled</li>
+<li>At least 4 GB of free disk space (Rust compilation is resource-intensive)</li>
+<li>At least 4 GB of RAM available to the Docker daemon</li>
+</ul>
+<h3 id="unified-image-recommended"><a class="header" href="#unified-image-recommended">Unified Image (Recommended)</a></h3>
+<p>The <code>Dockerfile.unified</code> performs a multi-stage build:</p>
+<ol>
+<li><strong>Stage 1 (rust-builder):</strong> Compiles the <code>s1-server</code> Rust binary and the WASM
+bindings using <code>wasm-pack</code>.</li>
+<li><strong>Stage 2 (web-builder):</strong> Installs npm dependencies and builds the editor
+frontend with Vite.</li>
+<li><strong>Stage 3 (runtime):</strong> Copies the stripped server binary (~15 MB) and the
+built static assets into a minimal <code>debian:bookworm-slim</code> image.</li>
+</ol>
+<pre><code class="language-bash">docker build -f Dockerfile.unified -t rudra/server:local .
+docker run -p 8080:8080 rudra/server:local
+</code></pre>
+<h3 id="server-only-no-frontend"><a class="header" href="#server-only-no-frontend">Server Only (No Frontend)</a></h3>
+<p>If you serve the editor frontend separately (e.g., from a CDN), build just the
+server:</p>
+<pre><code class="language-bash">docker build -f server/Dockerfile -t rudra/server-api:local .
+docker run -p 8080:8080 rudra/server-api:local
+</code></pre>
+<h3 id="build-arguments"><a class="header" href="#build-arguments">Build Arguments</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Argument</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>RUST_VERSION</code></td><td><code>1.88</code></td><td>Rust toolchain version used in the builder stage.</td></tr>
+<tr><td><code>NODE_VERSION</code></td><td><code>20</code></td><td>Node.js version used for the frontend build.</td></tr>
+</tbody></table>
+</div>
+<h3 id="build-caching"><a class="header" href="#build-caching">Build Caching</a></h3>
+<p>The Dockerfiles are optimized for layer caching. Cargo dependency manifests are
+copied before source code so that changing a source file does not re-download
+all crates. On a warm cache, incremental rebuilds take approximately 2-3 minutes
+instead of 10-15 minutes for a full build.</p>
+<hr />
+<h2 id="ssltls-with-a-reverse-proxy"><a class="header" href="#ssltls-with-a-reverse-proxy">SSL/TLS with a Reverse Proxy</a></h2>
+<p>In production, terminate TLS at a reverse proxy in front of the Rudra container.
+Do not expose port 8080 directly to the internet.</p>
+<h3 id="nginx"><a class="header" href="#nginx">nginx</a></h3>
+<pre><code class="language-nginx">server {
+    listen 443 ssl http2;
+    server_name docs.example.com;
+
+    ssl_certificate     /etc/ssl/certs/docs.example.com.pem;
+    ssl_certificate_key /etc/ssl/private/docs.example.com.key;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options    nosniff;
+    add_header X-Frame-Options           SAMEORIGIN;
+
+    # Max upload size (match S1 server limit)
+    client_max_body_size 64M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket upgrade for collaborative editing
+    location /ws/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host       $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+
+server {
+    listen 80;
+    server_name docs.example.com;
+    return 301 https://$host$request_uri;
+}
+</code></pre>
+<h3 id="traefik-docker-labels"><a class="header" href="#traefik-docker-labels">Traefik (Docker Labels)</a></h3>
+<p>Add these labels to the <code>rudra-server</code> service in <code>docker-compose.yml</code>:</p>
+<pre><code class="language-yaml">rudra-server:
+  image: rudra/server:1.0.2
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.rudra.rule=Host(`docs.example.com`)"
+    - "traefik.http.routers.rudra.entrypoints=websecure"
+    - "traefik.http.routers.rudra.tls.certresolver=letsencrypt"
+    - "traefik.http.services.rudra.loadbalancer.server.port=8080"
+    # WebSocket support is automatic in Traefik
+</code></pre>
+<h3 id="caddy"><a class="header" href="#caddy">Caddy</a></h3>
+<pre><code>docs.example.com {
+    reverse_proxy rudra-server:8080
+}
+</code></pre>
+<p>Caddy automatically provisions and renews TLS certificates from Let's Encrypt.</p>
+<hr />
+<h2 id="scaling"><a class="header" href="#scaling">Scaling</a></h2>
+<h3 id="horizontal-scaling-with-redis"><a class="header" href="#horizontal-scaling-with-redis">Horizontal Scaling with Redis</a></h3>
+<p>To run multiple server instances behind a load balancer, configure Redis for
+collaboration room routing. Redis ensures that CRDT operations from any server
+instance are broadcast to all peers in the same editing room, regardless of
+which instance they are connected to.</p>
+<pre><code class="language-yaml">services:
+  rudra-1:
+    image: rudra/server:1.0.2
+    environment:
+      S1_COLLAB_ENABLED: "true"
+      S1_COLLAB_REDIS_URL: "redis://redis:6379"
+      S1_STORAGE: "s3"
+      # ... other env vars
+    deploy:
+      replicas: 3
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+</code></pre>
+<h3 id="load-balancer-requirements"><a class="header" href="#load-balancer-requirements">Load Balancer Requirements</a></h3>
+<p>When running multiple instances, the load balancer must support:</p>
+<ul>
+<li><strong>WebSocket connections</strong> -- use sticky sessions or connection-based routing
+so that a WebSocket upgrade request reaches the same backend for the entire
+session lifetime.</li>
+<li><strong>Health check forwarding</strong> -- route health probes to <code>/health</code> on port 8080.</li>
+</ul>
+<p>Example for HAProxy:</p>
+<pre><code>backend rudra_backend
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+    # Sticky sessions for WebSocket
+    stick-table type string len 64 size 100k expire 30m
+    stick on req.cook(s1_session_id)
+    server rudra1 rudra-1:8080 check
+    server rudra2 rudra-2:8080 check
+    server rudra3 rudra-3:8080 check
+</code></pre>
+<h3 id="autoscaling-guidelines"><a class="header" href="#autoscaling-guidelines">Autoscaling Guidelines</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Scale Up When</th><th>Scale Down When</th></tr></thead><tbody>
+<tr><td>CPU usage</td><td>&gt; 70% for 5 minutes</td><td>&lt; 30% for 10 minutes</td></tr>
+<tr><td>Memory usage</td><td>&gt; 80%</td><td>&lt; 40%</td></tr>
+<tr><td>Active WebSocket connections</td><td>&gt; 500 per instance</td><td>&lt; 100 per instance</td></tr>
+<tr><td>Request latency (p95)</td><td>&gt; 500 ms</td><td>&lt; 100 ms</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h2 id="resource-limits"><a class="header" href="#resource-limits">Resource Limits</a></h2>
+<h3 id="recommended-resources"><a class="header" href="#recommended-resources">Recommended Resources</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Component</th><th>CPU</th><th>Memory</th><th>Disk</th></tr></thead><tbody>
+<tr><td>rudra/server</td><td>1-2 cores</td><td>256-512 MB</td><td>1 GB (binary + static files)</td></tr>
+<tr><td>PostgreSQL</td><td>1 core</td><td>256-512 MB</td><td>Depends on document count</td></tr>
+<tr><td>Redis</td><td>0.5 core</td><td>128 MB</td><td>Minimal (in-memory state)</td></tr>
+<tr><td>MinIO</td><td>1 core</td><td>512 MB</td><td>Depends on total document size</td></tr>
+<tr><td>AI sidecar</td><td>4 cores</td><td>4 GB</td><td>3 GB (model weights)</td></tr>
+</tbody></table>
+</div>
+<h3 id="docker-resource-limits"><a class="header" href="#docker-resource-limits">Docker Resource Limits</a></h3>
+<p>Apply resource constraints in your Compose file to prevent a single container
+from consuming all host resources:</p>
+<pre><code class="language-yaml">services:
+  rudra-server:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "2"
+        reservations:
+          memory: 128M
+          cpus: "0.5"
+</code></pre>
+<p>For the AI sidecar, allocate at least 4 GB of memory. The LLM model is loaded
+entirely into RAM at startup:</p>
+<pre><code class="language-yaml">  rudra-ai:
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "4"
+        reservations:
+          memory: 2G
+</code></pre>
+<h3 id="memory-sizing"><a class="header" href="#memory-sizing">Memory Sizing</a></h3>
+<p>The server uses approximately:</p>
+<ul>
+<li><strong>Base process:</strong> 20-40 MB</li>
+<li><strong>Per active editing session:</strong> 1-5 MB (depending on document size)</li>
+<li><strong>Per WebSocket connection:</strong> ~64 KB</li>
+</ul>
+<p>For 100 concurrent editors working on 20 documents, expect roughly 150-250 MB
+of server memory usage.</p>
+<hr />
+<h2 id="configuration-file"><a class="header" href="#configuration-file">Configuration File</a></h2>
+<p>As an alternative to environment variables, the server reads a <code>s1.toml</code>
+configuration file from the working directory at startup:</p>
+<pre><code class="language-toml">port = 8080
+storage = "local"
+data_dir = "/data"
+max_upload_size = 67108864  # 64 MB
+</code></pre>
+<p>Mount this file into the container:</p>
+<pre><code class="language-bash">docker run -p 8080:8080 \
+  -v ./s1.toml:/app/s1.toml \
+  -v rudra-data:/data \
+  rudra/server:1.0.2
+</code></pre>
+<p>Environment variables take precedence over <code>s1.toml</code> values.</p>
+<hr />
+<h2 id="logging"><a class="header" href="#logging">Logging</a></h2>
+<p>The server uses structured logging via <code>tracing</code>. Control verbosity with the
+<code>RUST_LOG</code> environment variable:</p>
+<pre><code class="language-bash"># Default: info level for the server and tower-http
+RUST_LOG=s1_server=info,tower_http=info
+
+# Debug mode (verbose, includes request/response details)
+RUST_LOG=s1_server=debug,tower_http=debug
+
+# Trace mode (extremely verbose, includes CRDT operations)
+RUST_LOG=s1_server=trace
+
+# Quiet mode (warnings and errors only)
+RUST_LOG=s1_server=warn
+</code></pre>
+<p>Logs are written to stdout in plain text format, suitable for collection by
+Docker logging drivers, Fluentd, Loki, or any other log aggregator.</p>
+<hr />
+<h2 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h2>
+<h3 id="container-exits-immediately"><a class="header" href="#container-exits-immediately">Container Exits Immediately</a></h3>
+<p>Check the logs:</p>
+<pre><code class="language-bash">docker logs rudra
+</code></pre>
+<p>Common causes:</p>
+<ul>
+<li>Port 8080 already in use on the host. Change the host port: <code>-p 9090:8080</code>.</li>
+<li>The <code>/data</code> volume directory has incorrect permissions.</li>
+</ul>
+<h3 id="websocket-connections-fail"><a class="header" href="#websocket-connections-fail">WebSocket Connections Fail</a></h3>
+<ul>
+<li>Verify that your reverse proxy passes WebSocket upgrade headers. See the
+<a href="getting-started/docker.html#ssltls-with-a-reverse-proxy">SSL/TLS section</a> for correct nginx and Traefik
+configuration.</li>
+<li>Check that the <code>Connection: Upgrade</code> and <code>Upgrade: websocket</code> headers reach
+the server.</li>
+</ul>
+<h3 id="admin-panel-returns-403"><a class="header" href="#admin-panel-returns-403">Admin Panel Returns 403</a></h3>
+<ul>
+<li><code>S1_ADMIN_USER</code> and <code>S1_ADMIN_PASS</code> must both be set and non-empty.</li>
+<li>Sessions expire after 1 hour. Log in again.</li>
+</ul>
+<h3 id="jwt-authentication-rejected"><a class="header" href="#jwt-authentication-rejected">JWT Authentication Rejected</a></h3>
+<ul>
+<li>Ensure <code>S1_JWT_SECRET</code> matches the secret used to sign tokens.</li>
+<li>If <code>S1_REQUIRE_JWT_EXP=true</code>, all tokens must include an <code>exp</code> claim.</li>
+<li>Check that the token has not expired (<code>exp</code> must be in the future).</li>
+</ul>
+<h3 id="high-memory-usage"><a class="header" href="#high-memory-usage">High Memory Usage</a></h3>
+<ul>
+<li>Check the number of active editing sessions in the admin panel
+(<code>/admin/dashboard</code>).</li>
+<li>Large documents (&gt; 10 MB) consume proportionally more memory during editing.</li>
+<li>Set memory limits with <code>deploy.resources.limits.memory</code> in Compose to prevent
+unbounded growth.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="self-hosting"><a class="header" href="#self-hosting">Self-Hosting</a></h1>
+<p>This guide covers deploying Rudra Office on your own infrastructure. The server ships as a single Rust binary (or Docker image) that serves the editor UI, REST API, and WebSocket collaboration -- no reverse proxy or sidecar process required for basic deployments.</p>
+<hr />
+<h2 id="requirements"><a class="header" href="#requirements">Requirements</a></h2>
+<h3 id="minimum-hardware"><a class="header" href="#minimum-hardware">Minimum Hardware</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr></thead><tbody>
+<tr><td>CPU</td><td>1 vCPU</td><td>2+ vCPUs</td></tr>
+<tr><td>RAM</td><td>512 MB</td><td>2 GB</td></tr>
+<tr><td>Disk</td><td>1 GB</td><td>10 GB+ (depends on document volume)</td></tr>
+<tr><td>Network</td><td>1 Mbps</td><td>100 Mbps</td></tr>
+</tbody></table>
+</div>
+<p>The server is single-process and multi-threaded (Tokio async runtime). Each active collaboration room holds its operation log in memory. Plan approximately 1 MB of RAM per active room with moderate edit history.</p>
+<h3 id="software"><a class="header" href="#software">Software</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Dependency</th><th>Version</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Docker</td><td>20.10+</td><td>For container deployments. Docker Compose v2 recommended.</td></tr>
+<tr><td>Linux</td><td>Any modern distro</td><td>The container image uses <code>debian:bookworm-slim</code>.</td></tr>
+<tr><td>curl</td><td>Any</td><td>Used by the Docker health check.</td></tr>
+</tbody></table>
+</div>
+<p>For bare-metal deployments without Docker, you need Rust 1.88+ and Node.js 20+ to build from source.</p>
+<hr />
+<h2 id="quick-deploy"><a class="header" href="#quick-deploy">Quick Deploy</a></h2>
+<h3 id="docker-compose-recommended"><a class="header" href="#docker-compose-recommended">Docker Compose (recommended)</a></h3>
+<p>Create a <code>docker-compose.yml</code>:</p>
+<pre><code class="language-yaml">services:
+  s1-server:
+    image: rudra/server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - S1_PORT=8080
+      - S1_STORAGE=local
+      - S1_DATA_DIR=/data
+      - S1_STATIC_DIR=/app/public
+      - S1_ADMIN_USER=admin
+      - S1_ADMIN_PASS=changeme
+      - RUST_LOG=s1_server=info,tower_http=info
+    volumes:
+      - s1-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  s1-data:
+</code></pre>
+<p>Start the server:</p>
+<pre><code class="language-bash">docker compose up -d
+</code></pre>
+<p>Open <code>http://localhost:8080</code> in your browser. The admin panel is at <code>http://localhost:8080/admin/dashboard</code>.</p>
+<h3 id="with-ai-sidecar"><a class="header" href="#with-ai-sidecar">With AI Sidecar</a></h3>
+<p>To include the AI writing assistant (CPU-based, no GPU required):</p>
+<pre><code class="language-yaml">services:
+  s1-server:
+    image: rudra/server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - S1_PORT=8080
+      - S1_STORAGE=local
+      - S1_DATA_DIR=/data
+      - S1_ADMIN_USER=admin
+      - S1_ADMIN_PASS=changeme
+    volumes:
+      - s1-data:/data
+    restart: unless-stopped
+
+  rudra-ai:
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: "4G"
+        reservations:
+          memory: "2G"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  s1-data:
+</code></pre>
+<p>Set the client configuration to point to the AI sidecar:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  aiUrl: 'http://localhost:8081',
+  enableAI: true,
+};
+</code></pre>
+<h3 id="build-from-source-1"><a class="header" href="#build-from-source-1">Build from Source</a></h3>
+<pre><code class="language-bash"># Clone the repository
+git clone https://github.com/example/doc-engine.git
+cd doc-engine
+
+# Build the unified image (server + editor + WASM)
+docker build -f Dockerfile.unified -t rudra/server .
+
+# Run
+docker run -d \
+  -p 8080:8080 \
+  -v rudra-data:/data \
+  -e S1_ADMIN_USER=admin \
+  -e S1_ADMIN_PASS=changeme \
+  rudra/server
+</code></pre>
+<hr />
+<h2 id="production-checklist"><a class="header" href="#production-checklist">Production Checklist</a></h2>
+<p>Before exposing Rudra Office to users, verify the following:</p>
+<h3 id="security"><a class="header" href="#security">Security</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Set a strong <code>S1_JWT_SECRET</code> (at least 32 random bytes, base64-encoded).</li>
+<li><input disabled="" type="checkbox"/>
+Set <code>S1_REQUIRE_JWT_EXP=true</code> to reject tokens without expiry.</li>
+<li><input disabled="" type="checkbox"/>
+Set <code>S1_AUTH_ENABLED=true</code> if the instance is not behind an authenticating proxy.</li>
+<li><input disabled="" type="checkbox"/>
+Set <code>S1_ALLOW_ANONYMOUS=false</code> to prevent unauthenticated access.</li>
+<li><input disabled="" type="checkbox"/>
+Change <code>S1_ADMIN_USER</code> and <code>S1_ADMIN_PASS</code> from their defaults.</li>
+<li><input disabled="" type="checkbox"/>
+Set <code>S1_CALLBACK_SECRET</code> if using integration callbacks, so the host app can verify request authenticity.</li>
+<li><input disabled="" type="checkbox"/>
+Terminate TLS at the reverse proxy (or load balancer). Never expose plain HTTP to the internet.</li>
+</ul>
+<h3 id="reliability"><a class="header" href="#reliability">Reliability</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Use a persistent volume for <code>/data</code> (Docker named volume or host mount).</li>
+<li><input disabled="" type="checkbox"/>
+Enable the Docker health check (included in the default Dockerfile).</li>
+<li><input disabled="" type="checkbox"/>
+Set <code>restart: unless-stopped</code> (or <code>always</code>) in your Compose file.</li>
+<li><input disabled="" type="checkbox"/>
+Configure log rotation (Docker logging driver or external collector).</li>
+</ul>
+<h3 id="performance"><a class="header" href="#performance">Performance</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+Set <code>RUST_LOG=s1_server=info,tower_http=warn</code> to reduce log volume.</li>
+<li><input disabled="" type="checkbox"/>
+Set appropriate resource limits in Docker (<code>cpus</code>, <code>memory</code>).</li>
+<li><input disabled="" type="checkbox"/>
+Monitor the <code>/admin/api/health</code> endpoint for memory and session counts.</li>
+</ul>
+<hr />
+<h2 id="architecture-options"><a class="header" href="#architecture-options">Architecture Options</a></h2>
+<h3 id="single-node"><a class="header" href="#single-node">Single Node</a></h3>
+<p>The simplest deployment. One container runs the entire stack:</p>
+<pre><code>Internet --&gt; [Reverse Proxy (TLS)] --&gt; rudra-server:8080
+                                           |
+                                           +--&gt; /        (editor UI)
+                                           +--&gt; /api/v1/ (REST API)
+                                           +--&gt; /ws/     (WebSocket)
+                                           +--&gt; /admin/  (admin panel)
+</code></pre>
+<p>Suitable for teams of up to ~50 concurrent editors. The server uses Tokio's multi-threaded runtime, so it scales well on a single machine with multiple cores.</p>
+<h3 id="multi-node-horizontal-scaling"><a class="header" href="#multi-node-horizontal-scaling">Multi-Node (Horizontal Scaling)</a></h3>
+<p>For larger deployments, run multiple rudra-server instances behind a load balancer with sticky sessions:</p>
+<pre><code>Internet --&gt; [Load Balancer (TLS + sticky sessions)]
+                 |          |          |
+                 v          v          v
+             server-1   server-2   server-3
+                 |          |          |
+                 +----------+----------+
+                            |
+                     [Shared Storage]
+                     (S3 / PostgreSQL)
+</code></pre>
+<p>Requirements for multi-node:</p>
+<ul>
+<li><strong>Sticky sessions</strong> -- WebSocket connections must be routed to the same backend for the duration of the editing session. Use cookie-based or IP-based affinity.</li>
+<li><strong>Shared storage</strong> -- All nodes must share the same storage backend (S3 or a shared filesystem). In-memory and local storage are not suitable for multi-node.</li>
+<li><strong>Collaboration rooms are per-node</strong> -- Each server instance manages its own set of rooms. Editors connected to different nodes for the same document will not see each other's changes in real time. For full cross-node collaboration, place a shared message broker (Redis Pub/Sub or NATS) in front of the room manager. This is a planned feature.</li>
+</ul>
+<hr />
+<h2 id="reverse-proxy"><a class="header" href="#reverse-proxy">Reverse Proxy</a></h2>
+<h3 id="nginx-1"><a class="header" href="#nginx-1">nginx</a></h3>
+<pre><code class="language-nginx">upstream rudra {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name docs.example.com;
+
+    ssl_certificate     /etc/ssl/certs/docs.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/docs.example.com.key;
+
+    # Security headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Max upload size (match S1 max_upload_size)
+    client_max_body_size 64m;
+
+    # Proxy all traffic to rudra-server
+    location / {
+        proxy_pass http://rudra;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket upgrade for collaboration
+    location /ws/ {
+        proxy_pass http://rudra;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Longer timeouts for WebSocket connections
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name docs.example.com;
+    return 301 https://$host$request_uri;
+}
+</code></pre>
+<h3 id="traefik"><a class="header" href="#traefik">Traefik</a></h3>
+<p>Using Docker labels with Traefik v2:</p>
+<pre><code class="language-yaml">services:
+  s1-server:
+    image: rudra/server:latest
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rudra.rule=Host(`docs.example.com`)"
+      - "traefik.http.routers.rudra.tls=true"
+      - "traefik.http.routers.rudra.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rudra.loadbalancer.server.port=8080"
+      # Sticky sessions for WebSocket affinity
+      - "traefik.http.services.rudra.loadbalancer.sticky.cookie=true"
+      - "traefik.http.services.rudra.loadbalancer.sticky.cookie.name=rudra_backend"
+    environment:
+      - S1_PORT=8080
+      - S1_STORAGE=local
+      - S1_DATA_DIR=/data
+    volumes:
+      - s1-data:/data
+</code></pre>
+<h3 id="caddy-1"><a class="header" href="#caddy-1">Caddy</a></h3>
+<pre><code>docs.example.com {
+    reverse_proxy localhost:8080
+
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade    websocket
+    }
+    reverse_proxy @websocket localhost:8080
+}
+</code></pre>
+<p>Caddy handles TLS automatically via Let's Encrypt.</p>
+<hr />
+<h2 id="backup-and-restore"><a class="header" href="#backup-and-restore">Backup and Restore</a></h2>
+<h3 id="local-storage"><a class="header" href="#local-storage">Local Storage</a></h3>
+<p>When using <code>S1_STORAGE=local</code>, documents are stored in the <code>S1_DATA_DIR</code> directory as flat files:</p>
+<pre><code>/data/
+  {doc-id}.bin           # Document bytes
+  {doc-id}.meta.json     # Metadata sidecar (JSON)
+  {doc-id}_ops.json      # Collaboration operation log (if room was active)
+</code></pre>
+<h4 id="backup"><a class="header" href="#backup">Backup</a></h4>
+<pre><code class="language-bash"># Stop the server to ensure consistency (or accept point-in-time)
+docker compose stop s1-server
+
+# Create a compressed archive
+tar czf rudra-backup-$(date +%Y%m%d).tar.gz /data/
+
+# Restart
+docker compose start s1-server
+</code></pre>
+<p>For zero-downtime backups, copy the data directory while the server is running. The files are append-only from the server's perspective; individual file reads are atomic.</p>
+<h4 id="restore"><a class="header" href="#restore">Restore</a></h4>
+<pre><code class="language-bash">docker compose stop s1-server
+rm -rf /data/*
+tar xzf rudra-backup-20260322.tar.gz -C /
+docker compose start s1-server
+</code></pre>
+<h3 id="s3-compatible-storage"><a class="header" href="#s3-compatible-storage">S3-Compatible Storage</a></h3>
+<p>When using S3 storage, backups are handled by the storage provider's own mechanisms:</p>
+<pre><code class="language-bash"># Cross-region replication (AWS)
+aws s3 sync s3://rudra-docs s3://rudra-docs-backup --region us-west-2
+
+# MinIO mirror
+mc mirror minio/rudra-docs backup/rudra-docs
+</code></pre>
+<h3 id="postgresql-planned"><a class="header" href="#postgresql-planned">PostgreSQL (planned)</a></h3>
+<p>For deployments using PostgreSQL as the metadata store:</p>
+<pre><code class="language-bash"># Dump
+pg_dump -h localhost -U rudra -d rudra_docs &gt; rudra-$(date +%Y%m%d).sql
+
+# Restore
+psql -h localhost -U rudra -d rudra_docs &lt; rudra-20260322.sql
+</code></pre>
+<p>Schedule automated dumps with <code>cron</code> or use continuous archiving with WAL-G for point-in-time recovery.</p>
+<hr />
+<h2 id="monitoring"><a class="header" href="#monitoring">Monitoring</a></h2>
+<h3 id="health-endpoints"><a class="header" href="#health-endpoints">Health Endpoints</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Endpoint</th><th>Auth Required</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>GET /health</code></td><td>No</td><td>Basic health check. Returns <code>{"status":"ok","version":"..."}</code>. Use this for load balancer probes and Docker health checks.</td></tr>
+<tr><td><code>GET /admin/api/health</code></td><td>Yes (admin)</td><td>Detailed health metrics including uptime, memory usage, active sessions, active rooms, total editors, and PID.</td></tr>
+<tr><td><code>GET /admin/api/stats</code></td><td>Yes (admin)</td><td>Server statistics: uptime, session count, editor count, memory.</td></tr>
+<tr><td><code>GET /api/v1/info</code></td><td>No</td><td>Server version, engine version, and supported format list.</td></tr>
+</tbody></table>
+</div>
+<h3 id="prometheus-metrics-planned"><a class="header" href="#prometheus-metrics-planned">Prometheus Metrics (planned)</a></h3>
+<p>A <code>/metrics</code> endpoint exposing Prometheus-compatible metrics is planned. In the meantime, scrape the <code>/admin/api/health</code> JSON endpoint with a custom exporter or use the health check for alerting.</p>
+<h3 id="key-metrics-to-monitor"><a class="header" href="#key-metrics-to-monitor">Key Metrics to Monitor</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Source</th><th>Alert Threshold</th></tr></thead><tbody>
+<tr><td>HTTP response status</td><td>Reverse proxy logs</td><td>Error rate &gt; 1%</td></tr>
+<tr><td>WebSocket connections</td><td><code>/admin/api/stats</code> (<code>total_editors</code>)</td><td>Approaching connection limit</td></tr>
+<tr><td>Memory usage</td><td><code>/admin/api/health</code> (<code>memory_mb</code>)</td><td>&gt; 80% of container limit</td></tr>
+<tr><td>Active sessions</td><td><code>/admin/api/stats</code> (<code>active_sessions</code>)</td><td>Unexpected drop to 0</td></tr>
+<tr><td>Uptime</td><td><code>/admin/api/health</code> (<code>uptime_secs</code>)</td><td>Reset indicates crash/restart</td></tr>
+<tr><td>Disk usage</td><td>Host monitoring</td><td>&gt; 85% of volume capacity</td></tr>
+</tbody></table>
+</div>
+<h3 id="logging-1"><a class="header" href="#logging-1">Logging</a></h3>
+<p>The server uses the <code>tracing</code> crate with structured logging. Control verbosity with the <code>RUST_LOG</code> environment variable:</p>
+<pre><code class="language-bash"># Production (recommended)
+RUST_LOG=s1_server=info,tower_http=warn
+
+# Debugging collaboration issues
+RUST_LOG=s1_server=debug,tower_http=info
+
+# Trace-level for development
+RUST_LOG=s1_server=trace,tower_http=trace
+</code></pre>
+<p>Logs are written to stdout in plain text format. Use your container runtime's log driver to forward them to a log aggregator (Loki, Elasticsearch, CloudWatch).</p>
+<h3 id="client-error-reporting"><a class="header" href="#client-error-reporting">Client Error Reporting</a></h3>
+<p>The editor sends client-side errors to <code>POST /api/v1/errors</code>. These are stored in an in-memory ring buffer (capacity: 100) and visible in the admin panel at <code>/admin/api/errors</code>:</p>
+<pre><code class="language-bash">curl -s http://localhost:8080/admin/api/errors?limit=10 | jq .
+</code></pre>
+<hr />
+<h2 id="upgrades"><a class="header" href="#upgrades">Upgrades</a></h2>
+<h3 id="rolling-updates-docker-compose"><a class="header" href="#rolling-updates-docker-compose">Rolling Updates (Docker Compose)</a></h3>
+<pre><code class="language-bash"># Pull the new image
+docker compose pull s1-server
+
+# Recreate with zero downtime (if using restart: always)
+docker compose up -d --no-deps s1-server
+</code></pre>
+<p>Active WebSocket connections will be dropped during the restart. Clients reconnect automatically (the editor has built-in reconnection logic with exponential backoff).</p>
+<h3 id="pre-upgrade-checklist"><a class="header" href="#pre-upgrade-checklist">Pre-Upgrade Checklist</a></h3>
+<ol>
+<li><strong>Back up data</strong> -- Create a snapshot of the data volume before upgrading.</li>
+<li><strong>Check release notes</strong> -- Look for breaking changes in configuration or storage format.</li>
+<li><strong>Test in staging</strong> -- Run the new version against a copy of your data before deploying to production.</li>
+</ol>
+<h3 id="database-migrations-planned"><a class="header" href="#database-migrations-planned">Database Migrations (planned)</a></h3>
+<p>When PostgreSQL support is added, migrations will be handled automatically on server startup using an embedded migration runner. The server will refuse to start if it detects a schema version newer than what it supports (preventing accidental downgrades).</p>
+<h3 id="rollback"><a class="header" href="#rollback">Rollback</a></h3>
+<p>If an upgrade causes issues:</p>
+<pre><code class="language-bash"># Roll back to the previous image
+docker compose down
+docker compose up -d --pull never s1-server
+</code></pre>
+<p>If the data format has changed, restore from the backup taken before the upgrade.</p>
+<hr />
+<h2 id="security-hardening"><a class="header" href="#security-hardening">Security Hardening</a></h2>
+<h3 id="cors"><a class="header" href="#cors">CORS</a></h3>
+<p>The server ships with a permissive CORS policy (<code>CorsLayer::permissive()</code>) for development convenience. In production, configure your reverse proxy to enforce a strict CORS policy:</p>
+<pre><code class="language-nginx"># nginx — restrict to your domain
+add_header Access-Control-Allow-Origin "https://docs.example.com" always;
+add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-API-Key" always;
+add_header Access-Control-Max-Age 86400 always;
+</code></pre>
+<h3 id="rate-limiting"><a class="header" href="#rate-limiting">Rate Limiting</a></h3>
+<p>The admin login endpoint has built-in rate limiting (5 attempts per IP per 60 seconds). For API endpoints, add rate limiting at the reverse proxy layer:</p>
+<pre><code class="language-nginx"># nginx — rate limit API requests
+limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+
+location /api/ {
+    limit_req zone=api burst=50 nodelay;
+    proxy_pass http://rudra;
+}
+</code></pre>
+<h3 id="ssrf-protection-1"><a class="header" href="#ssrf-protection-1">SSRF Protection</a></h3>
+<p>The server blocks outbound HTTP requests to private and internal IP addresses. This protects against Server-Side Request Forgery when processing <code>download_url</code> and <code>callback_url</code> values from integration JWTs. The following are blocked:</p>
+<ul>
+<li>RFC 1918 private ranges</li>
+<li>Loopback addresses</li>
+<li>Link-local addresses</li>
+<li>Cloud metadata endpoints (<code>169.254.169.254</code>)</li>
+<li>Hostnames ending in <code>.local</code> or <code>.internal</code></li>
+</ul>
+<p>No additional configuration is needed; SSRF protection is always active.</p>
+<h3 id="content-security-policy"><a class="header" href="#content-security-policy">Content Security Policy</a></h3>
+<p>Add a strict CSP header at your reverse proxy:</p>
+<pre><code class="language-nginx">add_header Content-Security-Policy "
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com;
+    img-src 'self' data: blob:;
+    connect-src 'self' wss://docs.example.com;
+" always;
+</code></pre>
+<p>Adjust the <code>connect-src</code> directive to match your domain and any AI sidecar URLs.</p>
+<h3 id="file-upload-validation"><a class="header" href="#file-upload-validation">File Upload Validation</a></h3>
+<p>The server validates all uploaded documents through the s1engine parser before accepting them. Malformed or unrecognized files are rejected with a <code>400 Bad Request</code>. The maximum upload size is 64 MB by default (configurable via <code>max_upload_size</code> in <code>s1.toml</code>).</p>
+<h3 id="network-isolation"><a class="header" href="#network-isolation">Network Isolation</a></h3>
+<p>In a Docker Compose deployment, isolate internal services from the public network:</p>
+<pre><code class="language-yaml">services:
+  s1-server:
+    networks:
+      - frontend
+      - backend
+
+  rudra-ai:
+    networks:
+      - backend  # AI sidecar not exposed to internet
+
+networks:
+  frontend:
+  backend:
+    internal: true
+</code></pre>
+<hr />
+<h2 id="troubleshooting-1"><a class="header" href="#troubleshooting-1">Troubleshooting</a></h2>
+<h3 id="common-issues"><a class="header" href="#common-issues">Common Issues</a></h3>
+<p><strong>Editor loads but shows "Failed to load WASM"</strong></p>
+<p>The static directory (<code>S1_STATIC_DIR</code>) does not contain the compiled WASM files. Verify the build completed successfully and that the <code>public/</code> directory contains <code>.wasm</code> files.</p>
+<p><strong>WebSocket connections fail with 403</strong></p>
+<p>If <code>S1_AUTH_ENABLED=true</code>, WebSocket connections may require authentication. Ensure the client passes credentials (JWT or API key) in the WebSocket URL query parameters or upgrade headers.</p>
+<p><strong>"S1_JWT_SECRET not set" warning on startup</strong></p>
+<p>Integration mode (<code>/edit?token=</code>) requires a JWT secret. Set <code>S1_JWT_SECRET</code> to a strong random string. This warning is informational if you are not using integration mode.</p>
+<p><strong>Admin panel returns 403</strong></p>
+<p>Both <code>S1_ADMIN_USER</code> and <code>S1_ADMIN_PASS</code> must be set as environment variables. If either is empty, the admin panel is disabled entirely.</p>
+<p><strong>High memory usage</strong></p>
+<p>Check the number of active rooms via <code>/admin/api/stats</code>. Each room with a large operation log consumes memory. The server truncates logs at 10,000 entries, but many concurrent rooms can still accumulate. Consider restarting stale sessions via the admin panel.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="rust-api-reference"><a class="header" href="#rust-api-reference">Rust API Reference</a></h1>
+<p>Full API documentation is auto-generated from source: <code>cargo doc --open</code></p>
+<h2 id="core-types"><a class="header" href="#core-types">Core Types</a></h2>
+<h3 id="engine"><a class="header" href="#engine">Engine</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let engine = Engine::new();
+let doc = engine.open(&amp;bytes)?;       // Open from bytes
+let doc = engine.open_file("path")?;  // Open from file
+let doc = engine.create();             // New empty document
+<span class="boring">}</span></code></pre></pre>
+<h3 id="document"><a class="header" href="#document">Document</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>doc.to_plain_text()           // Extract text
+doc.to_html()                 // Render to HTML
+doc.export(Format::Pdf)?      // Export to format
+doc.metadata()                // Get metadata
+doc.model()                   // Access document model
+doc.apply(operation)?         // Apply an operation
+doc.undo()?                   // Undo last operation
+doc.redo()?                   // Redo
+<span class="boring">}</span></code></pre></pre>
+<h3 id="documentbuilder"><a class="header" href="#documentbuilder">DocumentBuilder</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>DocumentBuilder::new()
+    .title("Report")
+    .heading(1, "Chapter 1")
+    .text("Content here.")
+    .bold("Important!")
+    .table(|t| t.row(|r| r.cell("A").cell("B")))
+    .build()
+<span class="boring">}</span></code></pre></pre>
+<h3 id="format"><a class="header" href="#format">Format</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>enum Format { Docx, Odt, Pdf, Txt, Md, Doc }
+<span class="boring">}</span></code></pre></pre>
+<h2 id="crate-documentation"><a class="header" href="#crate-documentation">Crate Documentation</a></h2>
+<p>Each crate has its own rustdoc:</p>
+<pre><code class="language-bash">cargo doc -p s1-model --open
+cargo doc -p s1-ops --open
+cargo doc -p s1-format-docx --open
+cargo doc -p s1engine --open
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="wasm--javascript-api"><a class="header" href="#wasm--javascript-api">WASM / JavaScript API</a></h1>
+<h2 id="wasmengine"><a class="header" href="#wasmengine">WasmEngine</a></h2>
+<pre><code class="language-javascript">import init, { WasmEngine } from '@rudra/wasm';
+await init();
+
+const engine = new WasmEngine();
+const doc = engine.create();
+const doc2 = engine.open(uint8Array);
+</code></pre>
+<h2 id="wasmdocument"><a class="header" href="#wasmdocument">WasmDocument</a></h2>
+<h3 id="content"><a class="header" href="#content">Content</a></h3>
+<pre><code class="language-javascript">doc.to_html()              // Full HTML rendering
+doc.to_plain_text()        // Text extraction
+doc.to_paginated_html()    // Paginated HTML with layout
+</code></pre>
+<h3 id="export-1"><a class="header" href="#export-1">Export</a></h3>
+<pre><code class="language-javascript">doc.to_docx()   // Uint8Array
+doc.to_odt()    // Uint8Array
+doc.to_pdf()    // Uint8Array
+doc.export('md') // Uint8Array
+</code></pre>
+<h3 id="editing"><a class="header" href="#editing">Editing</a></h3>
+<pre><code class="language-javascript">doc.insert_text_in_paragraph(nodeId, offset, "text")
+doc.delete_text_in_paragraph(nodeId, offset, length)
+doc.split_paragraph(nodeId, offset)
+doc.format_selection(startNode, startOff, endNode, endOff, key, value)
+doc.set_heading_level(nodeId, level)
+doc.insert_table(afterNodeId, rows, cols)
+doc.insert_image(afterNodeId, bytes, mimeType)
+</code></pre>
+<h3 id="undoredo"><a class="header" href="#undoredo">Undo/Redo</a></h3>
+<pre><code class="language-javascript">doc.undo()       // Returns boolean
+doc.redo()       // Returns boolean
+doc.can_undo()   // Boolean
+doc.can_redo()   // Boolean
+</code></pre>
+<h3 id="metadata"><a class="header" href="#metadata">Metadata</a></h3>
+<pre><code class="language-javascript">doc.set_title("My Doc")
+doc.set_author("Alice")
+doc.get_document_stats_json() // { words, characters, paragraphs, pages }
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="c-ffi-api"><a class="header" href="#c-ffi-api">C FFI API</a></h1>
+<p>Rudra Code provides C-compatible bindings via opaque handles.</p>
+<h2 id="build"><a class="header" href="#build">Build</a></h2>
+<pre><code class="language-bash">cd ffi/c
+cargo build --release
+# Output: target/release/libs1engine_c.{so,dylib,dll}
+</code></pre>
+<h2 id="api"><a class="header" href="#api">API</a></h2>
+<pre><code class="language-c">#include "s1engine.h"
+
+// Create engine
+S1Engine* engine = s1_engine_new();
+
+// Open a document
+S1Error* err = NULL;
+S1Document* doc = s1_engine_open(engine, data, len, &amp;err);
+
+// Get text
+S1String* text = s1_document_plain_text(doc);
+printf("%s\n", s1_string_ptr(text));
+
+// Export
+S1Bytes* docx = s1_document_export(doc, "docx", &amp;err);
+// Use s1_bytes_data() and s1_bytes_len()
+
+// Cleanup
+s1_string_free(text);
+s1_bytes_free(docx);
+s1_document_free(doc);
+s1_engine_free(engine);
+</code></pre>
+<h2 id="handle-types"><a class="header" href="#handle-types">Handle Types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th><th>Free Function</th></tr></thead><tbody>
+<tr><td><code>S1Engine</code></td><td>Engine instance</td><td><code>s1_engine_free</code></td></tr>
+<tr><td><code>S1Document</code></td><td>Open document</td><td><code>s1_document_free</code></td></tr>
+<tr><td><code>S1Error</code></td><td>Error message</td><td><code>s1_error_free</code></td></tr>
+<tr><td><code>S1String</code></td><td>UTF-8 string</td><td><code>s1_string_free</code></td></tr>
+<tr><td><code>S1Bytes</code></td><td>Byte buffer</td><td><code>s1_bytes_free</code></td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="rest-api"><a class="header" href="#rest-api">REST API</a></h1>
+<p>The rudra-server provides a REST API for document management.</p>
+<h2 id="base-url"><a class="header" href="#base-url">Base URL</a></h2>
+<pre><code>http://localhost:8080/api/v1/
+</code></pre>
+<h2 id="endpoints"><a class="header" href="#endpoints">Endpoints</a></h2>
+<h3 id="documents"><a class="header" href="#documents">Documents</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>POST</code></td><td><code>/documents</code></td><td>Upload a document (multipart)</td></tr>
+<tr><td><code>GET</code></td><td><code>/documents</code></td><td>List documents (paginated)</td></tr>
+<tr><td><code>GET</code></td><td><code>/documents/:id</code></td><td>Get document metadata</td></tr>
+<tr><td><code>GET</code></td><td><code>/documents/:id/content</code></td><td>Download document bytes</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/documents/:id</code></td><td>Delete a document</td></tr>
+<tr><td><code>GET</code></td><td><code>/documents/:id/thumbnail</code></td><td>Get PDF thumbnail</td></tr>
+</tbody></table>
+</div>
+<h3 id="conversion"><a class="header" href="#conversion">Conversion</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>POST</code></td><td><code>/convert</code></td><td>Stateless format conversion</td></tr>
+</tbody></table>
+</div>
+<h3 id="webhooks-1"><a class="header" href="#webhooks-1">Webhooks</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>POST</code></td><td><code>/webhooks</code></td><td>Register a webhook</td></tr>
+<tr><td><code>GET</code></td><td><code>/webhooks</code></td><td>List webhooks</td></tr>
+<tr><td><code>DELETE</code></td><td><code>/webhooks/:id</code></td><td>Delete a webhook</td></tr>
+</tbody></table>
+</div>
+<h3 id="system"><a class="header" href="#system">System</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>GET</code></td><td><code>/health</code></td><td>Health check</td></tr>
+<tr><td><code>GET</code></td><td><code>/info</code></td><td>Server info</td></tr>
+</tbody></table>
+</div>
+<h2 id="example-upload-and-convert"><a class="header" href="#example-upload-and-convert">Example: Upload and Convert</a></h2>
+<pre><code class="language-bash"># Upload a DOCX
+curl -X POST http://localhost:8080/api/v1/documents \
+  -F file=@report.docx
+
+# Convert to PDF
+curl -X POST http://localhost:8080/api/v1/convert \
+  -F file=@report.docx \
+  -F format=pdf \
+  -o report.pdf
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="websocket-protocol"><a class="header" href="#websocket-protocol">WebSocket Protocol</a></h1>
+<p>Real-time collaboration uses WebSocket at:</p>
+<pre><code>ws://localhost:8080/ws/collab/{room_id}
+</code></pre>
+<h2 id="connection-flow"><a class="header" href="#connection-flow">Connection Flow</a></h2>
+<ol>
+<li>Client connects to <code>ws://host/ws/collab/my-doc-123</code></li>
+<li>Server sends welcome: <code>{"type":"welcome","roomId":"my-doc-123","opsCount":0}</code></li>
+<li>If late joiner, server sends catch-up ops: <code>{"type":"catchUp","op":{...}}</code></li>
+<li>Client sends operations as JSON text messages</li>
+<li>Server validates and broadcasts to all peers in the room</li>
+</ol>
+<h2 id="message-types"><a class="header" href="#message-types">Message Types</a></h2>
+<h3 id="client--server"><a class="header" href="#client--server">Client → Server</a></h3>
+<pre><code class="language-json">{"type":"op","action":"insertText","nodeId":"0:5","offset":3,"text":"hello"}
+{"type":"op","action":"formatSelection","startNode":"0:5","startOffset":0,"endNode":"0:5","endOffset":5,"key":"bold","value":"true"}
+{"type":"awareness","cursor":{"nodeId":"0:5","offset":3},"user":"Alice"}
+</code></pre>
+<h3 id="server--client"><a class="header" href="#server--client">Server → Client</a></h3>
+<pre><code class="language-json">{"type":"welcome","roomId":"my-doc","opsCount":42}
+{"type":"catchUp","op":{"action":"insertText",...}}
+</code></pre>
+<h2 id="room-lifecycle"><a class="header" href="#room-lifecycle">Room Lifecycle</a></h2>
+<ul>
+<li>Room created on first peer join</li>
+<li>All operations broadcast to all peers</li>
+<li>Operations logged for late-joiner catch-up</li>
+<li>Dirty rooms auto-saved to storage every 30 seconds</li>
+<li>Room closed when last peer disconnects</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
+<pre><code>Consumer Applications
+        |  Rust API / C FFI / WASM
++-------v--------------------------------------------+
+|                s1engine (facade)                    |
+|----------------------------------------------------|
+|  s1-ops       s1-layout       s1-convert           |
+|  Operations   Page Layout     Format Conversion    |
+|  Undo/Redo    Pagination      DOC → DOCX           |
+|----------------------------------------------------|
+|  s1-crdt                s1-model                   |
+|  Collaborative          Core Document Model        |
+|  Editing (Fugue)        (zero external deps)       |
+|----------------------------------------------------|
+|  format-docx  format-odt  format-pdf  format-txt   |
+|  format-md                                         |
+|----------------------------------------------------|
+|                s1-text (Pure Rust)                  |
+|        rustybuzz  ttf-parser  fontdb               |
++----------------------------------------------------+
+</code></pre>
+<h2 id="design-principles"><a class="header" href="#design-principles">Design Principles</a></h2>
+<ol>
+<li><strong>s1-model has zero external dependencies</strong> — pure Rust data structures</li>
+<li><strong>All mutations via Operations</strong> — never modify the tree directly</li>
+<li><strong>Format isolation</strong> — each format crate only depends on s1-model</li>
+<li><strong>No panics in library code</strong> — all public functions return <code>Result</code></li>
+<li><strong>No unsafe</strong> — unless documented with a SAFETY comment</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="document-model"><a class="header" href="#document-model">Document Model</a></h1>
+<p>The document model (<code>s1-model</code>) is a tree of nodes:</p>
+<pre><code>Document
+  └─ Body
+       ├─ Paragraph
+       │    ├─ Run (formatting container)
+       │    │    ├─ Text ("Hello ")
+       │    │    └─ Text ("world")
+       │    └─ Run (bold)
+       │         └─ Text ("bold text")
+       ├─ Table
+       │    ├─ TableRow
+       │    │    ├─ TableCell
+       │    │    └─ TableCell
+       │    └─ TableRow
+       └─ Paragraph
+</code></pre>
+<h2 id="node-types"><a class="header" href="#node-types">Node Types</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Description</th><th>Can Contain</th></tr></thead><tbody>
+<tr><td>Document</td><td>Root node</td><td>Body, Header, Footer, CommentBody</td></tr>
+<tr><td>Body</td><td>Main content</td><td>Paragraph, Table, TOC, PageBreak</td></tr>
+<tr><td>Paragraph</td><td>Text container</td><td>Run, Image, LineBreak, Tab, Field</td></tr>
+<tr><td>Run</td><td>Formatting span</td><td>Text</td></tr>
+<tr><td>Text</td><td>Leaf text content</td><td>(none)</td></tr>
+<tr><td>Table</td><td>Grid container</td><td>TableRow</td></tr>
+<tr><td>TableRow</td><td>Row</td><td>TableCell</td></tr>
+<tr><td>TableCell</td><td>Cell</td><td>Paragraph</td></tr>
+<tr><td>Image</td><td>Inline image</td><td>(none)</td></tr>
+</tbody></table>
+</div>
+<h2 id="nodeid"><a class="header" href="#nodeid">NodeId</a></h2>
+<p>Every node has a globally unique <code>NodeId(replica_id, counter)</code>:</p>
+<ul>
+<li><code>replica_id</code> identifies the creating peer (for CRDT)</li>
+<li><code>counter</code> is monotonically increasing per replica</li>
+</ul>
+<h2 id="attributes"><a class="header" href="#attributes">Attributes</a></h2>
+<p>Nodes carry an <code>AttributeMap</code> of key-value formatting:</p>
+<ul>
+<li>Character: Bold, Italic, FontSize, FontFamily, Color</li>
+<li>Paragraph: Alignment, SpacingBefore, SpacingAfter, IndentLeft</li>
+<li>Image: ImageWidth, ImageHeight, ImageMediaId</li>
+<li>Style: StyleId references a named Style definition</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="operations--crdt"><a class="header" href="#operations--crdt">Operations &amp; CRDT</a></h1>
+<p>All document mutations go through the <code>Operation</code> enum:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>enum Operation {
+    InsertNode { parent_id, index, node },
+    DeleteNode { target_id },
+    MoveNode { target_id, new_parent_id, new_index },
+    InsertText { target_id, offset, text },
+    DeleteText { target_id, offset, length },
+    SetAttributes { target_id, attributes },
+    RemoveAttributes { target_id, keys },
+    SetMetadata { key, value },
+    SetStyle { style },
+    RemoveStyle { style_id },
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="undoredo-1"><a class="header" href="#undoredo-1">Undo/Redo</a></h2>
+<p>Every operation produces an inverse. Applying the inverse undoes the change:</p>
+<pre><code>InsertNode → inverse: DeleteNode (with snapshot)
+InsertText → inverse: DeleteText
+SetAttributes → inverse: SetAttributes (with previous values)
+</code></pre>
+<h2 id="transactions"><a class="header" href="#transactions">Transactions</a></h2>
+<p>Multiple operations can be grouped into a Transaction for atomic undo:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let mut txn = Transaction::with_label("Bold selection");
+txn.push(Operation::set_attributes(run1, bold_attrs));
+txn.push(Operation::set_attributes(run2, bold_attrs));
+doc.apply_transaction(&amp;txn)?;
+// Single undo reverts both
+<span class="boring">}</span></code></pre></pre>
+<h2 id="crdt-fugue"><a class="header" href="#crdt-fugue">CRDT (Fugue)</a></h2>
+<p>The CRDT layer (<code>s1-crdt</code>) uses the Fugue algorithm for text:</p>
+<ul>
+<li>Each character has a unique ID + origin references</li>
+<li>Concurrent inserts produce deterministic interleaving</li>
+<li>State vectors track what each replica has seen</li>
+<li>Convergence guaranteed regardless of operation order</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="format-crates"><a class="header" href="#format-crates">Format Crates</a></h1>
+<p>Each format has its own crate that only depends on <code>s1-model</code>.</p>
+<h2 id="docx-s1-format-docx"><a class="header" href="#docx-s1-format-docx">DOCX (s1-format-docx)</a></h2>
+<p>Reads and writes Office Open XML (ECMA-376):</p>
+<ul>
+<li>Paragraph/run formatting, styles, lists</li>
+<li>Tables (including nested), images, hyperlinks</li>
+<li>Headers/footers, comments, footnotes/endnotes</li>
+<li>Track changes, bookmarks, section properties</li>
+<li>Media deduplication by content hash</li>
+</ul>
+<h2 id="odt-s1-format-odt"><a class="header" href="#odt-s1-format-odt">ODT (s1-format-odt)</a></h2>
+<p>Reads and writes Open Document Format (ODF 1.2):</p>
+<ul>
+<li>Full formatting parity with DOCX</li>
+<li>Automatic styles → node attributes mapping</li>
+<li>Table column parsing with repeat support</li>
+<li>TOC source attributes preserved</li>
+</ul>
+<h2 id="pdf-s1-format-pdf"><a class="header" href="#pdf-s1-format-pdf">PDF (s1-format-pdf)</a></h2>
+<p>Export only (via pdf-writer):</p>
+<ul>
+<li>Font embedding with subsetting</li>
+<li>Proper ToUnicode CMap for text extraction</li>
+<li>JPEG passthrough, PNG decode</li>
+<li>Page layout from s1-layout</li>
+</ul>
+<h2 id="txt--markdown-s1-format-txt-s1-format-md"><a class="header" href="#txt--markdown-s1-format-txt-s1-format-md">TXT &amp; Markdown (s1-format-txt, s1-format-md)</a></h2>
+<ul>
+<li>Plain text: paragraph-per-line</li>
+<li>Markdown: GFM tables, headings, lists, images, code blocks</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="layout-engine"><a class="header" href="#layout-engine">Layout Engine</a></h1>
+<p>The layout engine (<code>s1-layout</code>) paginates documents for PDF export and editor display.</p>
+<h2 id="features"><a class="header" href="#features">Features</a></h2>
+<ul>
+<li>Knuth-Plass line breaking algorithm</li>
+<li>Widow/orphan control</li>
+<li>Text shaping via rustybuzz (pure Rust HarfBuzz)</li>
+<li>Font loading via fontdb with substitution table</li>
+<li>Hyphenation (English) via Knuth-Liang patterns</li>
+<li>BiDi text support via unicode-bidi</li>
+<li>Table layout with column width distribution</li>
+<li>Image placement with dimension constraints</li>
+<li>Margin collapsing (CSS spec-compliant)</li>
+</ul>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>LayoutConfig {
+    page_width: 612.0,   // US Letter (points)
+    page_height: 792.0,
+    margin_top: 72.0,    // 1 inch
+    margin_bottom: 72.0,
+    margin_left: 72.0,
+    margin_right: 72.0,
+    min_orphan_lines: 2,
+    min_widow_lines: 2,
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="performance-1"><a class="header" href="#performance-1">Performance</a></h2>
+<ul>
+<li>Full layout of a 10-page document: ~50ms</li>
+<li>Incremental layout: planned (dirty_from_page field exists)</li>
+<li>Font cache: LRU with 50K entry fallback cache</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="development-setup"><a class="header" href="#development-setup">Development Setup</a></h1>
+<h2 id="prerequisites-2"><a class="header" href="#prerequisites-2">Prerequisites</a></h2>
+<ul>
+<li>Rust 1.88+ (<code>rustup install stable</code>)</li>
+<li>wasm-pack (<code>cargo install wasm-pack</code>)</li>
+<li>Node.js 18+ and npm</li>
+<li>Git</li>
+</ul>
+<h2 id="clone--build"><a class="header" href="#clone--build">Clone &amp; Build</a></h2>
+<pre><code class="language-bash">git clone https://github.com/Rudra-Office/Rudra-Editor.git
+cd s1engine
+
+# Build and test all Rust crates
+cargo build --workspace
+cargo test --workspace
+
+# Build WASM bindings
+make wasm
+
+# Start the editor dev server
+cd editor &amp;&amp; npm install &amp;&amp; npm run dev
+</code></pre>
+<h2 id="verify-setup"><a class="header" href="#verify-setup">Verify Setup</a></h2>
+<pre><code class="language-bash">make check  # Runs fmt + clippy + all tests
+</code></pre>
+<h2 id="project-structure"><a class="header" href="#project-structure">Project Structure</a></h2>
+<pre><code>crates/           Rust library crates (model, ops, formats, etc.)
+ffi/wasm/         WASM bindings
+ffi/c/            C FFI bindings
+editor/           Browser editor (vanilla JS)
+server/           REST API server (Axum)
+packages/         npm packages (SDK, editor, React, Vue, Web Component)
+docs/             Internal documentation and trackers
+docs-site/        Public documentation (mdBook)
+scripts/          Build and utility scripts
+examples/         Example projects
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="architecture-rules"><a class="header" href="#architecture-rules">Architecture Rules</a></h1>
+<p>These are enforced in code review:</p>
+<h2 id="1-document-model-is-sacred"><a class="header" href="#1-document-model-is-sacred">1. Document Model is Sacred</a></h2>
+<p><code>s1-model</code> has <strong>zero external dependencies</strong>. Every node must have a globally unique <code>NodeId(replica_id, counter)</code>. Never expose internal model representation in public API.</p>
+<h2 id="2-all-mutations-via-operations"><a class="header" href="#2-all-mutations-via-operations">2. All Mutations Via Operations</a></h2>
+<p>Never modify the document tree directly. All changes go through <code>Operation</code> → applied via <code>s1-ops</code>. Every operation must implement <code>invert()</code> for undo.</p>
+<h2 id="3-format-isolation"><a class="header" href="#3-format-isolation">3. Format Isolation</a></h2>
+<p>Each format crate only depends on <code>s1-model</code>. Format crates never depend on each other or on <code>s1-ops</code>/<code>s1-layout</code>.</p>
+<h2 id="4-no-panics-in-library-code"><a class="header" href="#4-no-panics-in-library-code">4. No Panics in Library Code</a></h2>
+<p>All public functions return <code>Result&lt;T, Error&gt;</code>. No <code>.unwrap()</code> or <code>.expect()</code> in library code. Tests are fine.</p>
+<h2 id="5-no-unsafe"><a class="header" href="#5-no-unsafe">5. No Unsafe</a></h2>
+<p>Unless absolutely necessary, with a documented <code>// SAFETY:</code> comment.</p>
+<h2 id="6-editor-ui-standards"><a class="header" href="#6-editor-ui-standards">6. Editor UI Standards</a></h2>
+<ul>
+<li>Clean, professional look (follow production-grade UI standards)</li>
+<li>No emojis in UI</li>
+<li>Every button needs a <code>title</code> tooltip</li>
+<li>Use CSS variables, not hardcoded colors</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
+<h2 id="run-tests"><a class="header" href="#run-tests">Run Tests</a></h2>
+<pre><code class="language-bash"># All tests
+cargo test --workspace
+
+# Single crate
+cargo test -p s1-format-docx
+
+# With output
+cargo test -p s1-model -- --nocapture
+</code></pre>
+<h2 id="test-structure"><a class="header" href="#test-structure">Test Structure</a></h2>
+<ul>
+<li>Unit tests: <code>#[cfg(test)] mod tests</code> in each source file</li>
+<li>Integration tests: <code>tests/</code> directory in each crate</li>
+<li>Property-based tests: <code>proptest</code> in s1-model and s1-ops</li>
+<li>Round-trip tests: write → read → compare in format crates</li>
+<li>CRDT tests: convergence and error path tests in s1-crdt</li>
+</ul>
+<h2 id="writing-tests"><a class="header" href="#writing-tests">Writing Tests</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[test]
+fn my_feature_works() {
+    let mut doc = DocumentModel::new();
+    let body_id = doc.body_id().unwrap();
+    // ... setup ...
+    assert_eq!(result, expected);
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="format-round-trip-tests"><a class="header" href="#format-round-trip-tests">Format Round-Trip Tests</a></h2>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[test]
+fn roundtrip_feature() {
+    let mut doc = make_doc_with_feature();
+    let bytes = write(&amp;doc).unwrap();
+    let doc2 = read(&amp;bytes).unwrap();
+    // Verify feature survived round-trip
+    assert_eq!(doc2.feature(), doc.feature());
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="before-submitting"><a class="header" href="#before-submitting">Before Submitting</a></h2>
+<pre><code class="language-bash">cargo test --workspace     # All tests pass
+cargo clippy --workspace -- -D warnings  # No warnings
+cargo fmt --check          # Formatting correct
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="theme/custom.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </div>
+    </body>
+</html>

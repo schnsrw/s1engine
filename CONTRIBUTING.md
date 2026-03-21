@@ -15,7 +15,7 @@ Thank you for your interest in contributing to Rudra Code. This document provide
 
 ```bash
 # Clone the repository
-git clone https://github.com/schnsrw/s1engine.git
+git clone https://github.com/Rudra-Office/Rudra-Editor.git
 cd s1engine
 
 # Build and test
@@ -118,7 +118,7 @@ These are non-negotiable and will be enforced in code review:
 - ES modules, no bundler plugins beyond Vite
 - Clean, professional UI — no bright colors, no emojis in UI
 - Every toolbar button must have a `title` tooltip
-- Match the look of Google Docs / Word Online
+- Follow professional, production-grade UI standards
 
 ## Crate Structure
 

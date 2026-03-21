@@ -1,0 +1,717 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>White-Labeling - Rudra Code Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Open-source document engine SDK in Rust. Read, write, edit, and convert DOCX, ODT, PDF, Markdown with CRDT collaboration and WASM support.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/custom.css">
+
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "ayu" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Rudra Code Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/Rudra-Office/Rudra-Editor" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/Rudra-Office/Rudra-Editor/edit/main/docs-site/src/guides/white-label.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="white-labeling-rudra-office"><a class="header" href="#white-labeling-rudra-office">White-Labeling Rudra Office</a></h1>
+<p>This guide covers how to rebrand, restyle, and configure Rudra Office for your own product. Whether you are embedding the editor in a SaaS platform or shipping it as a standalone product under your own name, every visible element can be customized without modifying the editor source code.</p>
+<hr />
+<h2 id="configuration-overview"><a class="header" href="#configuration-overview">Configuration Overview</a></h2>
+<p>All runtime configuration is provided through the <code>window.S1_CONFIG</code> object in your <code>index.html</code>. The editor reads this object on startup and adjusts its behavior accordingly. You can either set the object before the editor script loads, or merge your overrides into the default:</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = window.S1_CONFIG || {
+    apiUrl: '',
+    relayUrl: '',
+    mode: 'standalone',
+    autoCollab: true,
+    productName: 'Rudra Office',
+    enableCollab: true,
+    enablePdfViewer: true,
+    enableTemplates: true,
+    aiUrl: '',
+    enableAI: true,
+  };
+&lt;/script&gt;
+</code></pre>
+<p>Place this block <strong>before</strong> the editor stylesheet and script tags. Each option is documented in the sections below.</p>
+<hr />
+<h2 id="1-branding"><a class="header" href="#1-branding">1. Branding</a></h2>
+<h3 id="product-name"><a class="header" href="#product-name">Product Name</a></h3>
+<p>Set <code>productName</code> to replace all instances of "Rudra Office" in the UI (title bar, about dialogs, share links):</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    productName: 'Acme Docs',
+  };
+&lt;/script&gt;
+</code></pre>
+<p>Update the HTML <code>&lt;title&gt;</code> tag and the <code>.logo-text</code> element to match:</p>
+<pre><code class="language-html">&lt;title&gt;Acme Docs&lt;/title&gt;
+</code></pre>
+<pre><code class="language-html">&lt;div class="logo"&gt;
+  &lt;img src="/assets/my-logo.svg" alt="Acme" width="28" height="28"&gt;
+  &lt;span class="logo-text"&gt;Acme Docs&lt;/span&gt;
+&lt;/div&gt;
+</code></pre>
+<h3 id="logo"><a class="header" href="#logo">Logo</a></h3>
+<p>Replace the logo image at <code>/assets/logo.svg</code> with your own SVG or PNG. The default logo slot is 28x28 pixels. If your logo requires different dimensions, adjust the <code>width</code> and <code>height</code> attributes on the <code>&lt;img&gt;</code> element inside the <code>.logo</code> container.</p>
+<blockquote>
+<p><strong>Dark mode note:</strong> The editor applies <code>filter: brightness(0) invert(1)</code> to the logo in dark mode so that a dark-on-transparent SVG becomes light. If your logo already handles both themes (e.g., uses <code>currentColor</code>), override this filter:</p>
+<pre><code class="language-css">[data-theme="dark"] .logo img {
+  filter: none;
+}
+</code></pre>
+</blockquote>
+<h3 id="accent-color"><a class="header" href="#accent-color">Accent Color</a></h3>
+<p>The primary brand color is controlled by the <code>--accent</code> CSS custom property. Override it in a <code>&lt;style&gt;</code> block after the editor stylesheet:</p>
+<pre><code class="language-html">&lt;style&gt;
+  :root {
+    --accent: #6200ea;
+    --accent-light: #e8d5ff;
+    --accent-bg: #d1b3ff;
+  }
+&lt;/style&gt;
+</code></pre>
+<p>See the <a href="#2-theme-system">Theme System</a> section for the complete list of properties.</p>
+<h3 id="favicon-and-manifest"><a class="header" href="#favicon-and-manifest">Favicon and Manifest</a></h3>
+<p>Replace these files in your deployment:</p>
+<ul>
+<li><code>/icon-192.svg</code> -- favicon / PWA icon</li>
+<li><code>/manifest.json</code> -- PWA manifest (update <code>name</code>, <code>short_name</code>, <code>icons</code>, <code>theme_color</code>)</li>
+<li>Update <code>&lt;meta name="theme-color" content="#..."&gt;</code> in <code>index.html</code></li>
+</ul>
+<hr />
+<h2 id="2-theme-system"><a class="header" href="#2-theme-system">2. Theme System</a></h2>
+<p>The editor uses CSS custom properties (variables) defined on <code>:root</code> for all visual elements. Override any of these to change the editor's appearance without touching the source CSS.</p>
+<h3 id="light-theme-properties-defaults"><a class="header" href="#light-theme-properties-defaults">Light Theme Properties (defaults)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--bg-app</code></td><td><code>#f8f9fa</code></td><td>Application background (behind the document canvas)</td></tr>
+<tr><td><code>--bg-white</code></td><td><code>#fff</code></td><td>Surface background (panels, cards)</td></tr>
+<tr><td><code>--bg-toolbar</code></td><td><code>#edf2fa</code></td><td>Toolbar and menu bar background</td></tr>
+<tr><td><code>--bg-toolbar-hover</code></td><td><code>#d3e3fd</code></td><td>Toolbar button hover state</td></tr>
+<tr><td><code>--bg-active</code></td><td><code>#c2dbff</code></td><td>Active/pressed toolbar button background</td></tr>
+<tr><td><code>--bg-hover</code></td><td><code>#f1f3f4</code></td><td>General hover background for list items</td></tr>
+<tr><td><code>--accent-bg</code></td><td><code>#c2dbff</code></td><td>Accent background (selection highlights, badges)</td></tr>
+<tr><td><code>--border</code></td><td><code>#c4c7c5</code></td><td>Primary border color</td></tr>
+<tr><td><code>--border-light</code></td><td><code>#dadce0</code></td><td>Subtle border color (dividers, separators)</td></tr>
+<tr><td><code>--text-primary</code></td><td><code>#202124</code></td><td>Primary text color</td></tr>
+<tr><td><code>--text-secondary</code></td><td><code>#5f6368</code></td><td>Secondary text color (labels, descriptions)</td></tr>
+<tr><td><code>--text-muted</code></td><td><code>#80868b</code></td><td>Muted text (placeholders, disabled items)</td></tr>
+<tr><td><code>--accent</code></td><td><code>#1a73e8</code></td><td>Primary accent color (buttons, links, active states)</td></tr>
+<tr><td><code>--accent-light</code></td><td><code>#d2e3fc</code></td><td>Light accent (selected item backgrounds)</td></tr>
+<tr><td><code>--danger</code></td><td><code>#d93025</code></td><td>Error / destructive action color</td></tr>
+<tr><td><code>--success</code></td><td><code>#188038</code></td><td>Success / confirmation color</td></tr>
+</tbody></table>
+</div>
+<h3 id="layout-properties"><a class="header" href="#layout-properties">Layout Properties</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--radius-sm</code></td><td><code>4px</code></td><td>Small border radius (buttons, inputs)</td></tr>
+<tr><td><code>--radius-md</code></td><td><code>8px</code></td><td>Medium border radius (cards, panels, modals)</td></tr>
+<tr><td><code>--font-ui</code></td><td><code>'Google Sans', 'Segoe UI', Roboto, ...</code></td><td>UI font stack</td></tr>
+</tbody></table>
+</div>
+<h3 id="elevation-shadows"><a class="header" href="#elevation-shadows">Elevation (Shadows)</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--shadow-sm</code></td><td><code>0 1px 2px rgba(60,64,67,.3), ...</code></td><td>Toolbar, small dropdowns</td></tr>
+<tr><td><code>--shadow-md</code></td><td><code>0 1px 3px rgba(60,64,67,.3), ...</code></td><td>Panels, menus</td></tr>
+<tr><td><code>--shadow-lg</code></td><td><code>0 1px 3px rgba(60,64,67,.3), ...</code></td><td>Modals, dialogs</td></tr>
+</tbody></table>
+</div>
+<h3 id="z-index-hierarchy"><a class="header" href="#z-index-hierarchy">Z-Index Hierarchy</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Default</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>--z-toolbar</code></td><td><code>100</code></td><td>Toolbar and menu bar</td></tr>
+<tr><td><code>--z-dropdown</code></td><td><code>200</code></td><td>Dropdown menus</td></tr>
+<tr><td><code>--z-sidebar</code></td><td><code>300</code></td><td>Side panels (pages, properties, comments)</td></tr>
+<tr><td><code>--z-modal-backdrop</code></td><td><code>400</code></td><td>Modal backdrop overlay</td></tr>
+<tr><td><code>--z-modal</code></td><td><code>500</code></td><td>Modal dialogs</td></tr>
+<tr><td><code>--z-context-menu</code></td><td><code>600</code></td><td>Right-click context menus</td></tr>
+<tr><td><code>--z-toast</code></td><td><code>700</code></td><td>Toast notifications</td></tr>
+</tbody></table>
+</div>
+<h3 id="example-complete-brand-override"><a class="header" href="#example-complete-brand-override">Example: Complete Brand Override</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #0052cc;
+  --accent-light: #deebff;
+  --accent-bg: #b3d4ff;
+  --bg-toolbar: #f4f5f7;
+  --bg-toolbar-hover: #ebecf0;
+  --bg-active: #b3d4ff;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+</code></pre>
+<hr />
+<h2 id="3-dark-mode"><a class="header" href="#3-dark-mode">3. Dark Mode</a></h2>
+<p>The editor supports three dark mode behaviors:</p>
+<ol>
+<li><strong>Automatic</strong> -- Follows the operating system preference via <code>prefers-color-scheme: dark</code>.</li>
+<li><strong>Manual toggle</strong> -- Users click the dark mode button in the status bar, which sets <code>data-theme="dark"</code> on the <code>&lt;html&gt;</code> element.</li>
+<li><strong>Explicit override</strong> -- You can force a theme on page load.</li>
+</ol>
+<h3 id="how-it-works"><a class="header" href="#how-it-works">How It Works</a></h3>
+<ul>
+<li>The <code>[data-theme="dark"]</code> selector overrides all CSS custom properties with dark values.</li>
+<li>The <code>@media (prefers-color-scheme: dark)</code> block applies the same overrides, gated by <code>:root:not([data-theme="light"])</code> so that an explicit light preference wins.</li>
+<li>The user's choice is persisted in <code>localStorage</code> under the key <code>s1-theme</code>.</li>
+</ul>
+<h3 id="dark-theme-properties"><a class="header" href="#dark-theme-properties">Dark Theme Properties</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Property</th><th>Dark Value</th><th>Light Value</th></tr></thead><tbody>
+<tr><td><code>--bg-app</code></td><td><code>#202124</code></td><td><code>#f8f9fa</code></td></tr>
+<tr><td><code>--bg-white</code></td><td><code>#292a2d</code></td><td><code>#fff</code></td></tr>
+<tr><td><code>--bg-toolbar</code></td><td><code>#35363a</code></td><td><code>#edf2fa</code></td></tr>
+<tr><td><code>--bg-toolbar-hover</code></td><td><code>#44454a</code></td><td><code>#d3e3fd</code></td></tr>
+<tr><td><code>--bg-active</code></td><td><code>#1a3a5c</code></td><td><code>#c2dbff</code></td></tr>
+<tr><td><code>--border</code></td><td><code>#5f6368</code></td><td><code>#c4c7c5</code></td></tr>
+<tr><td><code>--border-light</code></td><td><code>#3c4043</code></td><td><code>#dadce0</code></td></tr>
+<tr><td><code>--text-primary</code></td><td><code>#e8eaed</code></td><td><code>#202124</code></td></tr>
+<tr><td><code>--text-secondary</code></td><td><code>#bdc1c6</code></td><td><code>#5f6368</code></td></tr>
+<tr><td><code>--text-muted</code></td><td><code>#9aa0a6</code></td><td><code>#80868b</code></td></tr>
+<tr><td><code>--accent</code></td><td><code>#8ab4f8</code></td><td><code>#1a73e8</code></td></tr>
+<tr><td><code>--accent-light</code></td><td><code>#1a3a5c</code></td><td><code>#d2e3fc</code></td></tr>
+<tr><td><code>--danger</code></td><td><code>#f28b82</code></td><td><code>#d93025</code></td></tr>
+<tr><td><code>--success</code></td><td><code>#81c995</code></td><td><code>#188038</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="forcing-a-theme-programmatically"><a class="header" href="#forcing-a-theme-programmatically">Forcing a Theme Programmatically</a></h3>
+<pre><code class="language-javascript">// Force dark mode
+document.documentElement.setAttribute('data-theme', 'dark');
+localStorage.setItem('s1-theme', 'dark');
+
+// Force light mode
+document.documentElement.setAttribute('data-theme', 'light');
+localStorage.setItem('s1-theme', 'light');
+
+// Reset to OS preference
+document.documentElement.removeAttribute('data-theme');
+localStorage.removeItem('s1-theme');
+</code></pre>
+<h3 id="providing-custom-dark-theme-colors"><a class="header" href="#providing-custom-dark-theme-colors">Providing Custom Dark Theme Colors</a></h3>
+<p>Override the <code>[data-theme="dark"]</code> selector with your own palette:</p>
+<pre><code class="language-css">[data-theme="dark"] {
+  --bg-app: #1a1a2e;
+  --bg-white: #16213e;
+  --bg-toolbar: #1a1a2e;
+  --accent: #e94560;
+  --accent-light: #3a1528;
+}
+</code></pre>
+<hr />
+<h2 id="4-toolbar-customization"><a class="header" href="#4-toolbar-customization">4. Toolbar Customization</a></h2>
+<p>The toolbar is defined in <code>index.html</code> as a series of <code>&lt;button&gt;</code> and <code>&lt;select&gt;</code> elements with specific IDs. You can show or hide individual toolbar items using CSS, or remove them from the HTML entirely.</p>
+<h3 id="toolbar-button-reference"><a class="header" href="#toolbar-button-reference">Toolbar Button Reference</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>ID</th><th>Function</th><th>Collapsible Class</th></tr></thead><tbody>
+<tr><td><code>fontFamily</code></td><td>Font family dropdown</td><td><code>tb-collapsible-768</code></td></tr>
+<tr><td><code>fontSize</code></td><td>Font size input</td><td><code>tb-collapsible-768</code></td></tr>
+<tr><td><code>btnBold</code></td><td>Bold</td><td>--</td></tr>
+<tr><td><code>btnItalic</code></td><td>Italic</td><td>--</td></tr>
+<tr><td><code>btnUnderline</code></td><td>Underline</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnStrike</code></td><td>Strikethrough</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnFormatPainter</code></td><td>Format Painter</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnSuperscript</code></td><td>Superscript</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnSubscript</code></td><td>Subscript</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>colorPicker</code></td><td>Text color</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>highlightPicker</code></td><td>Highlight color</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnClearFormat</code></td><td>Clear formatting</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnAlignL</code></td><td>Align left</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignC</code></td><td>Align center</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignR</code></td><td>Align right</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnAlignJ</code></td><td>Justify</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>lineSpacing</code></td><td>Line spacing dropdown</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnOutdent</code></td><td>Decrease indent</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnIndent</code></td><td>Increase indent</td><td><code>tb-collapsible-1024</code></td></tr>
+<tr><td><code>btnBulletList</code></td><td>Bulleted list</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnNumberList</code></td><td>Numbered list</td><td><code>tb-collapsible-480</code></td></tr>
+<tr><td><code>btnInsertMenu</code></td><td>Insert dropdown menu</td><td>--</td></tr>
+</tbody></table>
+</div>
+<h3 id="hiding-toolbar-items-via-css"><a class="header" href="#hiding-toolbar-items-via-css">Hiding Toolbar Items via CSS</a></h3>
+<pre><code class="language-css">/* Hide the strikethrough button */
+#btnStrike { display: none !important; }
+
+/* Hide the format painter */
+#btnFormatPainter { display: none !important; }
+
+/* Hide the entire font selection area */
+#fontFamily, #fontSize { display: none !important; }
+</code></pre>
+<h3 id="responsive-collapsing"><a class="header" href="#responsive-collapsing">Responsive Collapsing</a></h3>
+<p>Toolbar items use <code>tb-collapsible-*</code> classes to automatically hide at specific viewport widths:</p>
+<ul>
+<li><code>tb-collapsible-1024</code> -- Hidden below 1024px</li>
+<li><code>tb-collapsible-768</code> -- Hidden below 768px</li>
+<li><code>tb-collapsible-480</code> -- Hidden below 480px</li>
+</ul>
+<p>You can adjust these breakpoints or assign different classes to control which items collapse first.</p>
+<h3 id="menu-bar-items"><a class="header" href="#menu-bar-items">Menu Bar Items</a></h3>
+<p>The menu bar (File, Edit, View, Insert, Format, Review, Tools) can be customized the same way:</p>
+<pre><code class="language-css">/* Hide the Review menu entirely */
+[data-menu="reviewMenu"] { display: none !important; }
+
+/* Hide the Tools menu */
+[data-menu="toolsMenu"] { display: none !important; }
+</code></pre>
+<hr />
+<h2 id="5-feature-flags"><a class="header" href="#5-feature-flags">5. Feature Flags</a></h2>
+<p>Feature flags in <code>S1_CONFIG</code> control the availability of major features. When a flag is set to <code>false</code>, the associated UI elements are hidden and the underlying functionality is not initialized.</p>
+<h3 id="available-flags"><a class="header" href="#available-flags">Available Flags</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Flag</th><th>Default</th><th>Effect</th></tr></thead><tbody>
+<tr><td><code>enableCollab</code></td><td><code>true</code></td><td>Enables the Share button, collaboration status indicator, and real-time editing.</td></tr>
+<tr><td><code>enablePdfViewer</code></td><td><code>true</code></td><td>Enables the built-in PDF viewer tab for opening PDF files.</td></tr>
+<tr><td><code>enableTemplates</code></td><td><code>true</code></td><td>Enables "New from Template" and "Save as Template" in the File menu.</td></tr>
+<tr><td><code>enableAI</code></td><td><code>true</code></td><td>Enables the AI assistant panel. Requires <code>aiUrl</code> to point to a running LLM endpoint.</td></tr>
+</tbody></table>
+</div>
+<h3 id="disabling-features"><a class="header" href="#disabling-features">Disabling Features</a></h3>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    enableCollab: false,
+    enableAI: false,
+    enableTemplates: false,
+  };
+&lt;/script&gt;
+</code></pre>
+<h3 id="ai-configuration"><a class="header" href="#ai-configuration">AI Configuration</a></h3>
+<p>The AI assistant connects to a local LLM sidecar (e.g., llama.cpp). Set <code>aiUrl</code> to the base URL of the sidecar and <code>enableAI</code> to <code>true</code>:</p>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    enableAI: true,
+    aiUrl: 'http://localhost:8081',
+  };
+&lt;/script&gt;
+</code></pre>
+<p>When <code>enableAI</code> is <code>false</code> or <code>aiUrl</code> is empty, the AI panel and its toolbar entry are not rendered.</p>
+<hr />
+<h2 id="6-custom-fonts"><a class="header" href="#6-custom-fonts">6. Custom Fonts</a></h2>
+<p>The font family dropdown is defined in <code>index.html</code> as a <code>&lt;select&gt;</code> element with id <code>fontFamily</code>. You can modify the available fonts by editing the <code>&lt;option&gt;</code> list directly.</p>
+<h3 id="default-font-list"><a class="header" href="#default-font-list">Default Font List</a></h3>
+<pre><code>Arial, Times New Roman, Georgia, Courier New, Verdana,
+Trebuchet MS, Garamond, Palatino, Tahoma, Comic Sans MS
+</code></pre>
+<h3 id="adding-custom-fonts"><a class="header" href="#adding-custom-fonts">Adding Custom Fonts</a></h3>
+<ol>
+<li>Load the font via a <code>&lt;link&gt;</code> tag or <code>@font-face</code> rule:</li>
+</ol>
+<pre><code class="language-html">&lt;link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&amp;display=swap" rel="stylesheet"&gt;
+</code></pre>
+<ol start="2">
+<li>Add the option to the <code>fontFamily</code> select in <code>index.html</code>:</li>
+</ol>
+<pre><code class="language-html">&lt;select id="fontFamily" ...&gt;
+  &lt;!-- existing options --&gt;
+  &lt;option value="Lora" style="font-family:Lora"&gt;Lora&lt;/option&gt;
+&lt;/select&gt;
+</code></pre>
+<h3 id="replacing-the-entire-font-list"><a class="header" href="#replacing-the-entire-font-list">Replacing the Entire Font List</a></h3>
+<p>Remove all existing <code>&lt;option&gt;</code> elements and add your own. Keep the first option as the default:</p>
+<pre><code class="language-html">&lt;select id="fontFamily" ...&gt;
+  &lt;option value=""&gt;Default&lt;/option&gt;
+  &lt;option value="Inter" style="font-family:Inter"&gt;Inter&lt;/option&gt;
+  &lt;option value="Source Serif Pro" style="font-family:'Source Serif Pro'"&gt;Source Serif Pro&lt;/option&gt;
+  &lt;option value="Fira Code" style="font-family:'Fira Code'"&gt;Fira Code&lt;/option&gt;
+&lt;/select&gt;
+</code></pre>
+<h3 id="changing-the-ui-font"><a class="header" href="#changing-the-ui-font">Changing the UI Font</a></h3>
+<p>The editor UI font is controlled by the <code>--font-ui</code> custom property:</p>
+<pre><code class="language-css">:root {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+</code></pre>
+<p>This affects all toolbar labels, menus, dialogs, and status bar text. It does not affect the document content font.</p>
+<hr />
+<h2 id="7-locale--i18n"><a class="header" href="#7-locale--i18n">7. Locale / i18n</a></h2>
+<p>Internationalization support is planned for a future release. The current architecture is prepared for it:</p>
+<ul>
+<li>All user-facing strings in the toolbar, menus, and dialogs are defined in the HTML and can be replaced.</li>
+<li>Tooltip text is set via <code>title</code> attributes on every interactive element.</li>
+<li>Right-to-left (RTL) layout support is available through the BiDi text processing in the engine.</li>
+</ul>
+<h3 id="preparing-for-i18n-today"><a class="header" href="#preparing-for-i18n-today">Preparing for i18n Today</a></h3>
+<p>If you need to localize the editor before the official i18n module ships, you can:</p>
+<ol>
+<li><strong>Replace HTML strings</strong> -- Edit <code>index.html</code> to translate menu labels, button text, and tooltips.</li>
+<li><strong>Override at runtime</strong> -- Use JavaScript to walk the DOM and replace text content after the editor loads:</li>
+</ol>
+<pre><code class="language-javascript">document.addEventListener('DOMContentLoaded', () =&gt; {
+  document.querySelector('#btnBold').title = 'Gras (Ctrl+B)';
+  document.querySelector('[data-menu="fileMenu"] .app-menu-btn').textContent = 'Fichier';
+  // ... other translations
+});
+</code></pre>
+<ol start="3">
+<li><strong>Use a translation map</strong> -- Maintain a JSON object mapping element IDs/selectors to translated strings, and apply them in a loop.</li>
+</ol>
+<hr />
+<h2 id="8-css-override-examples"><a class="header" href="#8-css-override-examples">8. CSS Override Examples</a></h2>
+<p>All customizations below should be placed in a <code>&lt;style&gt;</code> block after the editor stylesheet link, or in a separate CSS file loaded after <code>styles.css</code>.</p>
+<h3 id="change-the-accent-color-to-purple"><a class="header" href="#change-the-accent-color-to-purple">Change the Accent Color to Purple</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #7c3aed;
+  --accent-light: #ede9fe;
+  --accent-bg: #c4b5fd;
+}
+[data-theme="dark"] {
+  --accent: #a78bfa;
+  --accent-light: #2e1a5e;
+}
+</code></pre>
+<h3 id="rounded-toolbar-buttons"><a class="header" href="#rounded-toolbar-buttons">Rounded Toolbar Buttons</a></h3>
+<pre><code class="language-css">.tb-btn {
+  border-radius: 8px !important;
+}
+</code></pre>
+<h3 id="hide-the-status-bar-word-count"><a class="header" href="#hide-the-status-bar-word-count">Hide the Status Bar Word Count</a></h3>
+<pre><code class="language-css">.status-bar .word-count {
+  display: none;
+}
+</code></pre>
+<h3 id="custom-scrollbar-styling"><a class="header" href="#custom-scrollbar-styling">Custom Scrollbar Styling</a></h3>
+<pre><code class="language-css">/* Webkit browsers */
+.canvas::-webkit-scrollbar {
+  width: 8px;
+}
+.canvas::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+.canvas::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.canvas::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+</code></pre>
+<h3 id="compact-toolbar-reduced-height"><a class="header" href="#compact-toolbar-reduced-height">Compact Toolbar (Reduced Height)</a></h3>
+<pre><code class="language-css">.toolbar {
+  padding: 2px 8px !important;
+  min-height: 32px !important;
+}
+.tb-btn {
+  width: 28px !important;
+  height: 28px !important;
+}
+.tb-btn .msi {
+  font-size: 18px !important;
+}
+</code></pre>
+<h3 id="hide-the-ruler"><a class="header" href="#hide-the-ruler">Hide the Ruler</a></h3>
+<pre><code class="language-css">.ruler {
+  display: none !important;
+}
+</code></pre>
+<h3 id="full-width-document-no-page-margins"><a class="header" href="#full-width-document-no-page-margins">Full-Width Document (No Page Margins)</a></h3>
+<pre><code class="language-css">.doc-page {
+  max-width: 100% !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+</code></pre>
+<h3 id="custom-modal-styling"><a class="header" href="#custom-modal-styling">Custom Modal Styling</a></h3>
+<pre><code class="language-css">.modal {
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+.modal-header {
+  border-bottom: 1px solid var(--border-light);
+}
+</code></pre>
+<h3 id="hide-specific-menu-items"><a class="header" href="#hide-specific-menu-items">Hide Specific Menu Items</a></h3>
+<pre><code class="language-css">/* Hide "Export as ODT" from the File menu */
+[data-fmt="odt"] { display: none !important; }
+
+/* Hide the Templates menu entries */
+#btnTemplate, #btnSaveTemplate { display: none !important; }
+
+/* Hide the collaboration Share button */
+#btnShare { display: none !important; }
+</code></pre>
+<hr />
+<h2 id="9-integration-mode"><a class="header" href="#9-integration-mode">9. Integration Mode</a></h2>
+<p>The <code>mode</code> configuration option controls how the editor behaves within a host application.</p>
+<h3 id="standalone-mode-default"><a class="header" href="#standalone-mode-default">Standalone Mode (Default)</a></h3>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  mode: 'standalone',
+};
+</code></pre>
+<p>In standalone mode, the editor runs as a full-page application with its own file management, title bar, and menu system. This is the default for deployments where the editor is the primary application.</p>
+<h3 id="integrated-mode"><a class="header" href="#integrated-mode">Integrated Mode</a></h3>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  mode: 'integrated',
+  apiUrl: 'https://your-app.com/api/v1',
+  relayUrl: 'wss://your-app.com/ws/collab',
+};
+</code></pre>
+<p>In integrated mode, the editor is designed to be embedded within a larger application. Use this when:</p>
+<ul>
+<li>The editor is loaded inside an <code>&lt;iframe&gt;</code> within your application.</li>
+<li>File open/save operations are handled by your host application via the API.</li>
+<li>Collaboration is managed through your own WebSocket relay.</li>
+</ul>
+<h3 id="embedding-in-an-iframe"><a class="header" href="#embedding-in-an-iframe">Embedding in an iframe</a></h3>
+<pre><code class="language-html">&lt;iframe
+  src="https://editor.your-app.com?room=doc-123"
+  style="width: 100%; height: 100vh; border: none;"
+  allow="clipboard-read; clipboard-write"
+&gt;&lt;/iframe&gt;
+</code></pre>
+<h3 id="configuring-the-api-endpoint"><a class="header" href="#configuring-the-api-endpoint">Configuring the API Endpoint</a></h3>
+<p>When <code>apiUrl</code> is set, the editor uses it for document CRUD operations and format conversion:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  apiUrl: 'https://api.your-app.com/v1',
+};
+</code></pre>
+<h3 id="configuring-the-collaboration-relay"><a class="header" href="#configuring-the-collaboration-relay">Configuring the Collaboration Relay</a></h3>
+<p>When <code>relayUrl</code> is set along with <code>autoCollab: true</code>, the editor automatically connects to the WebSocket relay when a <code>room</code> parameter is present in the URL:</p>
+<pre><code class="language-javascript">window.S1_CONFIG = {
+  ...window.S1_CONFIG,
+  relayUrl: 'wss://collab.your-app.com/ws',
+  autoCollab: true,
+};
+</code></pre>
+<hr />
+<h2 id="10-removing-branding"><a class="header" href="#10-removing-branding">10. Removing Branding</a></h2>
+<p>For commercial licensees with a white-label agreement, you can fully remove Rudra branding.</p>
+<h3 id="step-1-replace-visual-assets"><a class="header" href="#step-1-replace-visual-assets">Step 1: Replace Visual Assets</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>File</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>/assets/logo.svg</code></td><td>Title bar logo</td></tr>
+<tr><td><code>/icon-192.svg</code></td><td>Favicon and PWA icon</td></tr>
+<tr><td><code>/manifest.json</code></td><td>PWA name, icons, theme color</td></tr>
+</tbody></table>
+</div>
+<h3 id="step-2-update-html"><a class="header" href="#step-2-update-html">Step 2: Update HTML</a></h3>
+<p>In <code>index.html</code>, update these elements:</p>
+<pre><code class="language-html">&lt;!-- Page title --&gt;
+&lt;title&gt;Your Product Name&lt;/title&gt;
+
+&lt;!-- Theme color --&gt;
+&lt;meta name="theme-color" content="#your-brand-color"&gt;
+
+&lt;!-- Logo container --&gt;
+&lt;div class="logo"&gt;
+  &lt;img src="/assets/your-logo.svg" alt="Your Brand" width="28" height="28"&gt;
+  &lt;span class="logo-text"&gt;Your Product Name&lt;/span&gt;
+&lt;/div&gt;
+</code></pre>
+<h3 id="step-3-set-the-config"><a class="header" href="#step-3-set-the-config">Step 3: Set the Config</a></h3>
+<pre><code class="language-html">&lt;script&gt;
+  window.S1_CONFIG = {
+    ...window.S1_CONFIG,
+    productName: 'Your Product Name',
+  };
+&lt;/script&gt;
+</code></pre>
+<h3 id="step-4-override-brand-colors"><a class="header" href="#step-4-override-brand-colors">Step 4: Override Brand Colors</a></h3>
+<pre><code class="language-css">:root {
+  --accent: #your-brand-color;
+  --accent-light: #your-brand-light;
+  --accent-bg: #your-brand-bg;
+}
+</code></pre>
+<h3 id="step-5-remove-powered-by-if-present"><a class="header" href="#step-5-remove-powered-by-if-present">Step 5: Remove "Powered By" (if present)</a></h3>
+<p>If any "Powered by Rudra" or attribution text is displayed, commercial licensees may remove it per the terms of their license agreement. Search the HTML for any such references and remove or replace them.</p>
+<h3 id="licensing-note"><a class="header" href="#licensing-note">Licensing Note</a></h3>
+<p>Rudra Office is licensed under AGPL-3.0. White-label redistribution without Rudra branding requires a separate commercial license. Contact the maintainers for licensing terms.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../guides/collaboration.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../guides/configuration.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../guides/collaboration.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../guides/configuration.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/custom.js"></script>
+
+
+    </div>
+    </body>
+</html>

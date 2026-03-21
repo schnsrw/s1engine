@@ -683,9 +683,24 @@ export function switchView(view) {
   $('toolbar').classList.toggle('show', view === 'editor');
   const menubar = $('appMenubar');
   if (menubar) menubar.classList.toggle('show', view === 'editor');
+  // Show spreadsheet-specific menu bar and toolbar only in spreadsheet view
+  const ssMenubar = $('ssMenubar');
+  if (ssMenubar) ssMenubar.style.display = (view === 'spreadsheet') ? 'flex' : 'none';
+  const ssToolbar = $('ssToolbar');
+  if (ssToolbar) ssToolbar.style.display = (view === 'spreadsheet') ? 'flex' : 'none';
   // Hide ruler in non-editor modes
   const ruler = $('ruler');
   if (ruler) ruler.style.display = (view !== 'editor') ? 'none' : '';
+  // Hide doc-only title bar buttons (pages panel, properties, comments, history) in non-editor modes
+  document.querySelectorAll('.doc-only-btn').forEach(b => {
+    b.style.display = (view === 'editor') ? '' : 'none';
+  });
+  // Swap logo based on active view
+  const logoImg = document.querySelector('.logo img');
+  if (logoImg) {
+    const logoMap = { editor: '/assets/logo-doc.svg', spreadsheet: '/assets/logo-sheet.svg', pdf: '/assets/logo-doc.svg' };
+    logoImg.src = logoMap[view] || '/assets/logo.svg';
+  }
   // Update legacy tab bar (hidden) and new status bar view buttons
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.querySelectorAll('.status-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));

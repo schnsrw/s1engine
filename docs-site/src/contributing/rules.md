@@ -24,7 +24,7 @@ Unless absolutely necessary, with a documented `// SAFETY:` comment.
 
 ## 6. Editor UI Standards
 
-- Clean, professional look (match Google Docs / Word Online)
+- Clean, professional look following production-grade UI standards
 - No emojis in UI
 - Every button needs a `title` tooltip
 - Use CSS variables, not hardcoded colors

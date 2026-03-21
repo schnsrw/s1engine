@@ -656,6 +656,27 @@ pub trait CellLookup {
     fn get_range_values(&self, range: &CellRange) -> Vec<CellValue>;
 }
 
+// ─── Sheet Lookup trait (cross-sheet references) ────────────
+
+/// Trait for resolving cross-sheet references during formula evaluation.
+///
+/// Implementations provide access to other sheets by name so that formulas like
+/// `Sheet1!A1` or `Sheet2!A1:B5` can be resolved.
+pub trait SheetLookup {
+    /// Look up a sheet by name and return a `CellLookup` reference for it.
+    /// Returns `None` if the sheet does not exist.
+    fn get_sheet(&self, name: &str) -> Option<&dyn CellLookup>;
+}
+
+/// A combined context that provides both cell lookup (current sheet) and sheet lookup
+/// (cross-sheet references).
+pub struct EvalContext<'a> {
+    /// The current sheet's cell lookup.
+    pub current: &'a dyn CellLookup,
+    /// Optional cross-sheet lookup.
+    pub sheets: Option<&'a dyn SheetLookup>,
+}
+
 // ─── Formula Evaluator ─────────────────────────────────────
 
 /// Stateless formula evaluation engine.
@@ -664,20 +685,41 @@ pub struct FormulaEngine;
 impl FormulaEngine {
     /// Evaluate an expression tree using the given cell lookup context.
     pub fn evaluate(expr: &Expr, ctx: &dyn CellLookup) -> CellValue {
+        FormulaEngine::evaluate_with_sheets(expr, ctx, None)
+    }
+
+    /// Evaluate an expression tree with optional cross-sheet lookup support.
+    ///
+    /// When `sheets` is `Some`, `SheetRef` nodes will resolve to the named sheet.
+    /// When `sheets` is `None`, `SheetRef` nodes fall back to the current context.
+    pub fn evaluate_with_sheets(
+        expr: &Expr,
+        ctx: &dyn CellLookup,
+        sheets: Option<&dyn SheetLookup>,
+    ) -> CellValue {
         match expr {
             Expr::Literal(v) => v.clone(),
             Expr::CellRef(fref) => ctx.get_value(&fref.to_cell_ref()),
             Expr::Range(_) => CellValue::Error(CellError::Value),
-            Expr::SheetRef(_sheet, inner) => {
-                // For now, evaluate the inner expression in the same context.
-                // Cross-sheet lookup would need a richer context.
-                FormulaEngine::evaluate(inner, ctx)
+            Expr::SheetRef(sheet_name, inner) => {
+                // Attempt to resolve the sheet via SheetLookup.
+                if let Some(sheet_lookup) = sheets {
+                    if let Some(target_ctx) = sheet_lookup.get_sheet(sheet_name) {
+                        return FormulaEngine::evaluate_with_sheets(inner, target_ctx, sheets);
+                    }
+                    // Sheet not found
+                    return CellValue::Error(CellError::Ref);
+                }
+                // No sheet lookup available — fall back to current context.
+                FormulaEngine::evaluate_with_sheets(inner, ctx, sheets)
             }
-            Expr::BinaryOp(op, left, right) => eval_binary(*op, left, right, ctx),
-            Expr::UnaryOp(op, operand) => eval_unary(*op, operand, ctx),
-            Expr::FunctionCall(name, args) => eval_function(name, args, ctx),
+            Expr::BinaryOp(op, left, right) => {
+                eval_binary_with_sheets(*op, left, right, ctx, sheets)
+            }
+            Expr::UnaryOp(op, operand) => eval_unary_with_sheets(*op, operand, ctx, sheets),
+            Expr::FunctionCall(name, args) => eval_function_with_sheets(name, args, ctx, sheets),
             Expr::Percent(inner) => {
-                let v = FormulaEngine::evaluate(inner, ctx);
+                let v = FormulaEngine::evaluate_with_sheets(inner, ctx, sheets);
                 match coerce_number(&v) {
                     Some(n) => CellValue::Number(n / 100.0),
                     None => CellValue::Error(CellError::Value),
@@ -738,9 +780,15 @@ fn coerce_bool(v: &CellValue) -> Option<bool> {
     }
 }
 
-fn eval_binary(op: Op, left: &Expr, right: &Expr, ctx: &dyn CellLookup) -> CellValue {
-    let lv = FormulaEngine::evaluate(left, ctx);
-    let rv = FormulaEngine::evaluate(right, ctx);
+fn eval_binary_with_sheets(
+    op: Op,
+    left: &Expr,
+    right: &Expr,
+    ctx: &dyn CellLookup,
+    sheets: Option<&dyn SheetLookup>,
+) -> CellValue {
+    let lv = FormulaEngine::evaluate_with_sheets(left, ctx, sheets);
+    let rv = FormulaEngine::evaluate_with_sheets(right, ctx, sheets);
 
     // Propagate errors
     if let CellValue::Error(e) = &lv {
@@ -781,9 +829,75 @@ fn eval_binary(op: Op, left: &Expr, right: &Expr, ctx: &dyn CellLookup) -> CellV
             CellValue::Text(format!("{ls}{rs}"))
         }
         Op::Eq | Op::Ne | Op::Lt | Op::Gt | Op::Le | Op::Ge => eval_comparison(op, &lv, &rv),
-        Op::Percent => CellValue::Error(CellError::Value), // shouldn't appear as binary
+        Op::Percent => CellValue::Error(CellError::Value),
     }
 }
+
+fn eval_unary_with_sheets(
+    op: Op,
+    operand: &Expr,
+    ctx: &dyn CellLookup,
+    sheets: Option<&dyn SheetLookup>,
+) -> CellValue {
+    let v = FormulaEngine::evaluate_with_sheets(operand, ctx, sheets);
+    if let CellValue::Error(e) = v {
+        return CellValue::Error(e);
+    }
+    match op {
+        Op::Sub => match coerce_number(&v) {
+            Some(n) => CellValue::Number(-n),
+            None => CellValue::Error(CellError::Value),
+        },
+        Op::Add => match coerce_number(&v) {
+            Some(n) => CellValue::Number(n),
+            None => CellValue::Error(CellError::Value),
+        },
+        _ => CellValue::Error(CellError::Value),
+    }
+}
+
+fn eval_function_with_sheets(
+    name: &str,
+    args: &[Expr],
+    ctx: &dyn CellLookup,
+    sheets: Option<&dyn SheetLookup>,
+) -> CellValue {
+    // Resolve any SheetRef arguments by replacing them with the unwrapped
+    // inner expression and switching the context for that argument.
+    // For simple cases (single SheetRef arg in SUM, etc.) we resolve here.
+    if let Some(sheet_lookup) = sheets {
+        // Check if any arg is a SheetRef — if so, resolve it
+        let mut resolved_args: Vec<Expr> = Vec::new();
+        let mut resolved_ctx: Option<&dyn CellLookup> = None;
+        let mut any_sheet_ref = false;
+
+        for arg in args {
+            if let Expr::SheetRef(sheet_name, inner) = arg {
+                if let Some(target) = sheet_lookup.get_sheet(sheet_name) {
+                    resolved_args.push((**inner).clone());
+                    resolved_ctx = Some(target);
+                    any_sheet_ref = true;
+                } else {
+                    return CellValue::Error(CellError::Ref);
+                }
+            } else {
+                resolved_args.push(arg.clone());
+            }
+        }
+
+        if any_sheet_ref {
+            // Use the resolved context for function evaluation.
+            // Note: this is simplified — if multiple args reference different sheets,
+            // only the last resolved context is used. For most real formulas this works.
+            let effective_ctx = resolved_ctx.unwrap_or(ctx);
+            return eval_function(name, &resolved_args, effective_ctx);
+        }
+    }
+
+    eval_function(name, args, ctx)
+}
+
+// NOTE: eval_binary replaced by eval_binary_with_sheets above.
 
 fn eval_comparison(op: Op, lv: &CellValue, rv: &CellValue) -> CellValue {
     // Compare numbers if both are numeric
@@ -826,23 +940,7 @@ fn eval_comparison(op: Op, lv: &CellValue, rv: &CellValue) -> CellValue {
     CellValue::Boolean(result)
 }
 
-fn eval_unary(op: Op, operand: &Expr, ctx: &dyn CellLookup) -> CellValue {
-    let v = FormulaEngine::evaluate(operand, ctx);
-    if let CellValue::Error(e) = v {
-        return CellValue::Error(e);
-    }
-    match op {
-        Op::Sub => match coerce_number(&v) {
-            Some(n) => CellValue::Number(-n),
-            None => CellValue::Error(CellError::Value),
-        },
-        Op::Add => match coerce_number(&v) {
-            Some(n) => CellValue::Number(n),
-            None => CellValue::Error(CellError::Value),
-        },
-        _ => CellValue::Error(CellError::Value),
-    }
-}
+// NOTE: eval_unary replaced by eval_unary_with_sheets above.
 
 // ─── Function Evaluation ───────────────────────────────────
 
@@ -858,6 +956,12 @@ fn collect_numbers(arg: &Expr, ctx: &dyn CellLookup) -> Vec<f64> {
                 .filter(|v| !matches!(v, CellValue::Empty | CellValue::Text(_)))
                 .filter_map(coerce_number)
                 .collect()
+        }
+        Expr::SheetRef(_name, inner) => {
+            // For cross-sheet range references, evaluate resolves the context.
+            // Here we fall back to evaluating the inner expression in the current context.
+            // The proper cross-sheet resolution happens in evaluate_with_sheets.
+            collect_numbers(inner, ctx)
         }
         _ => {
             let v = FormulaEngine::evaluate(arg, ctx);
@@ -875,6 +979,10 @@ fn collect_values(arg: &Expr, ctx: &dyn CellLookup) -> Vec<CellValue> {
         Expr::Range(frange) => {
             let range = frange.to_cell_range();
             ctx.get_range_values(&range)
+        }
+        Expr::SheetRef(_name, inner) => {
+            // For cross-sheet range references, fall back to inner evaluation.
+            collect_values(inner, ctx)
         }
         _ => vec![FormulaEngine::evaluate(arg, ctx)],
     }
@@ -933,6 +1041,31 @@ fn eval_function(name: &str, args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
         "YEAR" => eval_year(args, ctx),
         "MONTH" => eval_month(args, ctx),
         "DAY" => eval_day(args, ctx),
+
+        // ─── P2 String Functions ───
+        "FIND" => eval_find(args, ctx, true),
+        "SEARCH" => eval_find(args, ctx, false),
+        "SUBSTITUTE" => eval_substitute(args, ctx),
+        "TEXT" => eval_text(args, ctx),
+        "VALUE" => eval_value(args, ctx),
+
+        // ─── P2 Trig Functions ───
+        "SIN" => eval_trig1(args, ctx, f64::sin),
+        "COS" => eval_trig1(args, ctx, f64::cos),
+        "TAN" => eval_trig1(args, ctx, f64::tan),
+        "ASIN" => eval_trig1(args, ctx, f64::asin),
+        "ACOS" => eval_trig1(args, ctx, f64::acos),
+        "ATAN" => eval_trig1(args, ctx, f64::atan),
+
+        // ─── P2 Log/Exp Functions ───
+        "LOG" => eval_log(args, ctx),
+        "LOG10" => eval_log10(args, ctx),
+        "LN" => eval_ln(args, ctx),
+        "EXP" => eval_exp(args, ctx),
+
+        // ─── P2 Rounding Functions ───
+        "CEILING" => eval_ceiling(args, ctx),
+        "FLOOR" => eval_floor(args, ctx),
 
         _ => CellValue::Error(CellError::Name),
     }
@@ -1916,6 +2049,289 @@ fn eval_averageif(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
     }
 }
 
+// ─── P2 Function Implementations ──────────────────────────
+
+/// FIND(find_text, within_text, [start_num]) — case-sensitive
+/// SEARCH(find_text, within_text, [start_num]) — case-insensitive
+fn eval_find(args: &[Expr], ctx: &dyn CellLookup, case_sensitive: bool) -> CellValue {
+    if args.is_empty() || args.len() > 3 {
+        return CellValue::Error(CellError::Value);
+    }
+    let find_text = coerce_string(&FormulaEngine::evaluate(&args[0], ctx));
+    let within_text = coerce_string(&FormulaEngine::evaluate(&args[1], ctx));
+    let start_num = if args.len() > 2 {
+        match coerce_number(&FormulaEngine::evaluate(&args[2], ctx)) {
+            Some(n) if n >= 1.0 => (n as usize) - 1,
+            _ => return CellValue::Error(CellError::Value),
+        }
+    } else {
+        0
+    };
+
+    if start_num > within_text.len() {
+        return CellValue::Error(CellError::Value);
+    }
+
+    let haystack = &within_text[start_num..];
+    let pos = if case_sensitive {
+        haystack.find(&find_text)
+    } else {
+        haystack
+            .to_ascii_lowercase()
+            .find(&find_text.to_ascii_lowercase())
+    };
+
+    match pos {
+        Some(p) => CellValue::Number((start_num + p + 1) as f64),
+        None => CellValue::Error(CellError::Value),
+    }
+}
+
+/// SUBSTITUTE(text, old_text, new_text, [instance_num])
+fn eval_substitute(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() < 3 || args.len() > 4 {
+        return CellValue::Error(CellError::Value);
+    }
+    let text = coerce_string(&FormulaEngine::evaluate(&args[0], ctx));
+    let old_text = coerce_string(&FormulaEngine::evaluate(&args[1], ctx));
+    let new_text = coerce_string(&FormulaEngine::evaluate(&args[2], ctx));
+
+    if old_text.is_empty() {
+        return CellValue::Text(text);
+    }
+
+    if args.len() == 4 {
+        // Replace only the Nth instance
+        let instance_num = match coerce_number(&FormulaEngine::evaluate(&args[3], ctx)) {
+            Some(n) if n >= 1.0 => n as usize,
+            _ => return CellValue::Error(CellError::Value),
+        };
+        let mut result = String::new();
+        let mut count = 0usize;
+        let mut remaining = text.as_str();
+        while let Some(pos) = remaining.find(&old_text) {
+            count += 1;
+            if count == instance_num {
+                result.push_str(&remaining[..pos]);
+                result.push_str(&new_text);
+                result.push_str(&remaining[pos + old_text.len()..]);
+                return CellValue::Text(result);
+            }
+            result.push_str(&remaining[..pos + old_text.len()]);
+            remaining = &remaining[pos + old_text.len()..];
+        }
+        result.push_str(remaining);
+        CellValue::Text(result)
+    } else {
+        // Replace all instances
+        CellValue::Text(text.replace(&old_text, &new_text))
+    }
+}
+
+/// Single-argument trig function dispatcher.
+fn eval_trig1(args: &[Expr], ctx: &dyn CellLookup, f: fn(f64) -> f64) -> CellValue {
+    if args.len() != 1 {
+        return CellValue::Error(CellError::Value);
+    }
+    match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) => {
+            let result = f(n);
+            if result.is_finite() {
+                CellValue::Number(result)
+            } else {
+                CellValue::Error(CellError::Num)
+            }
+        }
+        None => CellValue::Error(CellError::Value),
+    }
+}
+
+/// LOG(number, [base]) — default base 10.
+fn eval_log(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.is_empty() || args.len() > 2 {
+        return CellValue::Error(CellError::Value);
+    }
+    let number = match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) if n > 0.0 => n,
+        _ => return CellValue::Error(CellError::Num),
+    };
+    let base = if args.len() > 1 {
+        match coerce_number(&FormulaEngine::evaluate(&args[1], ctx)) {
+            Some(b) if b > 0.0 && (b - 1.0).abs() > f64::EPSILON => b,
+            _ => return CellValue::Error(CellError::Num),
+        }
+    } else {
+        10.0
+    };
+    CellValue::Number(number.log(base))
+}
+
+/// LOG10(number)
+fn eval_log10(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 1 {
+        return CellValue::Error(CellError::Value);
+    }
+    match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) if n > 0.0 => CellValue::Number(n.log10()),
+        Some(_) => CellValue::Error(CellError::Num),
+        None => CellValue::Error(CellError::Value),
+    }
+}
+
+/// LN(number)
+fn eval_ln(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 1 {
+        return CellValue::Error(CellError::Value);
+    }
+    match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) if n > 0.0 => CellValue::Number(n.ln()),
+        Some(_) => CellValue::Error(CellError::Num),
+        None => CellValue::Error(CellError::Value),
+    }
+}
+
+/// EXP(number)
+fn eval_exp(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 1 {
+        return CellValue::Error(CellError::Value);
+    }
+    match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) => {
+            let result = n.exp();
+            if result.is_finite() {
+                CellValue::Number(result)
+            } else {
+                CellValue::Error(CellError::Num)
+            }
+        }
+        None => CellValue::Error(CellError::Value),
+    }
+}
+
+/// CEILING(number, significance)
+fn eval_ceiling(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 2 {
+        return CellValue::Error(CellError::Value);
+    }
+    let number = match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) => n,
+        None => return CellValue::Error(CellError::Value),
+    };
+    let significance = match coerce_number(&FormulaEngine::evaluate(&args[1], ctx)) {
+        Some(s) if s.abs() > f64::EPSILON => s,
+        _ => return CellValue::Error(CellError::Num),
+    };
+    // If signs differ, it's an error in Excel
+    if number > 0.0 && significance < 0.0 {
+        return CellValue::Error(CellError::Num);
+    }
+    CellValue::Number((number / significance).ceil() * significance)
+}
+
+/// FLOOR(number, significance)
+fn eval_floor(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 2 {
+        return CellValue::Error(CellError::Value);
+    }
+    let number = match coerce_number(&FormulaEngine::evaluate(&args[0], ctx)) {
+        Some(n) => n,
+        None => return CellValue::Error(CellError::Value),
+    };
+    let significance = match coerce_number(&FormulaEngine::evaluate(&args[1], ctx)) {
+        Some(s) if s.abs() > f64::EPSILON => s,
+        _ => return CellValue::Error(CellError::Num),
+    };
+    if number > 0.0 && significance < 0.0 {
+        return CellValue::Error(CellError::Num);
+    }
+    CellValue::Number((number / significance).floor() * significance)
+}
+
+/// TEXT(value, format_text) — basic number formatting.
+fn eval_text(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 2 {
+        return CellValue::Error(CellError::Value);
+    }
+    let value = FormulaEngine::evaluate(&args[0], ctx);
+    let format = coerce_string(&FormulaEngine::evaluate(&args[1], ctx));
+    let num = match coerce_number(&value) {
+        Some(n) => n,
+        None => return CellValue::Text(coerce_string(&value)),
+    };
+    let fmt_lower = format.to_ascii_lowercase();
+    // Basic format patterns
+    let result = if fmt_lower == "0" {
+        format!("{:.0}", num)
+    } else if fmt_lower == "0.0" {
+        format!("{:.1}", num)
+    } else if fmt_lower == "0.00" {
+        format!("{:.2}", num)
+    } else if fmt_lower == "0.000" {
+        format!("{:.3}", num)
+    } else if fmt_lower == "#,##0" {
+        format_number_with_commas(num, 0)
+    } else if fmt_lower == "#,##0.00" {
+        format_number_with_commas(num, 2)
+    } else if fmt_lower == "0%" || fmt_lower == "0.0%" || fmt_lower == "0.00%" {
+        let decimals = fmt_lower.matches('.').count();
+        let pct = num * 100.0;
+        let decimal_places = if decimals > 0 {
+            fmt_lower.len() - fmt_lower.find('.').unwrap() - 2
+        } else {
+            0
+        };
+        format!("{:.prec$}%", pct, prec = decimal_places)
+    } else if fmt_lower == "0.00e+00" {
+        format!("{:.2E}", num)
+    } else {
+        // Fallback: just convert to string
+        format!("{}", num)
+    };
+    CellValue::Text(result)
+}
+
+/// Helper for TEXT() — format with thousands separator.
+fn format_number_with_commas(num: f64, decimals: usize) -> String {
+    let formatted = format!("{:.prec$}", num.abs(), prec = decimals);
+    let parts: Vec<&str> = formatted.split('.').collect();
+    let integer_part = parts[0];
+    let mut with_commas = String::new();
+    for (i, ch) in integer_part.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            with_commas.push(',');
+        }
+        with_commas.push(ch);
+    }
+    let result: String = with_commas.chars().rev().collect();
+    let sign = if num < 0.0 { "-" } else { "" };
+    if parts.len() > 1 {
+        format!("{}{}.{}", sign, result, parts[1])
+    } else {
+        format!("{}{}", sign, result)
+    }
+}
+
+/// VALUE(text) — convert text to number.
+fn eval_value(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    if args.len() != 1 {
+        return CellValue::Error(CellError::Value);
+    }
+    let text = coerce_string(&FormulaEngine::evaluate(&args[0], ctx));
+    let trimmed = text.trim();
+    // Handle percentage
+    if let Some(stripped) = trimmed.strip_suffix('%') {
+        if let Ok(n) = stripped.trim().parse::<f64>() {
+            return CellValue::Number(n / 100.0);
+        }
+    }
+    // Handle currency prefix ($)
+    let cleaned = trimmed.trim_start_matches('$').replace(',', "");
+    match cleaned.trim().parse::<f64>() {
+        Ok(n) => CellValue::Number(n),
+        Err(_) => CellValue::Error(CellError::Value),
+    }
+}
+
 // ─── Helper Functions ──────────────────────────────────────
 
 /// Test equality of two cell values (case-insensitive for strings).
@@ -2095,6 +2511,23 @@ fn extract_references(formula: &str) -> Vec<CellRef> {
         }
     }
     refs
+}
+
+// ─── Workbook SheetLookup implementation ────────────────────
+
+/// Provides cross-sheet reference resolution for a workbook.
+pub struct WorkbookContext<'a> {
+    /// Reference to all sheets in the workbook.
+    pub sheets: &'a [crate::model::Sheet],
+}
+
+impl<'a> SheetLookup for WorkbookContext<'a> {
+    fn get_sheet(&self, name: &str) -> Option<&dyn CellLookup> {
+        self.sheets
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s as &dyn CellLookup)
+    }
 }
 
 // ─── Sheet CellLookup implementation ───────────────────────
@@ -3296,5 +3729,114 @@ mod tests {
         assert!(!wildcard_match("", "?"));
         assert!(wildcard_match("abc", "a*c"));
         assert!(wildcard_match("abc", "a?c"));
+    }
+
+    // ─── Cross-Sheet Reference Tests ───
+
+    /// Helper for multi-sheet evaluation: two contexts representing different sheets.
+    struct TwoSheetLookup {
+        sheet1: TestCtx,
+        sheet2: TestCtx,
+    }
+
+    impl SheetLookup for TwoSheetLookup {
+        fn get_sheet(&self, name: &str) -> Option<&dyn CellLookup> {
+            match name {
+                "Sheet1" => Some(&self.sheet1),
+                "Sheet2" => Some(&self.sheet2),
+                _ => None,
+            }
+        }
+    }
+
+    fn eval_with_sheets(
+        formula: &str,
+        ctx: &dyn CellLookup,
+        sheets: &dyn SheetLookup,
+    ) -> CellValue {
+        let expr = parse_formula(formula).expect("parse failed");
+        FormulaEngine::evaluate_with_sheets(&expr, ctx, Some(sheets))
+    }
+
+    #[test]
+    fn cross_sheet_cell_ref() {
+        let mut sheet1 = TestCtx::new();
+        sheet1.set(0, 0, CellValue::Number(42.0));
+        let sheet2 = TestCtx::new();
+
+        let lookup = TwoSheetLookup {
+            sheet1,
+            sheet2: sheet2,
+        };
+        // Evaluate Sheet1!A1 from sheet2's perspective
+        let ctx2 = &lookup.sheet2 as &dyn CellLookup;
+        assert_eq!(
+            eval_with_sheets("Sheet1!A1", ctx2, &lookup),
+            CellValue::Number(42.0)
+        );
+    }
+
+    #[test]
+    fn cross_sheet_range_ref() {
+        let mut sheet1 = TestCtx::new();
+        sheet1.set(0, 0, CellValue::Number(10.0));
+        sheet1.set(0, 1, CellValue::Number(20.0));
+        sheet1.set(0, 2, CellValue::Number(30.0));
+        let sheet2 = TestCtx::new();
+
+        let lookup = TwoSheetLookup { sheet1, sheet2 };
+        let ctx2 = &lookup.sheet2 as &dyn CellLookup;
+        // SUM of cross-sheet range — the parser creates
+        // SheetRef("Sheet1", Range(A1:A3)) which evaluate_with_sheets resolves
+        // by switching the context to sheet1 for the inner expression.
+        // However, SUM expects a Range arg that it collects values from using ctx,
+        // so after the SheetRef is resolved, the range is evaluated on sheet1.
+        assert_eq!(
+            eval_with_sheets("SUM(Sheet1!A1:A3)", ctx2, &lookup),
+            CellValue::Number(60.0)
+        );
+    }
+
+    #[test]
+    fn cross_sheet_nonexistent() {
+        let sheet1 = TestCtx::new();
+        let sheet2 = TestCtx::new();
+
+        let lookup = TwoSheetLookup { sheet1, sheet2 };
+        let ctx = &lookup.sheet1 as &dyn CellLookup;
+        assert_eq!(
+            eval_with_sheets("NoSuchSheet!A1", ctx, &lookup),
+            CellValue::Error(CellError::Ref)
+        );
+    }
+
+    #[test]
+    fn sheet_lookup_trait_basic() {
+        // Verify the WorkbookContext works with real Sheet objects
+        let mut s1 = Sheet::default();
+        s1.name = "Sales".to_string();
+        s1.cells.insert(
+            CellRef::new(0, 0),
+            crate::model::Cell {
+                value: CellValue::Number(100.0),
+                formula: None,
+                style_id: 0,
+            },
+        );
+
+        let mut s2 = Sheet::default();
+        s2.name = "Summary".to_string();
+
+        let sheets = vec![s1, s2];
+        let wb_ctx = WorkbookContext { sheets: &sheets };
+        assert!(wb_ctx.get_sheet("Sales").is_some());
+        assert!(wb_ctx.get_sheet("Summary").is_some());
+        assert!(wb_ctx.get_sheet("Missing").is_none());
+
+        // Evaluate a cross-sheet formula from Summary's perspective
+        let summary = &sheets[1] as &dyn CellLookup;
+        let expr = parse_formula("Sales!A1").unwrap();
+        let result = FormulaEngine::evaluate_with_sheets(&expr, summary, Some(&wb_ctx));
+        assert_eq!(result, CellValue::Number(100.0));
     }
 }

@@ -18,6 +18,11 @@ export function initPropertiesPanel() {
   const toggleBtn = $('btnPropsPanel');
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
+      // Route to spreadsheet properties panel when in sheet mode
+      if (state.currentView === 'spreadsheet' && state.spreadsheetView) {
+        state.spreadsheetView.showPropertiesPanel();
+        return;
+      }
       togglePropertiesPanel();
     });
   }

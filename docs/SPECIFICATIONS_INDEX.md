@@ -35,11 +35,11 @@
 ## Development Process
 
 ```
-1. RESEARCH    → Study standard + competitors
+1. RESEARCH    → Study standard + existing implementations
 2. SPECIFY     → Write spec: happy path + edge cases + errors + targets
 3. BREAK       → Adversarial thinking: what breaks this?
 4. FIX SPEC    → Update spec to handle breaks
 5. IMPLEMENT   → Code to spec (spec items = test cases)
 6. TEST        → Unit + integration + E2E for every spec item
-7. VERIFY      → Real documents from Word, LibreOffice, Google Docs
+7. VERIFY      → Real documents from various office applications
 ```

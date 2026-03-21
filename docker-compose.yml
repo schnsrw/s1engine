@@ -28,5 +28,28 @@ services:
       retries: 3
       start_period: 15s
 
+  # AI Sidecar — CPU-optimized LLM (Qwen2.5-3B via llama.cpp)
+  # Provides writing assist, grammar check, formula help, translation
+  rudra-ai:
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    ports:
+      - "${AI_PORT:-8081}:8081"
+    deploy:
+      resources:
+        limits:
+          cpus: "${AI_CPUS:-4}"
+          memory: "${AI_MEMORY:-4G}"
+        reservations:
+          memory: "2G"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
 volumes:
   s1-data:

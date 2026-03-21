@@ -1,17 +1,41 @@
 [book]
-title = "Rudra Code — Open-Source Document Engine SDK in Rust"
-description = "Read, write, edit, and convert DOCX, ODT, PDF, and Markdown documents with CRDT collaboration and WASM support. Self-hosted alternative to OnlyOffice and Google Docs."
+title = "Rudra Code Documentation"
+description = "Open-source document engine SDK in Rust. Read, write, edit, and convert DOCX, ODT, PDF, Markdown with CRDT collaboration and WASM support."
 authors = ["Rudra Code contributors"]
 language = "en"
 src = "src"
 
 [build]
 build-dir = "book"
+create-missing = false
 
 [output.html]
 default-theme = "light"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/schnsrw/s1engine"
-edit-url-template = "https://github.com/schnsrw/s1engine/edit/main/docs-site/{path}"
-site-url = "/s1engine/"
-description = "Rudra Code documentation — a pure Rust document engine SDK with DOCX, ODT, PDF, Markdown support, CRDT collaboration, WASM bindings, and a self-hosted web editor (Rudra Office)."
+git-repository-url = "https://github.com/Rudra-Office/Rudra-Editor"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/Rudra-Office/Rudra-Editor/edit/main/docs-site/{path}"
+site-url = "/Rudra-Editor/"
+description = "Rudra Code documentation — a pure Rust document engine SDK with DOCX, ODT, PDF, Markdown support, CRDT collaboration, WASM bindings, and a self-hosted web editor."
+additional-css = ["theme/custom.css"]
+additional-js = ["theme/custom.js"]
+no-section-label = false
+cname = ""
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+editable = false
+copyable = true
+copy-js = true
+line-numbers = true
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-hierarchical-headings = true
+
+[output.html.print]
+enable = true

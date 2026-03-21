@@ -45,6 +45,7 @@ function _setupImageDelegation(page) {
 
   page.addEventListener('dragover', onDragOver);
   page.addEventListener('drop', onDrop);
+  page.addEventListener('dragleave', onDragLeave);
 }
 
 // ─── Image Drag & Drop ─────────────────────
@@ -68,23 +69,48 @@ function onImageDragStart(e) {
 }
 
 function onDragOver(e) {
-  if (!_draggedImgNodeId) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
+  // Handle internal image reorder drag
+  if (_draggedImgNodeId) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
 
-  // Show drop indicator
-  const target = findDropTarget(e);
-  if (target) {
-    if (!_dropIndicator) {
-      _dropIndicator = document.createElement('div');
-      _dropIndicator.className = 'img-drop-indicator';
+    // Show drop indicator
+    const target = findDropTarget(e);
+    if (target) {
+      if (!_dropIndicator) {
+        _dropIndicator = document.createElement('div');
+        _dropIndicator.className = 'img-drop-indicator';
+      }
+      const rect = target.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY < midY) {
+        target.before(_dropIndicator);
+      } else {
+        target.after(_dropIndicator);
+      }
     }
-    const rect = target.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    if (e.clientY < midY) {
-      target.before(_dropIndicator);
-    } else {
-      target.after(_dropIndicator);
+    return;
+  }
+
+  // Handle external file drop (images dragged from desktop/file manager)
+  if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    // Show drag-over visual indicator on the page content
+    const pageContent = e.target.closest('.page-content');
+    if (pageContent && !pageContent.classList.contains('drag-over')) {
+      pageContent.classList.add('drag-over');
+    }
+  }
+}
+
+function onDragLeave(e) {
+  const pageContent = e.target.closest('.page-content');
+  if (pageContent) {
+    // Only remove if we're actually leaving the page-content element
+    const related = e.relatedTarget;
+    if (!related || !pageContent.contains(related)) {
+      pageContent.classList.remove('drag-over');
     }
   }
 }
@@ -94,35 +120,50 @@ function onDrop(e) {
   if (_dropIndicator) _dropIndicator.remove();
   _dropIndicator = null;
 
-  if (!_draggedImgNodeId || !state.doc) {
+  // Remove drag-over indicator from all page-content elements
+  document.querySelectorAll('.page-content.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+  // Handle internal image reorder drop
+  if (_draggedImgNodeId && state.doc) {
+    const target = findDropTarget(e);
+    if (target && target.dataset.nodeId) {
+      const targetNodeId = target.dataset.nodeId;
+      if (targetNodeId !== _draggedImgNodeId) {
+        try {
+          const rect = target.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          if (e.clientY < midY) {
+            state.doc.move_node_before(_draggedImgNodeId, targetNodeId);
+            broadcastOp({ action: 'moveNodeBefore', nodeId: _draggedImgNodeId, beforeId: targetNodeId });
+          } else {
+            state.doc.move_node_after(_draggedImgNodeId, targetNodeId);
+            broadcastOp({ action: 'moveNodeAfter', nodeId: _draggedImgNodeId, afterId: targetNodeId });
+          }
+          // G2: Record undo BEFORE render so it's saved even if renderDocument() throws
+          recordUndoAction('Move image');
+          renderDocument();
+          updateUndoRedo();
+        } catch (err) {
+          console.error('move image:', err);
+        }
+      }
+    }
     _draggedImgNodeId = null;
     return;
   }
 
-  const target = findDropTarget(e);
-  if (target && target.dataset.nodeId) {
-    const targetNodeId = target.dataset.nodeId;
-    if (targetNodeId !== _draggedImgNodeId) {
-      try {
-        const rect = target.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (e.clientY < midY) {
-          state.doc.move_node_before(_draggedImgNodeId, targetNodeId);
-          broadcastOp({ action: 'moveNodeBefore', nodeId: _draggedImgNodeId, beforeId: targetNodeId });
-        } else {
-          state.doc.move_node_after(_draggedImgNodeId, targetNodeId);
-          broadcastOp({ action: 'moveNodeAfter', nodeId: _draggedImgNodeId, afterId: targetNodeId });
-        }
-        // G2: Record undo BEFORE render so it's saved even if renderDocument() throws
-        recordUndoAction('Move image');
-        renderDocument();
-        updateUndoRedo();
-      } catch (err) {
-        console.error('move image:', err);
+  _draggedImgNodeId = null;
+
+  // Handle external file drop — insert dropped image files
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+    const files = Array.from(e.dataTransfer.files).filter(f => IMAGE_TYPES.includes(f.type));
+    if (files.length > 0 && state.doc) {
+      for (const file of files) {
+        insertImage(file);
       }
     }
   }
-  _draggedImgNodeId = null;
 }
 
 function findDropTarget(e) {

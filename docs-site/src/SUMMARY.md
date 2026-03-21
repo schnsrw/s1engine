@@ -8,7 +8,6 @@
 - [Installation](./getting-started/installation.md)
   - [Rust Library](./getting-started/rust.md)
   - [npm / WASM](./getting-started/npm.md)
-  - [Docker](./getting-started/docker.md)
 
 # Guides
 
@@ -17,6 +16,12 @@
 - [Format Conversion](./guides/conversion.md)
 - [Collaboration Setup](./guides/collaboration.md)
 - [White-Labeling](./guides/white-label.md)
+- [Configuration](./guides/configuration.md)
+
+# Deployment
+
+- [Docker](./getting-started/docker.md)
+- [Self-Hosting](./guides/self-hosting.md)
 
 # API Reference
 
