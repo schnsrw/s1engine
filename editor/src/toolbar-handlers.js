@@ -5954,13 +5954,23 @@ function enhanceTemplateGrid() {
 
     const preview = document.createElement('div');
     preview.className = 'template-preview template-preview-custom';
-    // Render a tiny preview from saved HTML (sanitized — strip scripts/event handlers)
+    // Render a tiny preview from saved HTML (sanitized via DOM parsing)
     const previewInner = document.createElement('div');
     previewInner.className = 'template-preview-content';
-    const safeHtml = (tpl.html || '').replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
-      .replace(/\bon\w+\s*=\s*[^\s>]*/gi, '');
-    previewInner.innerHTML = safeHtml;
+    const tmpDoc = new DOMParser().parseFromString(tpl.html || '', 'text/html');
+    // Remove all scripts and event handlers
+    tmpDoc.querySelectorAll('script,link[rel="import"],iframe,object,embed,form').forEach(el => el.remove());
+    tmpDoc.querySelectorAll('*').forEach(el => {
+      for (const attr of [...el.attributes]) {
+        if (attr.name.startsWith('on') || attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+    previewInner.textContent = '';
+    for (const child of tmpDoc.body.childNodes) {
+      previewInner.appendChild(document.importNode(child, true));
+    }
     preview.appendChild(previewInner);
 
     const icon = document.createElement('span');

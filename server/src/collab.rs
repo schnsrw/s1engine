@@ -83,7 +83,11 @@ impl RoomManager {
         if let Some(room) = rooms.get_mut(room_id) {
             let existing_peers = room.peers.clone();
             room.peers.push(peer);
-            let catch_up: Vec<(u64, String)> = room.ops_log.iter().map(|(v, s, _)| (*v, s.clone())).collect();
+            let catch_up: Vec<(u64, String)> = room
+                .ops_log
+                .iter()
+                .map(|(v, s, _)| (*v, s.clone()))
+                .collect();
             (room.tx.clone(), catch_up, existing_peers)
         } else {
             let (tx, _) = broadcast::channel(512);
@@ -168,16 +172,28 @@ impl RoomManager {
             if let Some(t) = val.get("type").and_then(|v| v.as_str()) {
                 return matches!(
                     t,
-                    "op" | "join" | "awareness" | "awareness-batch" | "sync"
-                        | "fullSync" | "requestFullSync" | "requestCatchup"
+                    "op" | "join"
+                        | "awareness"
+                        | "awareness-batch"
+                        | "sync"
+                        | "fullSync"
+                        | "requestFullSync"
+                        | "requestCatchup"
                 );
             }
             if let Some(a) = val.get("action").and_then(|v| v.as_str()) {
                 return matches!(
                     a,
-                    "op" | "insert" | "delete" | "format" | "structural"
-                        | "ssSetCell" | "ssFormat" | "ssSync" | "ssCursor"
-                        | "peer-join" | "peer-leave"
+                    "op" | "insert"
+                        | "delete"
+                        | "format"
+                        | "structural"
+                        | "ssSetCell"
+                        | "ssFormat"
+                        | "ssSync"
+                        | "ssCursor"
+                        | "peer-join"
+                        | "peer-leave"
                 );
             }
         }
@@ -222,7 +238,8 @@ impl RoomManager {
         for (room_id, room) in rooms.iter_mut() {
             if room.dirty && !room.ops_log.is_empty() {
                 // Serialize only the op strings (strip version tuples) for storage compatibility
-                let ops_only: Vec<&str> = room.ops_log.iter().map(|(_, op, _)| op.as_str()).collect();
+                let ops_only: Vec<&str> =
+                    room.ops_log.iter().map(|(_, op, _)| op.as_str()).collect();
                 let ops_json = serde_json::to_string(&ops_only).unwrap_or_default();
                 let meta = crate::storage::DocumentMeta {
                     id: format!("{}_ops", room_id),

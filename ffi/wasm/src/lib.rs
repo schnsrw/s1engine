@@ -265,7 +265,8 @@ impl WasmDocument {
     pub fn export(&self, format: &str) -> Result<Vec<u8>, JsError> {
         let fmt = parse_format(format)?;
         let doc = self.doc()?;
-        doc.export(fmt).map_err(|e| JsError::new(&format!("Export to {} failed: {}", format, e)))
+        doc.export(fmt)
+            .map_err(|e| JsError::new(&format!("Export to {} failed: {}", format, e)))
     }
 
     /// Get the document title (from metadata).
@@ -3504,8 +3505,16 @@ impl WasmDocument {
         height_pt: f64,
     ) -> Result<String, JsError> {
         // Bug W7: Clamp invalid dimensions to sensible defaults instead of erroring
-        let width_pt = if width_pt <= 0.0 || width_pt > 10000.0 { 200.0 } else { width_pt };
-        let height_pt = if height_pt <= 0.0 || height_pt > 10000.0 { 200.0 } else { height_pt };
+        let width_pt = if width_pt <= 0.0 || width_pt > 10000.0 {
+            200.0
+        } else {
+            width_pt
+        };
+        let height_pt = if height_pt <= 0.0 || height_pt > 10000.0 {
+            200.0
+        } else {
+            height_pt
+        };
 
         let doc = self.doc_mut()?;
         let after_id = parse_node_id(after_node_str)?;
@@ -4788,7 +4797,11 @@ impl WasmDocument {
             // Deletion fits in one text node — simple path
             let mut txn = Transaction::with_label("Replace text");
             if safe_length > 0 {
-                txn.push(Operation::delete_text(text_node_id, local_offset, safe_length));
+                txn.push(Operation::delete_text(
+                    text_node_id,
+                    local_offset,
+                    safe_length,
+                ));
             }
             if !replacement.is_empty() {
                 txn.push(Operation::insert_text(
@@ -10330,11 +10343,15 @@ impl WasmCollabDocument {
         let new_len = new_chars.len();
 
         let mut prefix_len = 0;
-        while prefix_len < old_len && prefix_len < new_len && old_chars[prefix_len] == new_chars[prefix_len] {
+        while prefix_len < old_len
+            && prefix_len < new_len
+            && old_chars[prefix_len] == new_chars[prefix_len]
+        {
             prefix_len += 1;
         }
         let mut suffix_len = 0;
-        while suffix_len < (old_len - prefix_len) && suffix_len < (new_len - prefix_len)
+        while suffix_len < (old_len - prefix_len)
+            && suffix_len < (new_len - prefix_len)
             && old_chars[old_len - 1 - suffix_len] == new_chars[new_len - 1 - suffix_len]
         {
             suffix_len += 1;
@@ -10600,10 +10617,9 @@ impl WasmEngine {
     ///
     /// The document is loaded and wrapped in a CRDT-aware container.
     pub fn open_collab(&self, data: &[u8], replica_id: u64) -> Result<WasmCollabDocument, JsError> {
-        let doc = self
-            .inner
-            .open(data)
-            .map_err(|e| JsError::new(&format!("Failed to open document for collaboration: {}", e)))?;
+        let doc = self.inner.open(data).map_err(|e| {
+            JsError::new(&format!("Failed to open document for collaboration: {}", e))
+        })?;
         let collab = s1_crdt::CollabDocument::from_model(doc.into_model(), replica_id);
         Ok(WasmCollabDocument {
             inner: Some(collab),
@@ -11142,7 +11158,9 @@ fn render_node_to_html(model: &DocumentModel, node: &Node) -> String {
                 // W5: Build paragraph-level CSS for non-heading paragraphs
                 let mut ps = String::new();
                 // Tab stops
-                if let Some(AttributeValue::TabStops(stops)) = node.attributes.get(&AttributeKey::TabStops) {
+                if let Some(AttributeValue::TabStops(stops)) =
+                    node.attributes.get(&AttributeKey::TabStops)
+                {
                     if let Some(first) = stops.first() {
                         let tab_px = (first.position * 96.0 / 72.0) as i32;
                         if tab_px > 0 {

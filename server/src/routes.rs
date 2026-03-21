@@ -410,11 +410,7 @@ fn check_session_access(session_mode: &str, required: &str) -> bool {
 /// assert_eq!(detect_file_type_category("manual.pdf"), "pdf");
 /// ```
 pub fn detect_file_type_category(filename: &str) -> &'static str {
-    let ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
         "docx" | "doc" | "odt" | "txt" | "md" => "document",
         "xlsx" | "xls" | "ods" | "csv" => "spreadsheet",
