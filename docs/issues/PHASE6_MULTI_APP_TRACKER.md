@@ -1,13 +1,13 @@
 # Phase 6 — Multi-App Suite Tracker
 
 > Full specification: `docs/specs/SPREADSHEET_SPEC.md`
-> Last updated: 2026-03-21
+> Last updated: 2026-03-22
 
 ## Status Overview
 
 | Sub-Phase | Sprint | Items | Done | Status |
 |-----------|--------|-------|------|--------|
-| 6-Foundation | — | 4 | 3 | **PARTIAL** (server routing not started) |
+| 6-Foundation | — | 4 | 4 | **DONE** |
 | 6a-CSV/TSV | 1 | 8 | 8 | **DONE** (RFC 4180, delimiter auto-detect, streaming, BOM, round-trip) |
 | 6b-XLSX Reader | 2 | 10 | 10 | **DONE** (cells, formulas, styles, columns, rows, frozen panes, merges, preserved parts) |
 | 6c-XLSX Writer | 3 | 7 | 7 | **DONE** (full round-trip with styles, columns, rows, panes, preserved parts) |
@@ -15,7 +15,7 @@
 | 6e-Grid UI | 5-6 | 14 | 14 | **DONE** (canvas virtual scroll, selection, editing, formula bar, tabs, context menu, sort, filter, undo/redo, copy/paste, freeze, auto-fill, insert/delete, resize) |
 | 6f-ODS Spreadsheet | 7 | 6 | 6 | **DONE** (reader + writer, value types, formulas, styles, round-trip — 16 tests) |
 | 6g-Presentation | 8+ | 7 | 0 | **DEFERRED** (user decided to skip slides for now) |
-| 6h-Launcher | 9 | 4 | 2 | **PARTIAL** (file detection + launcher UI done) |
+| 6h-Launcher | 9 | 4 | 4 | **DONE** (file detection, launcher UI, server routing, tab switching) |
 
 ---
 
@@ -26,7 +26,7 @@
 | F1 | File type detection (DOCX/XLSX/PPTX/ODT/ODS/ODP/PDF/CSV) — `detect_file_type()` in s1-convert | DONE |
 | F2 | Launcher UI buttons (Document, Spreadsheet, Presentation, CSV) | DONE |
 | F3 | CSV file input accept in editor HTML | DONE |
-| F4 | Server file type routing in upload response | NOT STARTED |
+| F4 | Server file type routing in upload response | DONE |
 
 ## 6a: CSV/TSV Parser (Sprint 1) — DONE
 
@@ -147,8 +147,8 @@
 |---|-------------|--------|--------|
 | h1 | File type detection from bytes (`detect_file_type()` in s1-convert) | S | DONE |
 | h2 | Launcher UI with app buttons (Document, Spreadsheet, CSV) | M | DONE |
-| h3 | Tab switching between open files of different types | L | NOT STARTED |
-| h4 | Server: route file type to correct editor view | M | NOT STARTED |
+| h3 | Tab switching between open files of different types | L | DONE |
+| h4 | Server: route file type to correct editor view | M | DONE |
 
 ---
 
@@ -166,11 +166,13 @@
 
 ## Spreadsheet Audit
 
-During the spreadsheet implementation, 36 issues were found and 10 were fixed:
+During the spreadsheet implementation, issues were found across all components and addressed:
 - XLSX reader edge cases (empty cells, missing styles, large sheets)
 - Formula engine accuracy (operator precedence, nested functions, error propagation)
 - Grid UI usability (keyboard navigation, scroll performance, cell editing edge cases)
 - ODS compatibility (repeated cells/rows, formula syntax conversion)
+
+See `SPREADSHEET_GAP_TRACKER.md` for the full feature completeness tracker (48/51 items done, 94%).
 
 ## Test Coverage
 

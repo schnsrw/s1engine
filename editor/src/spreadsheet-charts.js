@@ -119,6 +119,14 @@ export class ChartRenderer {
             : CHART_COLORS;
     }
 
+    /** S20: Auto-determine legend position — use bottom for narrow charts. */
+    _effectiveLegendPos(options, chartWidth) {
+        const requested = (options && options.legendPos) || 'bottom';
+        // If chart is narrow and legend was set to 'right', force to 'bottom'
+        if (requested === 'right' && chartWidth < 400) return 'bottom';
+        return requested;
+    }
+
     /** Draw Y-axis labels and horizontal gridlines, returns yScale info. */
     _drawYAxis(ctx, pad, chartH, allValues, formatFn) {
         const minV = Math.min(0, ...allValues);
@@ -166,8 +174,13 @@ export class ChartRenderer {
         ctx.restore();
     }
 
-    /** Draw a legend block. */
+    /** Draw a legend block. For small charts (width < 300), hide the legend. */
     _drawLegend(ctx, series, colors, w, h, pad, pos) {
+        // Hide legend entirely on very small charts to prevent overlap
+        if (w < 300) return;
+        // Force legend to bottom on narrow charts instead of right
+        if (pos === 'right' && w < 400) pos = 'bottom';
+
         ctx.save();
         ctx.font = '11px Arial, sans-serif';
         ctx.textBaseline = 'middle';
@@ -216,7 +229,7 @@ export class ChartRenderer {
 
     _renderColumn(ctx, w, h, data, options) {
         const colors = this._getColors(options);
-        const legendPos = (options && options.legendPos) || 'bottom';
+        const legendPos = this._effectiveLegendPos(options, w);
         const pad = { top: 16, right: 20, bottom: 46, left: 52 };
         if (legendPos === 'right') pad.right = 100;
         if (data.series.length > 1) pad.bottom = 52;
@@ -272,7 +285,7 @@ export class ChartRenderer {
 
     _renderBar(ctx, w, h, data, options) {
         const colors = this._getColors(options);
-        const legendPos = (options && options.legendPos) || 'bottom';
+        const legendPos = this._effectiveLegendPos(options, w);
         const pad = { top: 16, right: 30, bottom: 40, left: 70 };
         if (legendPos === 'right') pad.right = 100;
         if (data.series.length > 1) pad.bottom = 52;
@@ -360,7 +373,7 @@ export class ChartRenderer {
 
     _renderLine(ctx, w, h, data, options, fill) {
         const colors = this._getColors(options);
-        const legendPos = (options && options.legendPos) || 'bottom';
+        const legendPos = this._effectiveLegendPos(options, w);
         const pad = { top: 16, right: 20, bottom: 46, left: 52 };
         if (legendPos === 'right') pad.right = 100;
         if (data.series.length > 1) pad.bottom = 52;

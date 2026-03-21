@@ -28,6 +28,12 @@ use tokio::sync::{broadcast, Mutex};
 use crate::routes::AppState;
 use crate::storage::StorageBackend;
 
+/// Maximum allowed WebSocket message size (256 KB).
+const MAX_WS_MESSAGE_SIZE: usize = 256 * 1024;
+
+/// Maximum messages per second per client before rate-limiting kicks in.
+const MAX_MESSAGES_PER_SECOND: u32 = 100;
+
 /// Info about a connected peer in a room.
 #[derive(Debug, Clone)]
 struct PeerInfo {
@@ -40,13 +46,19 @@ struct PeerInfo {
 struct Room {
     tx: broadcast::Sender<String>,
     peers: Vec<PeerInfo>,
-    /// Each entry is (server_version, op_json).
-    ops_log: Vec<(u64, String)>,
+    /// Each entry is (server_version, op_json, timestamp).
+    ops_log: Vec<(u64, String, std::time::Instant)>,
     /// Monotonically increasing version counter.
     version: u64,
     #[allow(dead_code)]
     doc_id: String,
     dirty: bool,
+}
+
+/// Per-client rate-limit state: message count in the current 1-second window.
+struct RateWindow {
+    count: u32,
+    window_start: std::time::Instant,
 }
 
 /// Manages all active collaboration rooms.
@@ -71,7 +83,7 @@ impl RoomManager {
         if let Some(room) = rooms.get_mut(room_id) {
             let existing_peers = room.peers.clone();
             room.peers.push(peer);
-            let catch_up = room.ops_log.clone();
+            let catch_up: Vec<(u64, String)> = room.ops_log.iter().map(|(v, s, _)| (*v, s.clone())).collect();
             (room.tx.clone(), catch_up, existing_peers)
         } else {
             let (tx, _) = broadcast::channel(512);
@@ -99,13 +111,37 @@ impl RoomManager {
     }
 
     /// Record an op with an incremented server version. Returns the new version.
+    ///
+    /// Eviction policy:
+    /// 1. Time-based: entries older than 1 hour are evicted.
+    /// 2. Count-based: if the log exceeds 10,000 entries, the oldest 5,000 are removed.
     async fn record_op(&self, room_id: &str, op: &str) -> u64 {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
             room.version += 1;
             let version = room.version;
-            room.ops_log.push((version, op.to_string()));
+            let now = std::time::Instant::now();
+            room.ops_log.push((version, op.to_string(), now));
             room.dirty = true;
+
+            // Time-based eviction: remove entries older than 1 hour
+            let one_hour = std::time::Duration::from_secs(3600);
+            if let Some((_, _, oldest_ts)) = room.ops_log.first() {
+                if oldest_ts.elapsed() > one_hour {
+                    let cutoff = now - one_hour;
+                    let evict_count = room.ops_log.partition_point(|(_, _, ts)| *ts < cutoff);
+                    if evict_count > 0 {
+                        tracing::debug!(
+                            "Room {} evicting {} time-expired ops (>1h old)",
+                            room_id,
+                            evict_count
+                        );
+                        room.ops_log.drain(..evict_count);
+                    }
+                }
+            }
+
+            // Count-based cap (existing logic)
             if room.ops_log.len() > 10000 {
                 tracing::warn!(
                     "Room {} ops_log at {} entries — truncating oldest 5000. Late joiners may miss history.",
@@ -120,10 +156,32 @@ impl RoomManager {
         }
     }
 
+    /// Validate an incoming WebSocket message.
+    ///
+    /// Rejects messages that are too large, fail to parse as JSON, or
+    /// contain an unrecognised `type` / `action` field.
     fn validate_op(msg: &str) -> bool {
-        serde_json::from_str::<serde_json::Value>(msg)
-            .map(|v| v.get("type").is_some() || v.get("action").is_some())
-            .unwrap_or(false)
+        if msg.len() > MAX_WS_MESSAGE_SIZE {
+            return false;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(msg) {
+            if let Some(t) = val.get("type").and_then(|v| v.as_str()) {
+                return matches!(
+                    t,
+                    "op" | "join" | "awareness" | "awareness-batch" | "sync"
+                        | "fullSync" | "requestFullSync" | "requestCatchup"
+                );
+            }
+            if let Some(a) = val.get("action").and_then(|v| v.as_str()) {
+                return matches!(
+                    a,
+                    "op" | "insert" | "delete" | "format" | "structural"
+                        | "ssSetCell" | "ssFormat" | "ssSync" | "ssCursor"
+                        | "peer-join" | "peer-leave"
+                );
+            }
+        }
+        false
     }
 
     /// Get the current server version for a room.
@@ -138,8 +196,8 @@ impl RoomManager {
         if let Some(room) = rooms.get(room_id) {
             room.ops_log
                 .iter()
-                .filter(|(v, _)| *v > from_version)
-                .cloned()
+                .filter(|(v, _, _)| *v > from_version)
+                .map(|(v, s, _)| (*v, s.clone()))
                 .collect()
         } else {
             Vec::new()
@@ -164,7 +222,7 @@ impl RoomManager {
         for (room_id, room) in rooms.iter_mut() {
             if room.dirty && !room.ops_log.is_empty() {
                 // Serialize only the op strings (strip version tuples) for storage compatibility
-                let ops_only: Vec<&str> = room.ops_log.iter().map(|(_, op)| op.as_str()).collect();
+                let ops_only: Vec<&str> = room.ops_log.iter().map(|(_, op, _)| op.as_str()).collect();
                 let ops_json = serde_json::to_string(&ops_only).unwrap_or_default();
                 let meta = crate::storage::DocumentMeta {
                     id: format!("{}_ops", room_id),
@@ -441,10 +499,43 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
     let file_id_recv = file_id.clone();
     let sender_peer_id = peer_id.clone();
     let mut recv_task = tokio::spawn(async move {
+        // Per-client rate limiting state
+        let mut rate = RateWindow {
+            count: 0,
+            window_start: std::time::Instant::now(),
+        };
+
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Text(text) => {
                     let text_str = text.to_string();
+
+                    // Reject oversized messages before parsing
+                    if text_str.len() > MAX_WS_MESSAGE_SIZE {
+                        tracing::warn!(
+                            "Dropping oversized WS message ({} bytes) from {}",
+                            text_str.len(),
+                            sender_peer_id
+                        );
+                        continue;
+                    }
+
+                    // Per-client rate limiting: max MAX_MESSAGES_PER_SECOND msgs/sec
+                    let now = std::time::Instant::now();
+                    if now.duration_since(rate.window_start).as_secs() >= 1 {
+                        rate.count = 0;
+                        rate.window_start = now;
+                    }
+                    rate.count += 1;
+                    if rate.count > MAX_MESSAGES_PER_SECOND {
+                        tracing::warn!(
+                            "Rate limit exceeded for peer {} ({} msgs/sec)",
+                            sender_peer_id,
+                            rate.count
+                        );
+                        continue;
+                    }
+
                     if !RoomManager::validate_op(&text_str) {
                         continue;
                     }

@@ -55,7 +55,10 @@ export function abortAI() {
  */
 export async function aiComplete(mode, userMessage, opts = {}) {
   if (!opts.noAutoAbort) abortAI();
-  _abortController = new AbortController();
+  const controller = new AbortController();
+  if (!opts.noAutoAbort) {
+    _abortController = controller;
+  }
 
   const systemPrompt = opts.systemPrompt || SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.writer;
   const maxTokens = opts.maxTokens || 1024;
@@ -78,7 +81,7 @@ export async function aiComplete(mode, userMessage, opts = {}) {
   // Auto-abort after timeout (Bug 33)
   const timeoutMs = opts.timeout || 60000;
   const timeoutId = setTimeout(() => {
-    if (_abortController) _abortController.abort(new Error('AI request timed out'));
+    if (controller) controller.abort(new Error('AI request timed out'));
   }, timeoutMs);
 
   let res;
@@ -87,7 +90,7 @@ export async function aiComplete(mode, userMessage, opts = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: _abortController.signal
+      signal: controller.signal
     });
   } catch (fetchErr) {
     clearTimeout(timeoutId);
@@ -132,14 +135,14 @@ export async function aiComplete(mode, userMessage, opts = {}) {
       clearTimeout(timeoutId);
     }
 
-    _abortController = null;
+    if (!opts.noAutoAbort) _abortController = null;
     return fullText;
   }
 
   // Non-streaming response
   const data = await res.json();
   clearTimeout(timeoutId);
-  _abortController = null;
+  if (!opts.noAutoAbort) _abortController = null;
   return data.choices?.[0]?.message?.content || '';
 }
 

@@ -19,6 +19,7 @@ import { initPropertiesPanel } from './properties-panel.js';
 import { initFonts, ensureDocumentFonts } from './fonts.js';
 import { initAIPanel } from './ai-panel.js';
 import { initAIInline } from './ai-inline.js';
+import { initTabs } from './tabs.js';
 
 // ── Service Worker Registration ──────────────────────
 if ('serviceWorker' in navigator) {
@@ -38,6 +39,29 @@ window.addEventListener('unhandledrejection', (e) => {
   recordError(e.reason);
 });
 
+/**
+ * Show a custom modal for auto-recovery instead of browser confirm().
+ * Returns a Promise that resolves to true (recover) or false (discard).
+ */
+function showRecoveryModal(description) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = '<h3>Recover Unsaved Document?</h3>' +
+      '<p style="color:#5f6368;font-size:13px;margin:8px 0 16px;">' + description + '</p>' +
+      '<div class="modal-actions">' +
+      '<button class="modal-cancel">Discard</button>' +
+      '<button class="modal-ok primary">Recover</button></div>';
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    modal.querySelector('.modal-cancel').onclick = () => { document.body.removeChild(overlay); resolve(false); };
+    modal.querySelector('.modal-ok').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+    modal.querySelector('.modal-ok').focus();
+  });
+}
+
 async function boot() {
   const dot = $('wasmDot');
   const label = $('wasmLabel');
@@ -54,23 +78,33 @@ async function boot() {
     docName.autocomplete = 'off';
   }
 
+  // Timeout to update loading message if WASM takes too long
+  const wasmTimeout = setTimeout(() => {
+    if (label && label.textContent.includes('Loading')) {
+      label.textContent = 'Still loading... check your connection';
+    }
+  }, 8000);
+
   try {
     // Import WASM bindings from wasm-pkg directory
     const wasm = await import('../wasm-pkg/s1engine_wasm.js');
     await wasm.default();  // init wasm module
 
+    clearTimeout(wasmTimeout);
     state.engine = new wasm.WasmEngine();
     setDetectFormat(wasm.detect_format);
 
     // Initialize font database and preload common fonts
-    initFonts(wasm).catch(e => console.warn('[fonts] Preload failed:', e));
+    try {
+      await initFonts(wasm);
+    } catch (e) {
+      console.warn('[fonts] Preload failed, using system fonts:', e);
+    }
 
     dot.classList.add('ok');
     label.textContent = 's1engine ready';
-    // Re-enable toolbar
-    if (toolbar) toolbar.style.pointerEvents = '';
 
-    // Wire up all handlers
+    // Wire up all handlers FIRST
     initInput();
     initFileHandlers();
     initToolbar();
@@ -84,9 +118,13 @@ async function boot() {
     initPropertiesPanel();
     initAIPanel();
     initAIInline();
+    initTabs();
     renderRuler();
     initPdfToolbar();
     initSpreadsheetToolbar();
+
+    // THEN re-enable toolbar (after handlers are ready)
+    if (toolbar) toolbar.style.pointerEvents = '';
 
     // Expose state for testing
     window.__s1_state = state;
@@ -111,16 +149,19 @@ async function boot() {
             const name = saved.name || 'Untitled Document';
             const mins = Math.round(age / 60000);
             const timeStr = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-            // Check checksum integrity
-            const integrityOk = saved._checksumValid !== false;
+            // Check checksum integrity + byte length consistency
+            const integrityOk = saved._checksumValid !== false && (!saved.byteLength || saved.byteLength === saved.bytes.byteLength);
             if (!integrityOk) {
               console.warn('Auto-recover skipped: checksum mismatch for', name);
               // Don't offer corrupted files
-            } else if (confirm(`Recover unsaved document "${name}" (saved ${timeStr})?`)) {
-              openFile(new Uint8Array(saved.bytes), name + '.docx');
-              // Restore comment thread replies if they were persisted
-              if (saved.commentReplies) {
-                try { state.commentReplies = JSON.parse(saved.commentReplies); } catch (_) {}
+            } else {
+              const recover = await showRecoveryModal(`"${name}" (saved ${timeStr})`);
+              if (recover) {
+                openFile(new Uint8Array(saved.bytes), name + '.docx');
+                // Restore comment thread replies if they were persisted
+                if (saved.commentReplies) {
+                  try { state.commentReplies = JSON.parse(saved.commentReplies); } catch (_) {}
+                }
               }
             }
           }
@@ -129,9 +170,19 @@ async function boot() {
     } catch (_) {}
 
   } catch (e) {
+    clearTimeout(wasmTimeout);
     console.error('WASM init failed:', e);
     dot.classList.add('err');
-    label.textContent = 'WASM failed: ' + e.message;
+    label.textContent = 'Engine failed — click to retry';
+    label.style.cursor = 'pointer';
+    label.title = e.message;
+    label.onclick = () => {
+      label.onclick = null;
+      label.style.cursor = '';
+      dot.classList.remove('err');
+      label.textContent = 'Retrying...';
+      boot(); // Retry the entire boot sequence
+    };
     // Keep toolbar disabled on failure
     if (toolbar) toolbar.style.pointerEvents = 'none';
   }
@@ -174,19 +225,29 @@ function initPdfToolbar() {
     }
   });
   $('pdfZoomSelect')?.addEventListener('change', (e) => {
-    if (state.pdfViewer) state.pdfViewer.setZoom(e.target.value);
+    if (!state.pdfViewer) return;
+    const val = parseFloat(e.target.value);
+    if (!isNaN(val) && val >= 0.25 && val <= 4.0) {
+      state.pdfViewer.setZoom(val);
+    } else {
+      e.target.value = String(state.pdfZoom);
+    }
   });
 
   // Tool selection
+  const validPdfTools = ['select', 'highlight', 'comment', 'draw', 'text', 'redact'];
   document.querySelectorAll('.pdf-tool-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+      const toolName = btn.dataset.tool;
+      if (!toolName) return;
+      if (!validPdfTools.includes(toolName)) return;
       document.querySelectorAll('.pdf-tool-btn').forEach(b => {
         b.classList.remove('active');
         b.setAttribute('aria-pressed', 'false');
       });
       btn.classList.add('active');
       btn.setAttribute('aria-pressed', 'true');
-      state.pdfTool = btn.dataset.tool;
+      state.pdfTool = toolName;
 
       // Update cursor style on canvas container
       const container = $('pdfCanvasContainer');
@@ -274,8 +335,7 @@ function initPdfToolbar() {
       a.download = ($('docName').value || 'document') + '.pdf';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => { try { document.body.removeChild(a); } catch(_) {} URL.revokeObjectURL(url); }, 200);
       state.pdfModified = false;
 
       const { showToast } = await import('./toolbar-handlers.js');
@@ -290,8 +350,7 @@ function initPdfToolbar() {
       a.download = ($('docName').value || 'document') + '.pdf';
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => { try { document.body.removeChild(a); } catch(_) {} URL.revokeObjectURL(url); }, 200);
 
       const { showToast } = await import('./toolbar-handlers.js');
       showToast('Saved without annotations (WASM editor unavailable)', 'error');
@@ -335,6 +394,47 @@ function initPdfToolbar() {
       e.preventDefault();
       $('pdfSave')?.click();
     }
+  });
+}
+
+/**
+ * Custom modal prompt for spreadsheet comments (replaces window.prompt).
+ */
+function _ssCommentPrompt(message, defaultValue) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const h3 = document.createElement('h3');
+    h3.textContent = message;
+    modal.appendChild(h3);
+    const input = document.createElement('textarea');
+    input.value = defaultValue || '';
+    input.rows = 3;
+    input.style.cssText = 'width:100%;padding:8px;margin:8px 0 16px;border:1px solid #dadce0;border-radius:4px;font-size:14px;box-sizing:border-box;resize:vertical;';
+    modal.appendChild(input);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'modal-cancel';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'OK';
+    okBtn.className = 'modal-ok primary';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+    cancelBtn.onclick = () => close(null);
+    okBtn.onclick = () => close(input.value);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close(null);
+    });
+    input.focus();
   });
 }
 
@@ -537,6 +637,7 @@ function initSpreadsheetToolbar() {
     try {
       const { switchView } = await import('./file.js');
       const { SpreadsheetView } = await import('./spreadsheet.js');
+      const { addFileTab } = await import('./tabs.js');
       if (state.spreadsheetView) state.spreadsheetView.destroy();
       state.currentFormat = 'CSV';
       const container = $('spreadsheetContainer');
@@ -546,6 +647,7 @@ function initSpreadsheetToolbar() {
       const info = $('statusInfo');
       if (info) info.textContent = '0 cells';
       $('statusFormat').textContent = 'CSV';
+      addFileTab('Untitled Spreadsheet', 'spreadsheet', null);
     } catch (e) { console.error('New sheet error:', e); }
   });
 
@@ -566,7 +668,7 @@ function initSpreadsheetToolbar() {
       a.href = url;
       a.download = ($('docName')?.value || 'spreadsheet') + '.xlsx';
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => { URL.revokeObjectURL(url); }, 200);
     } catch (e) { console.error('XLSX export error:', e); }
   });
 
@@ -587,9 +689,15 @@ function initSpreadsheetToolbar() {
     closeSsMenus();
     if (state.spreadsheetView) { state.spreadsheetView.destroy(); state.spreadsheetView = null; }
     const { switchView } = await import('./file.js');
-    switchView('editor');
-    $('welcomeScreen').style.display = '';
-    $('statusbar').classList.remove('show');
+    const { closeFileTab } = await import('./tabs.js');
+    // Close the active tab if there is one
+    if (state.activeFileId) {
+      closeFileTab(state.activeFileId);
+    } else {
+      switchView('editor');
+      $('welcomeScreen').style.display = '';
+      $('statusbar').classList.remove('show');
+    }
   });
 
   // Edit menu
@@ -643,6 +751,18 @@ function initSpreadsheetToolbar() {
     if (!state.spreadsheetView) return;
     const { col, row } = state.spreadsheetView.selectedCell;
     state.spreadsheetView.startEdit(col, row, '=');
+  });
+
+  // Insert Image (S3.5)
+  $('ssMenuInsertImage')?.addEventListener('click', () => {
+    closeSsMenus();
+    if (state.spreadsheetView) state.spreadsheetView.insertImage();
+  });
+
+  // Insert Shape (S5.6)
+  $('ssMenuInsertShape')?.addEventListener('click', () => {
+    closeSsMenus();
+    if (state.spreadsheetView) state.spreadsheetView.showInsertShapeDialog();
   });
 
   // Insert Chart (S3)
@@ -764,15 +884,23 @@ function initSpreadsheetToolbar() {
   });
 
   // Insert > Comment (S2.3)
-  $('ssMenuInsertComment')?.addEventListener('click', () => {
+  $('ssMenuInsertComment')?.addEventListener('click', async () => {
     closeSsMenus();
     if (!state.spreadsheetView) return;
     const { col, row } = state.spreadsheetView.selectedCell;
     const sheet = state.spreadsheetView._sheet();
     const cell = sheet ? sheet.getCell(col, row) : null;
     const existing = cell?.comment?.text || '';
-    const text = window.prompt(existing ? 'Edit comment:' : 'Add comment:', existing);
-    if (text !== null) state.spreadsheetView.setCellComment(col, row, text);
+    // Custom modal prompt instead of browser prompt()
+    const text = await _ssCommentPrompt(existing ? 'Edit comment:' : 'Add comment:', existing);
+    if (text === null) return;
+    const trimmed = text.trim();
+    if (trimmed.length > 10000) {
+      const { showToast } = await import('./toolbar-handlers.js');
+      showToast('Comment too long (max 10,000 characters)', 'error');
+      return;
+    }
+    state.spreadsheetView.setCellComment(col, row, text);
   });
   // Comments panel
   $('ssMenuShowComments')?.addEventListener('click', () => {

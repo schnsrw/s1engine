@@ -101,12 +101,14 @@
   box-sizing: border-box;
 }
 
-body.dark-mode .ss-formula-wrap {
+body.dark-mode .ss-formula-wrap,
+[data-theme="dark"] .ss-formula-wrap {
   background: #333;
   border-radius: 2px;
 }
 
-body.dark-mode .ss-formula-highlight {
+body.dark-mode .ss-formula-highlight,
+[data-theme="dark"] .ss-formula-highlight {
   color: #e0e0e0;
 }
 
@@ -220,7 +222,7 @@ body.dark-mode .ss-formula-highlight {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   min-width: 200px;
   padding: 4px 0;
-  z-index: 100;
+  z-index: 600;
   font-family: 'Arial', sans-serif;
   font-size: 13px;
 }
@@ -268,7 +270,7 @@ body.dark-mode .ss-formula-highlight {
   max-height: 280px;
   overflow-y: auto;
   padding: 8px;
-  z-index: 100;
+  z-index: 500;
   font-family: 'Arial', sans-serif;
   font-size: 13px;
 }
@@ -523,140 +525,170 @@ body.dark-mode .ss-formula-highlight {
 }
 
 /* ─── Dark mode overrides ────────────────────── */
+/* Dual selectors: body.dark-mode (legacy) + [data-theme="dark"] (primary) */
 body.dark-mode .spreadsheet-container,
-body.dark-mode .ss-canvas {
+body.dark-mode .ss-canvas,
+[data-theme="dark"] .spreadsheet-container,
+[data-theme="dark"] .ss-canvas {
   background: #1e1e1e;
 }
 
-body.dark-mode .ss-formula-bar {
+body.dark-mode .ss-formula-bar,
+[data-theme="dark"] .ss-formula-bar {
   background: #2d2d2d;
   border-color: #444;
 }
 
-body.dark-mode .ss-cell-ref-label {
+body.dark-mode .ss-cell-ref-label,
+[data-theme="dark"] .ss-cell-ref-label {
   background: #333;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-formula-input {
+body.dark-mode .ss-formula-input,
+[data-theme="dark"] .ss-formula-input {
   background: #333;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-formula-wrap .ss-formula-input {
+body.dark-mode .ss-formula-wrap .ss-formula-input,
+[data-theme="dark"] .ss-formula-wrap .ss-formula-input {
   background: transparent;
 }
 
-body.dark-mode .ss-tab-bar {
+body.dark-mode .ss-tab-bar,
+[data-theme="dark"] .ss-tab-bar {
   background: #2d2d2d;
   border-color: #444;
 }
 
-body.dark-mode .ss-tab {
+body.dark-mode .ss-tab,
+[data-theme="dark"] .ss-tab {
   color: #aaa;
 }
 
-body.dark-mode .ss-tab.active {
+body.dark-mode .ss-tab.active,
+[data-theme="dark"] .ss-tab.active {
   background: #1e1e1e;
   border-color: #444;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-tab:hover:not(.active) {
+body.dark-mode .ss-tab:hover:not(.active),
+[data-theme="dark"] .ss-tab:hover:not(.active) {
   background: #3a3a3a;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-context-menu {
+body.dark-mode .ss-context-menu,
+[data-theme="dark"] .ss-context-menu {
   background: #2d2d2d;
   border-color: #555;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-body.dark-mode .ss-ctx-item {
+body.dark-mode .ss-ctx-item,
+[data-theme="dark"] .ss-ctx-item {
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-ctx-item:hover {
+body.dark-mode .ss-ctx-item:hover,
+[data-theme="dark"] .ss-ctx-item:hover {
   background: #3a3a3a;
 }
 
-body.dark-mode .ss-ctx-sep {
+body.dark-mode .ss-ctx-sep,
+[data-theme="dark"] .ss-ctx-sep {
   background: #444;
 }
 
-body.dark-mode .ss-cell-editor {
+body.dark-mode .ss-cell-editor,
+[data-theme="dark"] .ss-cell-editor {
   background: #1e1e1e;
   color: #e0e0e0;
   border-color: #4d90fe;
 }
 
-body.dark-mode .ss-toolbar {
+body.dark-mode .ss-toolbar,
+[data-theme="dark"] .ss-toolbar {
   background: #2d2d2d;
   border-color: #444;
 }
 
-body.dark-mode .ss-toolbar .tb-btn {
+body.dark-mode .ss-toolbar .tb-btn,
+[data-theme="dark"] .ss-toolbar .tb-btn {
   color: #aaa;
 }
 
-body.dark-mode .ss-toolbar .tb-btn:hover {
+body.dark-mode .ss-toolbar .tb-btn:hover,
+[data-theme="dark"] .ss-toolbar .tb-btn:hover {
   background: #3a3a3a;
 }
 
-body.dark-mode .ss-menubar {
+body.dark-mode .ss-menubar,
+[data-theme="dark"] .ss-menubar {
   background: #292a2d;
   border-color: #444;
 }
 
-body.dark-mode .ss-tb-select {
+body.dark-mode .ss-tb-select,
+[data-theme="dark"] .ss-tb-select {
   background: #333;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-color-btn .msi {
+body.dark-mode .ss-color-btn .msi,
+[data-theme="dark"] .ss-color-btn .msi {
   color: #aaa;
 }
 
-body.dark-mode .ss-toolbar .tb-btn.active {
+body.dark-mode .ss-toolbar .tb-btn.active,
+[data-theme="dark"] .ss-toolbar .tb-btn.active {
   background: #3a3a3a;
   color: #8ab4f8;
 }
 
-body.dark-mode .ss-find-bar {
+body.dark-mode .ss-find-bar,
+[data-theme="dark"] .ss-find-bar {
   background: #2d2d2d;
   border-color: #444;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-body.dark-mode .ss-find-input {
+body.dark-mode .ss-find-input,
+[data-theme="dark"] .ss-find-input {
   background: #333;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-find-info {
+body.dark-mode .ss-find-info,
+[data-theme="dark"] .ss-find-info {
   color: #aaa;
 }
 
-body.dark-mode .ss-find-btn {
+body.dark-mode .ss-find-btn,
+[data-theme="dark"] .ss-find-btn {
   color: #aaa;
 }
 
-body.dark-mode .ss-find-btn:hover {
+body.dark-mode .ss-find-btn:hover,
+[data-theme="dark"] .ss-find-btn:hover {
   background: #3a3a3a;
 }
 
-body.dark-mode .ss-find-btn-text {
+body.dark-mode .ss-find-btn-text,
+[data-theme="dark"] .ss-find-btn-text {
   background: #333;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-find-btn-text:hover {
+body.dark-mode .ss-find-btn-text:hover,
+[data-theme="dark"] .ss-find-btn-text:hover {
   background: #3a3a3a;
 }
 
@@ -783,42 +815,50 @@ body.dark-mode .ss-find-btn-text:hover {
 }
 
 /* ─── Dark mode — Charts ────────────────────── */
-body.dark-mode .ss-chart-container {
+body.dark-mode .ss-chart-container,
+[data-theme="dark"] .ss-chart-container {
   background: #1e1e1e;
   border-color: #444;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-body.dark-mode .ss-chart-container:hover {
+body.dark-mode .ss-chart-container:hover,
+[data-theme="dark"] .ss-chart-container:hover {
   border-color: #8ab4f8;
 }
 
-body.dark-mode .ss-chart-title {
+body.dark-mode .ss-chart-title,
+[data-theme="dark"] .ss-chart-title {
   color: #e0e0e0;
   border-bottom-color: #333;
 }
 
-body.dark-mode .ss-chart-close {
+body.dark-mode .ss-chart-close,
+[data-theme="dark"] .ss-chart-close {
   color: #aaa;
 }
 
-body.dark-mode .ss-chart-close:hover {
+body.dark-mode .ss-chart-close:hover,
+[data-theme="dark"] .ss-chart-close:hover {
   background: #3a3a3a;
   color: #e0e0e0;
 }
 
-body.dark-mode .chart-type-grid button {
+body.dark-mode .chart-type-grid button,
+[data-theme="dark"] .chart-type-grid button {
   background: #2d2d2d;
   border-color: #555;
   color: #e0e0e0;
 }
 
-body.dark-mode .chart-type-grid button:hover {
+body.dark-mode .chart-type-grid button:hover,
+[data-theme="dark"] .chart-type-grid button:hover {
   border-color: #8ab4f8;
   background: #333;
 }
 
-body.dark-mode .chart-type-grid button.selected {
+body.dark-mode .chart-type-grid button.selected,
+[data-theme="dark"] .chart-type-grid button.selected {
   border-color: #8ab4f8;
   background: #374151;
 }
@@ -972,54 +1012,100 @@ body.dark-mode .chart-type-grid button.selected {
 }
 
 /* ─── Dark mode — new elements ──────────────── */
-body.dark-mode .ss-toast {
+body.dark-mode .ss-toast,
+[data-theme="dark"] .ss-toast {
   background: #555;
   color: #fff;
 }
 
-body.dark-mode .ss-comment-tooltip {
+body.dark-mode .ss-comment-tooltip,
+[data-theme="dark"] .ss-comment-tooltip {
   background: #3a3622;
   border-color: #7c6a00;
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-comment-tooltip .ss-comment-author {
+body.dark-mode .ss-comment-tooltip .ss-comment-author,
+[data-theme="dark"] .ss-comment-tooltip .ss-comment-author {
   color: #aaa;
 }
 
-body.dark-mode .ss-comment-tooltip .ss-comment-text {
+body.dark-mode .ss-comment-tooltip .ss-comment-text,
+[data-theme="dark"] .ss-comment-tooltip .ss-comment-text {
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-comments-panel {
+body.dark-mode .ss-comments-panel,
+[data-theme="dark"] .ss-comments-panel {
   background: #2d2d2d;
   border-color: #444;
 }
 
-body.dark-mode .ss-comments-header {
+body.dark-mode .ss-comments-header,
+[data-theme="dark"] .ss-comments-header {
   background: #333;
   border-color: #444;
 }
 
-body.dark-mode .ss-comment-entry {
+body.dark-mode .ss-comment-entry,
+[data-theme="dark"] .ss-comment-entry {
   border-color: #444;
 }
 
-body.dark-mode .ss-comment-entry:hover {
+body.dark-mode .ss-comment-entry:hover,
+[data-theme="dark"] .ss-comment-entry:hover {
   background: #3a3a3a;
 }
 
-body.dark-mode .ss-validation-dropdown {
+body.dark-mode .ss-validation-dropdown,
+[data-theme="dark"] .ss-validation-dropdown {
   background: #2d2d2d;
   border-color: #555;
 }
 
-body.dark-mode .ss-validation-option {
+body.dark-mode .ss-validation-option,
+[data-theme="dark"] .ss-validation-option {
   color: #e0e0e0;
 }
 
-body.dark-mode .ss-validation-option:hover {
+body.dark-mode .ss-validation-option:hover,
+[data-theme="dark"] .ss-validation-option:hover {
   background: #3a3a3a;
+}
+
+/* ═══════════════════════════════════════════════════
+   S5.6: Shapes & Text Boxes
+   ═══════════════════════════════════════════════════ */
+
+.ss-shape-overlay {
+  position: absolute;
+  cursor: move;
+  z-index: 25;
+  box-shadow: none;
+  transition: box-shadow 0.15s;
+  box-sizing: border-box;
+}
+
+.ss-shape-overlay:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.ss-shape-overlay:focus-within {
+  box-shadow: 0 2px 12px rgba(26, 115, 232, 0.25);
+}
+
+.ss-shape-text {
+  cursor: default;
+}
+
+.ss-shape-text[contenteditable="true"] {
+  cursor: text;
+}
+
+/* ─── Dark mode — Shapes ────────────────────────── */
+body.dark-mode .ss-shape-overlay .ss-shape-text,
+[data-theme="dark"] .ss-shape-overlay .ss-shape-text {
+  color: #e0e0e0;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1028,7 +1114,7 @@ body.dark-mode .ss-validation-option:hover {
 
 .ss-autocomplete-dropdown {
   position: absolute;
-  z-index: 150;
+  z-index: 550;
   background: #fff;
   border: 1px solid #dadce0;
   border-radius: 6px;
@@ -1068,7 +1154,7 @@ body.dark-mode .ss-validation-option:hover {
 
 .ss-signature-tooltip {
   position: absolute;
-  z-index: 150;
+  z-index: 550;
   background: #333;
   color: #fff;
   padding: 4px 10px;
@@ -1082,28 +1168,131 @@ body.dark-mode .ss-validation-option:hover {
 }
 
 /* ─── Dark mode for autocomplete ──────────────── */
-body.dark-mode .ss-autocomplete-dropdown {
+body.dark-mode .ss-autocomplete-dropdown,
+[data-theme="dark"] .ss-autocomplete-dropdown {
   background: #2d2d2d;
   border-color: #555;
 }
 
-body.dark-mode .ss-ac-item {
+body.dark-mode .ss-ac-item,
+[data-theme="dark"] .ss-ac-item {
   color: #e0e0e0;
 }
 
 body.dark-mode .ss-ac-item:hover,
-body.dark-mode .ss-ac-item.active {
+body.dark-mode .ss-ac-item.active,
+[data-theme="dark"] .ss-ac-item:hover,
+[data-theme="dark"] .ss-ac-item.active {
   background: #3a3a3a;
 }
 
-body.dark-mode .ss-ac-name {
+body.dark-mode .ss-ac-name,
+[data-theme="dark"] .ss-ac-name {
   color: #8ab4f8;
 }
 
-body.dark-mode .ss-ac-desc {
+body.dark-mode .ss-ac-desc,
+[data-theme="dark"] .ss-ac-desc {
   color: #9aa0a6;
 }
 
-body.dark-mode .ss-signature-tooltip {
+body.dark-mode .ss-signature-tooltip,
+[data-theme="dark"] .ss-signature-tooltip {
   background: #555;
+}
+
+/* ─── Mobile Responsive (S5.7) ───────────────── */
+@media (max-width: 768px) {
+  .ss-toolbar {
+    height: auto;
+    min-height: 36px;
+    flex-wrap: wrap;
+    padding: 4px;
+    gap: 2px;
+    overflow-x: auto;
+  }
+  .ss-toolbar .tb-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    font-size: 20px;
+  }
+  .ss-toolbar .tb-sep {
+    display: none;
+  }
+  .ss-toolbar .tb-label {
+    display: none;
+  }
+  .ss-toolbar .ss-tb-select {
+    min-width: 60px;
+    height: 32px;
+  }
+  .ss-menubar {
+    height: auto;
+    min-height: 28px;
+  }
+  .ss-menubar .app-menu-btn {
+    font-size: 12px;
+    padding: 0 6px;
+  }
+  .ss-formula-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 28px;
+    padding: 2px 4px;
+    gap: 4px;
+  }
+  .ss-cell-ref-label {
+    min-width: 40px;
+    font-size: 11px;
+  }
+  .ss-fx-label {
+    display: none;
+  }
+  .ss-formula-wrap {
+    width: 100%;
+    min-width: 0;
+    order: 1;
+  }
+  .ss-formula-input {
+    font-size: 12px;
+  }
+  .ss-tab-bar {
+    height: 32px;
+    min-height: 32px;
+  }
+  .ss-tab {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .ss-context-menu {
+    min-width: 160px;
+    font-size: 14px;
+  }
+  .ss-ctx-item {
+    padding: 10px 16px;
+  }
+  .ss-cell-editor {
+    font-size: 16px !important; /* Prevents iOS zoom on input focus */
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ss-toolbar .ss-tb-select {
+    display: none;
+  }
+  .ss-toolbar .ss-color-btn {
+    display: none;
+  }
+  .ss-formula-bar {
+    padding: 0 4px;
+  }
+  .ss-cell-ref-label {
+    min-width: 36px;
+    font-size: 10px;
+  }
+  .ss-fx-label {
+    display: none;
+  }
 }

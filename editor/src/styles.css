@@ -56,7 +56,15 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --font-ui: 'Google Sans', 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
-  /* Z-index hierarchy */
+  /* Z-Index Hierarchy (ascending)
+     --z-toolbar:        100   Toolbar (fixed top)
+     --z-dropdown:       200   Dropdown menus
+     --z-sidebar:        300   Side panels (pages, comments, properties)
+     --z-modal-backdrop: 400   Modal backdrop overlay
+     --z-modal:          500   Modal dialogs, floating toolbar
+     --z-context-menu:   600   Context menus
+     --z-toast:          700   Toast notifications
+  */
   --z-toolbar: 100;
   --z-dropdown: 200;
   --z-sidebar: 300;
@@ -64,6 +72,12 @@
   --z-modal: 500;
   --z-context-menu: 600;
   --z-toast: 700;
+  /* PDF layer stacking (local to .pdf-page) */
+  --z-pdf-text: 1;
+  --z-pdf-annotation: 2;
+  --z-pdf-drawing: 3;
+  --z-pdf-overlay: 5;
+  --z-pdf-text-active: 6;
 }
 
 html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(--bg-app);color:var(--text-primary);font-size:14px}
@@ -123,6 +137,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .wasm-status{display:flex;align-items:center;gap:6px}
 .wasm-dot{width:8px;height:8px;border-radius:50%;background:#fbbc04;flex-shrink:0;transition:background .3s}
 .wasm-dot.ok{background:#34a853;animation:none}.wasm-dot.err{background:#ea4335;animation:none}
+[data-theme="dark"] .wasm-dot.err{background:#f28b82}
 @keyframes wasm-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .wasm-dot:not(.ok):not(.err){animation:wasm-pulse 1.5s ease-in-out infinite}
 .wasm-label{font-size:11px;color:var(--text-muted);font-family:'Roboto Mono',monospace;letter-spacing:-.02em}
@@ -221,7 +236,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   border-bottom:1px solid var(--border-light);
   display:none;align-items:center;
   padding:0 8px;gap:1px;flex-shrink:0;
-  overflow-x:auto;overflow-y:hidden;
+  overflow-x:auto;overflow-y:visible;
   position:relative;z-index:50;
 }
 .toolbar::-webkit-scrollbar{height:0}
@@ -269,6 +284,9 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .format-painter-cursor *{
   cursor:crosshair !important;
 }
+/* D21: Global cursor override when format painter is active on body */
+body.format-painter-active { cursor: copy !important; }
+body.format-painter-active [contenteditable] { cursor: copy !important; }
 
 .tb-btn .msi{font-size:18px}
 .tb-btn svg{width:18px;height:18px;fill:currentColor}
@@ -289,7 +307,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .tb-zoom-value:hover{background:var(--bg-toolbar-hover)}
 .tb-zoom-dropdown{
   position:absolute;top:100%;left:50%;transform:translateX(-50%) translateY(-4px);
-  background:var(--bg-app);border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--bg-app);border:1px solid var(--border);border-radius:var(--radius-md);
   box-shadow:var(--shadow-menu);z-index:500;min-width:110px;padding:4px 0;
   margin-top:4px;
   opacity:0;pointer-events:none;visibility:hidden;
@@ -480,6 +498,128 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 .tab.active::after{
   content:'';position:absolute;bottom:0;left:4px;right:4px;
   height:3px;background:var(--accent);border-radius:3px 3px 0 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   FILE TAB BAR (open files)
+   ═══════════════════════════════════════════════════ */
+.file-tab-bar {
+  display: none;
+  align-items: stretch;
+  height: 32px;
+  background: var(--bg-white);
+  border-bottom: 1px solid var(--border-light);
+  padding: 0 4px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.file-tab-bar::-webkit-scrollbar { display: none; }
+.file-tab-bar.show { display: flex; }
+
+.file-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+  min-width: 0;
+  max-width: 180px;
+  flex-shrink: 0;
+}
+.file-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover, rgba(0,0,0,0.04));
+}
+.file-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--bg-surface, rgba(26,115,232,0.06));
+}
+.file-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.file-tab-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.file-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+.file-tab:hover .file-tab-close,
+.file-tab.active .file-tab-close {
+  opacity: 1;
+}
+.file-tab-close:hover {
+  background: rgba(0,0,0,0.1);
+  color: var(--text-primary);
+}
+.file-tab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  display: none;
+}
+.file-tab.dirty .file-tab-dirty {
+  display: block;
+}
+.file-tab.dirty .file-tab-close {
+  display: none;
+}
+.file-tab.dirty:hover .file-tab-dirty {
+  display: none;
+}
+.file-tab.dirty:hover .file-tab-close {
+  display: flex;
+  opacity: 1;
+}
+
+/* Dark mode overrides for file tab bar */
+:root:not([data-theme="light"]) .file-tab-bar {
+  background: var(--bg-white);
+  border-bottom-color: var(--border-light);
+}
+:root:not([data-theme="light"]) .file-tab:hover {
+  background: rgba(255,255,255,0.06);
+}
+:root:not([data-theme="light"]) .file-tab.active {
+  background: rgba(138,180,248,0.1);
+}
+:root:not([data-theme="light"]) .file-tab-close:hover {
+  background: rgba(255,255,255,0.12);
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1368,7 +1508,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   overflow:hidden;
   opacity:1;
   line-height:1;
-  z-index:1;
+  z-index:var(--z-pdf-text);
 }
 .pdf-text-layer span{
   position:absolute;
@@ -1381,24 +1521,26 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
 }
 /* When highlight tool is active, boost text layer above overlays */
 .pdf-canvas-container[data-tool="highlight"] .pdf-text-layer{
-  z-index:6;
+  z-index:var(--z-pdf-text-active);
   cursor:text;
 }
+/* PDF layers use local z-index within the PDF container stacking context.
+   These don't conflict with global z-index values. */
 .pdf-annotation-layer{
   position:absolute;top:0;left:0;
   width:100%;height:100%;
   pointer-events:none;
-  z-index:2;
+  z-index:var(--z-pdf-annotation);
 }
 .pdf-drawing-layer{
   position:absolute;top:0;left:0;
   pointer-events:none;
-  z-index:3;
+  z-index:var(--z-pdf-drawing);
 }
 .pdf-overlay-layer{
   position:absolute;top:0;left:0;
   pointer-events:none;
-  z-index:5;
+  z-index:var(--z-pdf-overlay);
 }
 
 /* PDF tool cursors — apply to container and all children */
@@ -1739,6 +1881,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--font-ui);background:var(
   transition:background .15s;
 }
 .error-indicator:hover{background:rgba(217,48,37,0.08)}
+[data-theme="dark"] .error-indicator .msi { color: #f28b82; }
 .error-badge{
   min-width:14px;height:14px;line-height:14px;
   text-align:center;font-size:10px;font-weight:600;
@@ -2743,6 +2886,7 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
    AI ASSISTANT PANEL
    ═══════════════════════════════════════════════════ */
 .ai-panel {
+  position: relative;
   width: 0;
   min-width: 0;
   overflow: hidden;
@@ -2985,6 +3129,25 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
 [data-theme="dark"] .ai-msg-action-btn { background: #35363a; border-color: #5f6368; color: #bdc1c6; }
 [data-theme="dark"] .ai-msg-action-btn:hover { background: #3c4043; color: #e8eaed; }
 [data-theme="dark"] .ai-welcome { color: #9aa0a6; }
+
+/* ── AI Panel Resize Handle (Enhancement 86) ── */
+.ai-panel-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 1;
+  transition: background .15s;
+}
+.ai-panel-resize-handle:hover {
+  background: var(--accent);
+}
+[data-theme="dark"] .ai-panel-resize-handle:hover {
+  background: #8ab4f8;
+}
 
 /* ── AI Context Chip (panel header) ── */
 .ai-context-chip {
@@ -3482,7 +3645,7 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
    SLASH COMMAND MENU
    ═══════════════════════════════════════════════════ */
 .slash-menu{
-  position:absolute;z-index:250;
+  position:absolute;z-index:260;
   background:var(--bg-white);
   border:1px solid var(--border-light);
   border-radius:var(--radius-md);
@@ -3752,6 +3915,10 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
 /* ═══════════════════════════════════════════════════
    DARK MODE — auto (prefers-color-scheme) + manual ([data-theme="dark"])
    ═══════════════════════════════════════════════════ */
+/* Dark mode: Two mechanisms work together:
+   1. @media (prefers-color-scheme: dark) — auto-detects OS preference
+   2. [data-theme="dark"] — manual toggle via UI button
+   Both set the same CSS variables. Manual toggle takes precedence. */
 /* Manual toggle via data attribute */
 [data-theme="dark"] {
   --bg-app: #202124;
@@ -3930,6 +4097,7 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
   :root:not([data-theme="light"]) input[type=number],:root:not([data-theme="light"]) select { color-scheme: dark; }
   :root:not([data-theme="light"]) .canvas::-webkit-scrollbar-thumb { background: #5f6368; border-color: #202124; }
   :root:not([data-theme="light"]) .canvas { background: #303134; }
+  :root:not([data-theme="light"]) .wasm-dot.err { background: #f28b82; }
 }
 
 /* ═══════════════════════════════════════════════════
@@ -4048,7 +4216,7 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
   .toolbar{
     flex-wrap:nowrap;
     overflow-x:auto;
-    overflow-y:hidden;
+    overflow-y:visible;
     -webkit-overflow-scrolling:touch;
     scrollbar-width:none; /* Firefox */
     height:auto;
@@ -4199,7 +4367,7 @@ mark.find-highlight.replace-preview{background:#f28b82;color:#fff;text-decoratio
     padding:2px 4px;gap:1px;
     flex-wrap:nowrap !important;
     overflow-x:auto;
-    overflow-y:hidden;
+    overflow-y:visible;
     -webkit-overflow-scrolling:touch;
     scrollbar-width:none;
   }

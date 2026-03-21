@@ -12,9 +12,53 @@ import { deleteSelectedImage, setupImages } from './images.js';
 import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
 import { updatePageBreaks } from './pagination.js';
 import { markDirty, saveVersion, updateDirtyIndicator, updateStatusBar, openAutosaveDB } from './file.js';
-import { broadcastOp, broadcastCrdtOp } from './collab.js';
+import { broadcastOp, broadcastCrdtOp, isApplyingRemote } from './collab.js';
 import { setZoomLevel, getAutoCorrectMap, isAutoCorrectEnabled, exitFormatPainter, applyFormatPainter, enterHeaderFooterEditMode, exitHeaderFooterEditMode, showToast } from './toolbar-handlers.js';
 import { closeFindBar } from './find.js';
+
+/**
+ * Custom modal prompt (replaces browser prompt()). Used for alt text, etc.
+ */
+function _showPromptModal(message, defaultValue) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const h3 = document.createElement('h3');
+    h3.textContent = message;
+    modal.appendChild(h3);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    input.value = defaultValue || '';
+    input.style.cssText = 'width:100%;padding:8px;margin:8px 0 16px;border:1px solid #dadce0;border-radius:4px;font-size:14px;box-sizing:border-box;';
+    modal.appendChild(input);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'modal-cancel';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'OK';
+    okBtn.className = 'modal-ok primary';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+    cancelBtn.onclick = () => close(null);
+    okBtn.onclick = () => close(input.value);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(input.value);
+      if (e.key === 'Escape') close(null);
+    });
+    input.focus();
+    input.select();
+  });
+}
 
 /**
  * Try incremental render for a single paragraph; fall back to full renderDocument.
@@ -28,6 +72,13 @@ function renderSmart(nodeId) {
 
 export function initInput() {
   const page = $('pageContainer');
+
+  // ─── Cleanup previous listeners if re-initializing ───
+  // Prevents event listener accumulation when documents are switched
+  if (state._inputCleanup) state._inputCleanup();
+  const _inputAC = new AbortController();
+  const _inputSignal = { signal: _inputAC.signal };
+  state._inputCleanup = () => { _inputAC.abort(); state._inputCleanup = null; };
 
   // ─── Clear pending formats on editor blur ───
   // ED2-06: Only clear when blur goes outside the editor UI (not toolbar/modal)
@@ -49,6 +100,27 @@ export function initInput() {
     }
     state.pendingFormats = {};
   }, true);
+
+  // ─── Clear stale pending formats on editor focus ───
+  // Prevents stale pending formats from a previous editing context
+  page.addEventListener('focus', () => {
+    state.pendingFormats = {};
+  }, true);
+
+  // ─── D6: IME composition — document-level guards for CRDT text ops ───
+  // touch.js sets compositionstart/end on pageContainer, but we also need
+  // document-level listeners to catch composition events that may fire before
+  // the pageContainer receives focus (e.g. quick IME start on fresh focus).
+  document.addEventListener('compositionstart', () => { state._composing = true; }, _inputSignal);
+  document.addEventListener('compositionend', () => {
+    // Bug R12: Delay clearing to ensure all composition events have settled
+    setTimeout(() => {
+      state._composing = false;
+      // Sync the final composed text after IME commits
+      const el = getActiveElement();
+      if (el) debouncedSync(el);
+    }, 50);
+  }, _inputSignal);
 
   // ─── UXP-02: Double-click to enter header/footer edit mode ───
   page.addEventListener('dblclick', (e) => {
@@ -72,15 +144,17 @@ export function initInput() {
     // Click on toolbar/modal elements should not exit
     if (e.target.closest('.hf-toolbar, .hf-close-btn, .modal-overlay, .modal')) return;
     exitHeaderFooterEditMode();
-  });
+  }, _inputSignal);
 
   // ─── UXP-02: Escape key exits header/footer edit mode ───
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.hfEditingMode) {
       e.preventDefault();
+      // Sync pending text before exiting
+      syncAllText();
       exitHeaderFooterEditMode();
     }
-  }, true);
+  }, { capture: true, ..._inputSignal });
 
   // ─── FS-39: Ctrl+Click to add secondary cursor ───
   page.addEventListener('click', (e) => {
@@ -187,9 +261,20 @@ export function initInput() {
             if (crdtOps && crdtOps !== '[]') {
               broadcastCrdtOp(crdtOps);
             }
-            // Also update the non-collab doc for rendering
+            // Sync to main doc model — must stay in sync with CRDT
             if (state.doc) {
-              try { state.doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, e.data); } catch (_) {}
+              try {
+                state.doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, e.data);
+              } catch (syncErr) {
+                console.error('[input] CRDT/doc sync divergence on insert:', syncErr);
+                // Force full re-sync from CRDT source of truth on next tick
+                setTimeout(() => {
+                  try {
+                    const html = state.collabDoc.to_html();
+                    if (html && typeof renderDocument === 'function') renderDocument();
+                  } catch (_) {}
+                }, 0);
+              }
             }
           } catch (err) {
             console.warn('CRDT insert failed, falling back to sync:', err);
@@ -210,8 +295,18 @@ export function initInput() {
                 broadcastCrdtOp(crdtOps);
               }
               if (state.doc) {
-                try { state.doc.set_paragraph_text(info.startNodeId,
-                  getEditableText(info.startEl)); } catch (_) {}
+                try {
+                  state.doc.set_paragraph_text(info.startNodeId,
+                    getEditableText(info.startEl));
+                } catch (syncErr) {
+                  console.error('[input] CRDT/doc sync divergence on delete:', syncErr);
+                  setTimeout(() => {
+                    try {
+                      const html = state.collabDoc.to_html();
+                      if (html && typeof renderDocument === 'function') renderDocument();
+                    } catch (_) {}
+                  }, 0);
+                }
               }
             }
           } catch (err) {
@@ -260,7 +355,14 @@ export function initInput() {
           for (const sc of state.multiSelections) {
             sc.offset += e.data.length;
           }
-          renderDocument();
+          try {
+            renderDocument();
+          } catch (renderErr) {
+            console.warn('[multi-cursor] Render failed after insert, resetting cursors:', renderErr);
+            state.multiSelections = [];
+            clearSecondarySelections();
+            renderDocument(); // retry full render with clean state
+          }
           // Broadcast multi-cursor insert to peers
           for (const c of cursors) {
             broadcastOp({ action: 'insertText', nodeId: c.nodeId, offset: c.offset, text: e.data });
@@ -273,7 +375,11 @@ export function initInput() {
           // Fallback: insert at primary only, clear secondary cursors
           clearSecondarySelections();
         }
-      } catch (err) { console.warn('multi-cursor insert:', err); }
+      } catch (err) {
+        console.warn('[multi-cursor] Error during insert, resetting cursors:', err);
+        state.multiSelections = [];
+        clearSecondarySelections();
+      }
       return;
     }
     if (e.inputType === 'insertText' && e.data) {
@@ -525,7 +631,7 @@ export function initInput() {
     setTimeout(() => {
       applyFormatPainter();
     }, 10);
-  });
+  }, _inputSignal);
 
   // ─── Keydown ────────────────────────────────────
   page.addEventListener('keydown', e => {
@@ -713,26 +819,43 @@ export function initInput() {
       // FS-02: Ctrl+Shift+V — Paste without formatting
       if (e.shiftKey && e.key.toLowerCase() === 'v') {
         e.preventDefault();
+        // D22: Multi-cursor paste not supported
+        if (state.multiSelections && state.multiSelections.length > 0) {
+          showToast('Paste with multiple cursors is not yet supported', 'info');
+          return;
+        }
         const pasteInfo = state._selectAll ? state.lastSelInfo : info;
         if (pasteInfo && state.doc) {
-          // Delete selection first if non-collapsed
-          if (!pasteInfo.collapsed) {
-            try {
-              state.doc.delete_selection(pasteInfo.startNodeId, pasteInfo.startOffset, pasteInfo.endNodeId, pasteInfo.endOffset);
-              renderDocument();
-            } catch (err) { console.error('paste-plain delete selection:', err); }
-          }
           if (navigator.clipboard && navigator.clipboard.readText) {
+            // D2 fix: Read clipboard FIRST — don't delete selection until we have content.
+            // If clipboard read fails (permission error), selection stays intact.
             navigator.clipboard.readText().then(text => {
               if (!text) return;
               try {
                 recordUndoAction('Paste without formatting');
+                // Delete selection only after clipboard read succeeds
+                if (!pasteInfo.collapsed) {
+                  try {
+                    state.doc.delete_selection(pasteInfo.startNodeId, pasteInfo.startOffset, pasteInfo.endNodeId, pasteInfo.endOffset);
+                  } catch (delErr) { console.error('paste-plain delete selection:', delErr); }
+                }
                 if (text.includes('\n')) {
                   state.doc.paste_plain_text(pasteInfo.startNodeId, pasteInfo.startOffset, text);
                 } else {
                   state.doc.insert_text_in_paragraph(pasteInfo.startNodeId, pasteInfo.startOffset, text);
                 }
                 broadcastOp({ action: 'pasteText', nodeId: pasteInfo.startNodeId, offset: pasteInfo.startOffset, text });
+                // Bug R4: Apply pending formats to pasted text (Ctrl+Shift+V path)
+                if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
+                  try {
+                    const pastedLen = Array.from(text.replace(/\n/g, '')).length;
+                    const endOffset = pasteInfo.startOffset + pastedLen;
+                    for (const [fmtKey, fmtVal] of Object.entries(state.pendingFormats)) {
+                      state.doc.format_selection(pasteInfo.startNodeId, pasteInfo.startOffset, pasteInfo.startNodeId, endOffset, fmtKey, fmtVal);
+                      broadcastOp({ action: 'formatSelection', startNode: pasteInfo.startNodeId, startOffset: pasteInfo.startOffset, endNode: pasteInfo.startNodeId, endOffset: endOffset, key: fmtKey, value: fmtVal });
+                    }
+                  } catch (_) {}
+                }
                 renderDocument();
                 const container = $('pageContainer');
                 const updated = container?.querySelector(`[data-node-id="${pasteInfo.startNodeId}"]`);
@@ -741,7 +864,7 @@ export function initInput() {
                 markDirty();
               } catch (err) { console.error('paste plain text:', err); }
             }).catch(() => {
-              // Clipboard API unavailable
+              // Clipboard read failed — selection is still intact, no content lost
               import('./toolbar-handlers.js').then(mod => {
                 if (typeof mod.showToast === 'function') mod.showToast('Paste without formatting not available in this browser', 'info');
               });
@@ -1039,17 +1162,22 @@ export function initInput() {
           const listType = el.dataset.listType || 'bullet';
           const newLevel = e.shiftKey ? Math.max(0, currentLevel - 1) : Math.min(8, currentLevel + 1);
           try {
+            state._suppressVirtualScroll = true; // R14: prevent cursor jump during indent
+            // R14: Save cursor offset before indent so we can restore it after re-render
+            const savedOffset = getCursorOffset(el);
             doc.set_list_format(nodeId, listType, newLevel);
             broadcastOp({ action: 'setListFormat', nodeId, format: listType, level: newLevel });
             const updated = renderNodeById(nodeId);
             if (updated) {
               const content = updated.closest('.page-content');
               if (content) content.focus();
-              setCursorAtStart(updated);
+              // R14: Restore cursor at the saved offset instead of jumping to start
+              setCursorAtOffset(updated, savedOffset);
             }
             recordUndoAction(e.shiftKey ? 'Outdent list item' : 'Indent list item');
             state.pagesRendered = false; updatePageBreaks(); updateUndoRedo(); markDirty();
-          } catch (err) { console.error('list indent:', err); }
+            state._suppressVirtualScroll = false; // R14
+          } catch (err) { state._suppressVirtualScroll = false; console.error('list indent:', err); }
           return;
         }
       }
@@ -1258,13 +1386,28 @@ export function initInput() {
         const cursorPos = Array.from(getEditableText(prev)).length;
         const nodeId1 = prev.dataset.nodeId;
         const nodeId2 = el.dataset.nodeId;
+        // D9: Detect cross-page merge (prev is on a different page than el)
+        const isCrossPage = prev.closest('.page-content') !== el.closest('.page-content');
         try {
           doc.merge_paragraphs(nodeId1, nodeId2);
-          const updated = renderNodeById(nodeId1);
-          // Only remove source element after confirming render succeeded
-          if (updated) {
-            el.remove();
-            setCursorAtOffset(updated, cursorPos);
+          if (isCrossPage) {
+            // Cross-page merge: full re-render to rebuild page map
+            state._layoutDirty = true;
+            state.pagesRendered = false;
+            // D9: Clear stale page map so pagination rebuilds correctly
+            state.nodeToPage.clear();
+            state.pageMap = null;
+            state._lastPageMapHash = null;
+            renderDocument();
+            const merged = $('pageContainer')?.querySelector(`[data-node-id="${nodeId1}"]`);
+            if (merged) setCursorAtOffset(merged, cursorPos);
+          } else {
+            const updated = renderNodeById(nodeId1);
+            // Only remove source element after confirming render succeeded
+            if (updated) {
+              el.remove();
+              setCursorAtOffset(updated, cursorPos);
+            }
           }
           recordUndoAction('Merge paragraphs');
           state.pagesRendered = false; updatePageBreaks(); updateUndoRedo(); markDirty();
@@ -1301,13 +1444,28 @@ export function initInput() {
         const cursorPos = Array.from(getEditableText(el)).length;
         const nodeId1 = el.dataset.nodeId;
         const nodeId2 = next.dataset.nodeId;
+        // D9: Detect cross-page merge (next is on a different page than el)
+        const isCrossPage = el.closest('.page-content') !== next.closest('.page-content');
         try {
           doc.merge_paragraphs(nodeId1, nodeId2);
-          const updated = renderNodeById(nodeId1);
-          // Only remove source element after confirming render succeeded
-          if (updated) {
-            next.remove();
-            setCursorAtOffset(updated, cursorPos);
+          if (isCrossPage) {
+            // Cross-page merge: full re-render to rebuild page map
+            state._layoutDirty = true;
+            state.pagesRendered = false;
+            // D9: Clear stale page map so pagination rebuilds correctly
+            state.nodeToPage.clear();
+            state.pageMap = null;
+            state._lastPageMapHash = null;
+            renderDocument();
+            const merged = $('pageContainer')?.querySelector(`[data-node-id="${nodeId1}"]`);
+            if (merged) setCursorAtOffset(merged, cursorPos);
+          } else {
+            const updated = renderNodeById(nodeId1);
+            // Only remove source element after confirming render succeeded
+            if (updated) {
+              next.remove();
+              setCursorAtOffset(updated, cursorPos);
+            }
           }
           recordUndoAction('Merge paragraphs');
           state.pagesRendered = false; updatePageBreaks(); updateUndoRedo(); markDirty();
@@ -1322,9 +1480,26 @@ export function initInput() {
   page.addEventListener('paste', e => {
     e.preventDefault();
     if (!state.doc) return;
-    // FS-11: Block paste in read-only mode
-    if (state.readOnlyMode) return;
+    // FS-11: Block paste in read-only mode (Bug R16: show feedback)
+    if (state.readOnlyMode) {
+      showToast('Paste not available in read-only mode', 'info');
+      return;
+    }
+    // D22: Multi-cursor paste not supported — show toast and bail
+    if (state.multiSelections && state.multiSelections.length > 0) {
+      showToast('Paste with multiple cursors is not yet supported', 'info');
+      return;
+    }
+    // D8: Guard against re-entrant paste (renderDocument inside ensureTarget could re-trigger)
+    if (state._pasteInProgress) return;
+    state._pasteInProgress = true;
+    try {
     const doc = state.doc;
+
+    // D10: Clear format painter on paste to prevent stale format application
+    if (state.formatPainterMode) {
+      exitFormatPainter();
+    }
 
     let info = getSelectionInfo();
 
@@ -1437,6 +1612,17 @@ export function initInput() {
         recordUndoAction('Paste text');
         doc.paste_plain_text(info.startNodeId, info.startOffset, text);
         broadcastOp({ action: 'pasteText', nodeId: info.startNodeId, offset: info.startOffset, text });
+        // Bug R4: Apply pending formats to pasted text
+        if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
+          try {
+            const pastedLen = text.replace(/\n/g, '').length;
+            const endOffset = info.startOffset + pastedLen;
+            for (const [key, value] of Object.entries(state.pendingFormats)) {
+              doc.format_selection(info.startNodeId, info.startOffset, info.startNodeId, endOffset, key, value);
+              broadcastOp({ action: 'formatSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.startNodeId, endOffset: endOffset, key, value });
+            }
+          } catch (_) {}
+        }
         renderDocument();
         placeCursorAfterPaste(page, text, info.startNodeId, info.startOffset);
         updateUndoRedo();
@@ -1458,6 +1644,17 @@ export function initInput() {
         recordUndoAction('Paste text');
         doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
         broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text });
+        // Bug R4: Apply pending formats to pasted text
+        if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
+          try {
+            const pastedLen = Array.from(text).length;
+            const endOffset = info.startOffset + pastedLen;
+            for (const [key, value] of Object.entries(state.pendingFormats)) {
+              doc.format_selection(info.startNodeId, info.startOffset, info.startNodeId, endOffset, key, value);
+              broadcastOp({ action: 'formatSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.startNodeId, endOffset: endOffset, key, value });
+            }
+          } catch (_) {}
+        }
         renderDocument();
         const container = $('pageContainer');
         const updated = container?.querySelector(`[data-node-id="${info.startNodeId}"]`);
@@ -1468,10 +1665,23 @@ export function initInput() {
         console.error('paste single-line:', err);
       }
     }
+
+    // D3: After paste triggers re-render, verify selection nodes are still in DOM.
+    // If the selection references detached nodes, clear it to prevent stale references.
+    const selAfterPaste = window.getSelection();
+    if (selAfterPaste && selAfterPaste.anchorNode && !document.contains(selAfterPaste.anchorNode)) {
+      selAfterPaste.removeAllRanges();
+    }
+    } finally { state._pasteInProgress = false; }
   });
 
   // ─── Selection change ──────────────────────────
   // E-01 fix: Clear pending formats when cursor moves or selection changes
+  let _toolbarUpdateTimer = null;
+  function debouncedToolbarUpdate() {
+    if (_toolbarUpdateTimer) clearTimeout(_toolbarUpdateTimer);
+    _toolbarUpdateTimer = setTimeout(() => updateToolbarState(), 50);
+  }
   document.addEventListener('selectionchange', () => {
     if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
       // Only clear if the selection actually moved to a different position
@@ -1494,8 +1704,8 @@ export function initInput() {
         }
       }
     }
-    updateToolbarState();
-  });
+    debouncedToolbarUpdate();
+  }, _inputSignal);
 
   // ─── E2.4: Text Drag & Drop within editor ─────
   let dragSourceInfo = null;
@@ -1589,6 +1799,11 @@ export function initInput() {
         doc.insert_text_in_paragraph(dropNodeId, adjustedOffset, text);
         broadcastOp({ action: 'insertText', nodeId: dropNodeId, offset: adjustedOffset, text });
         renderDocument();
+        // D16: Force additional full re-render for cross-paragraph D&D to ensure
+        // both source and target paragraphs are correctly laid out
+        if (src.startNodeId !== dropNodeId) {
+          renderDocument();
+        }
         const updated = page.querySelector(`[data-node-id="${dropNodeId}"]`);
         if (updated) setCursorAtOffset(updated, adjustedOffset + [...text].length);
       } else {
@@ -1687,7 +1902,7 @@ export function initInput() {
       $('historyPanel').classList.remove('show');
       return;
     }
-  });
+  }, _inputSignal);
 
   // ─── Right-Click Context Menu ────────────────────
   page.addEventListener('contextmenu', e => {
@@ -1802,8 +2017,9 @@ export function initInput() {
             return;
           }
         }
-      } catch (_) {
-        // Fallback: read plain text
+      } catch (clipErr) {
+        // D11: Fallback — read plain text with proper error handling
+        console.warn('[paste] Clipboard read() failed, trying readText():', clipErr?.message);
         try {
           const text = await navigator.clipboard.readText();
           const freshInfo = getSelectionInfo();
@@ -1814,8 +2030,9 @@ export function initInput() {
             updateUndoRedo();
             markDirty();
           }
-        } catch (_2) {
-          showToast('Paste failed — try Ctrl+V instead', 'error');
+        } catch (readErr) {
+          console.warn('[paste] Clipboard access denied:', readErr?.message);
+          showToast('Paste failed — clipboard access denied', 'error');
         }
       }
     });
@@ -1874,8 +2091,8 @@ export function initInput() {
         addItem('Delete image', '', () => {
           try { state.doc.delete_image(imgNodeId); broadcastOp({ action: 'deleteNode', nodeId: imgNodeId }); renderDocument(); recordUndoAction('Delete image'); updateUndoRedo(); markDirty(); } catch (e) { console.error(e); }
         });
-        addItem('Set alt text', '', () => {
-          const alt = prompt('Alt text:', img.alt || '');
+        addItem('Set alt text', '', async () => {
+          const alt = await _showPromptModal('Alt text:', img.alt || '');
           if (alt !== null) {
             try { state.doc.set_image_alt_text(imgNodeId, alt); broadcastOp({ action: 'setImageAltText', nodeId: imgNodeId, alt }); recordUndoAction('Set alt text'); updateUndoRedo(); markDirty(); } catch (e) { console.error(e); }
           }
@@ -2143,7 +2360,9 @@ function _hasPageBreakStyle(el) {
 }
 
 /** Walk block-level children and produce structured elements */
-function walkBlockElements(container, elements) {
+function walkBlockElements(container, elements, depth = 0) {
+  // D8: Guard against infinite recursion on corrupted/deeply-nested HTML
+  if (depth > 50) return;
   for (const child of container.childNodes) {
     if (child.nodeType === 3) {
       // Text node at top level — merge into previous inline paragraph if applicable
@@ -2222,7 +2441,7 @@ function walkBlockElements(container, elements) {
       if (tag === 'div' && child.childNodes.length > 0) {
         const hasBlocks = child.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, img, ul, ol, li');
         if (hasBlocks) {
-          walkBlockElements(child, elements);
+          walkBlockElements(child, elements, depth + 1);
         } else {
           const runs = extractRunsFromElement(child);
           if (runs.length > 0) {
@@ -2250,7 +2469,7 @@ function walkBlockElements(container, elements) {
       // Check if it contains block children or is just a wrapper for inline content
       const hasBlocks = child.querySelector('p, h1, h2, h3, h4, h5, h6, div, table, img, ul, ol, li');
       if (hasBlocks) {
-        walkBlockElements(child, elements);
+        walkBlockElements(child, elements, depth + 1);
       } else {
         const runs = extractRunsFromElement(child);
         if (runs.length > 0) {
@@ -2372,6 +2591,54 @@ function walkBlockElements(container, elements) {
       continue;
     }
 
+    // R13: Blockquotes — convert to indented paragraphs
+    if (tag === 'blockquote') {
+      const beforeLen = elements.length;
+      walkBlockElements(child, elements, depth + 1);
+      // If no block children were found, extract inline content as paragraph
+      if (elements.length === beforeLen) {
+        const runs = extractRunsFromElement(child);
+        if (runs.length > 0) {
+          const para = { type: 'paragraph', runs };
+          extractParagraphFormat(child, para);
+          elements.push(para);
+        }
+      }
+      // Apply indent to all paragraphs added from this blockquote
+      for (let i = beforeLen; i < elements.length; i++) {
+        const el = elements[i];
+        if (el.type === 'paragraph') {
+          el.indentLeft = (el.indentLeft || 0) + 36; // 0.5 inch = 36pt
+        }
+      }
+      continue;
+    }
+
+    // R13: Definition lists — map <dt> to bold paragraph, <dd> to indented paragraph
+    if (tag === 'dl') {
+      for (const dlChild of child.children) {
+        const dlTag = dlChild.tagName?.toLowerCase();
+        if (dlTag === 'dt') {
+          const runs = extractRunsFromElement(dlChild);
+          if (runs.length > 0) {
+            // Apply bold to all runs in the definition term
+            for (const run of runs) { run.bold = true; }
+            const para = { type: 'paragraph', runs };
+            extractParagraphFormat(dlChild, para);
+            elements.push(para);
+          }
+        } else if (dlTag === 'dd') {
+          const runs = extractRunsFromElement(dlChild);
+          if (runs.length > 0) {
+            const para = { type: 'paragraph', runs, indentLeft: 36 };
+            extractParagraphFormat(dlChild, para);
+            elements.push(para);
+          }
+        }
+      }
+      continue;
+    }
+
     // Horizontal rules
     if (tag === 'hr') {
       elements.push({ type: 'hr' });
@@ -2442,7 +2709,11 @@ function pasteStructuredContent(doc, info, parsed, page) {
   };
 
   // Find a valid target node from WASM paragraph list
-  const findValidTarget = () => {
+  const findValidTarget = (depth) => {
+    if ((depth || 0) > 3) {
+      console.error('[paste] Cannot find valid target after 3 attempts');
+      return null;
+    }
     try {
       const allIds = JSON.parse(doc.paragraph_ids_json());
       if (allIds.length > 0) return { nodeId: allIds[allIds.length - 1], offset: 0 };
@@ -2450,7 +2721,7 @@ function pasteStructuredContent(doc, info, parsed, page) {
     // Last resort: create a paragraph
     try {
       const newId = doc.append_paragraph('');
-      return { nodeId: newId, offset: 0 };
+      if (newId) return { nodeId: newId, offset: 0 };
     } catch (_) {}
     return null;
   };
@@ -2811,8 +3082,9 @@ function pasteStructuredContent(doc, info, parsed, page) {
                     }
                     runOffset = runEnd;
                   }
-                } catch (_) {
-                  // Formatting failed silently — plain text already set above
+                } catch (fmtErr) {
+                  // Bug R8: Log formatting failure for diagnosis — plain text already set above
+                  console.warn('[paste] Cell formatting failed for', cellId, ':', fmtErr.message);
                 }
               }
             } catch (_) {}
@@ -3208,7 +3480,9 @@ function extractRunsFromElement(el) {
   return merged;
 }
 
-function walkInline(node, inherited, runs) {
+function walkInline(node, inherited, runs, depth = 0) {
+  // D8: Guard against infinite recursion on corrupted/deeply-nested HTML
+  if (depth > 50) return;
   if (node.nodeType === 3) { // Text node
     const text = node.textContent;
     if (text) {
@@ -3273,6 +3547,10 @@ function walkInline(node, inherited, runs) {
     if (style.fontFamily) {
       const ff = style.fontFamily.replace(/['"]/g, '').split(',')[0].trim();
       if (ff) fmt.fontFamily = ff;
+      // Warn on potentially unavailable fonts (R11)
+      if (ff && !['Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana', 'Helvetica', 'sans-serif', 'serif', 'monospace'].some(f => ff.includes(f))) {
+        console.info('[paste] Font "' + ff + '" may not be available — system font used as fallback');
+      }
     }
     if (style.color) {
       const hex = colorToHex(style.color);
@@ -3301,7 +3579,7 @@ function walkInline(node, inherited, runs) {
   }
 
   for (const child of node.childNodes) {
-    walkInline(child, fmt, runs);
+    walkInline(child, fmt, runs, depth + 1);
   }
 }
 
@@ -3390,6 +3668,8 @@ function placeCursorAfterPaste(page, text, pasteNodeId, pasteOffset) {
 
 function doUndo() {
   if (!state.doc) return;
+  // Guard: don't undo while applying remote collaborative ops
+  if (isApplyingRemote()) return;
   // ED2-21: Reset format painter on undo to prevent stale painter state
   if (state.formatPainterMode) {
     exitFormatPainter();
@@ -3437,6 +3717,8 @@ function doUndo() {
 
 function doRedo() {
   if (!state.doc) return;
+  // Guard: don't redo while applying remote collaborative ops
+  if (isApplyingRemote()) return;
   // ED2-21: Reset format painter on redo to prevent stale painter state
   if (state.formatPainterMode) {
     exitFormatPainter();
@@ -3587,7 +3869,7 @@ function saveToLocal() {
     openAutosaveDB().then(db => {
       const tx = db.transaction('documents', 'readwrite');
       const store = tx.objectStore('documents');
-      store.put({ id: 'current', name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum });
+      store.put({ id: 'current', name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum, byteLength: bytes.byteLength });
       state.lastSaveTimestamp = now;
       state.dirty = false;
       updateDirtyIndicator();
@@ -3646,7 +3928,11 @@ const SLASH_COMMANDS = [
 
 function filterSlashCommands(query) {
   const isSpreadsheet = !!state.spreadsheetView;
-  let commands = SLASH_COMMANDS.filter(cmd => !cmd.ssOnly || isSpreadsheet);
+  let commands = SLASH_COMMANDS.filter(cmd => {
+    if (cmd.ssOnly && !isSpreadsheet) return false;
+    if (cmd.id.startsWith('ai') && !state.aiAvailable) return false;
+    return true;
+  });
   if (!query) return commands;
   const q = query.toLowerCase();
   return commands.filter(cmd =>
@@ -3673,13 +3959,6 @@ function renderSlashMenu(commands) {
   const activeItem = menu.querySelector('.slash-menu-item.active');
   if (activeItem) activeItem.scrollIntoView({ block: 'nearest' });
 
-  // Click handler for each item
-  menu.querySelectorAll('.slash-menu-item').forEach(item => {
-    item.addEventListener('mousedown', e => {
-      e.preventDefault();
-      executeSlashCommand(item.dataset.cmd);
-    });
-  });
 }
 
 function positionSlashMenu() {
@@ -3711,6 +3990,17 @@ function openSlashMenu() {
   if (menu) {
     menu.setAttribute('role', 'listbox');
     menu.setAttribute('aria-label', 'Insert commands');
+    // Register delegated click handler once
+    if (!menu._slashDelegated) {
+      menu._slashDelegated = true;
+      menu.addEventListener('mousedown', (e) => {
+        const item = e.target.closest('.slash-menu-item');
+        if (item?.dataset?.cmd) {
+          e.preventDefault();
+          executeSlashCommand(item.dataset.cmd);
+        }
+      });
+    }
   }
   const commands = filterSlashCommands('');
   renderSlashMenu(commands);
@@ -3842,7 +4132,11 @@ function executeSlashCommand(cmdId) {
         break;
       }
       case 'ai-translate': {
-        import('./ai-inline.js').then(m => m.triggerAIAction('translate')).catch(() => {});
+        import('./ai-inline.js').then(m => {
+          m.showInlineAIPrompt();
+          const input = document.getElementById('aiInlinePromptInput');
+          if (input) { input.value = 'Translate to English'; input.setSelectionRange(13, 20); }
+        }).catch(() => {});
         break;
       }
       case 'ai-fill': {
@@ -3880,7 +4174,7 @@ function executeSlashCommand(cmdId) {
       hr: 'Insert horizontal rule', pagebreak: 'Insert page break', sectionbreak: 'Insert section break', quote: 'Apply quote style', code: 'Apply code style',
       ai: 'AI prompt', 'ai-improve': 'AI improve', 'ai-grammar': 'AI grammar', 'ai-summarize': 'AI summarize',
       'ai-translate': 'AI translate', 'ai-fill': 'AI fill sample', 'ai-format': 'AI format', 'ai-table': 'AI table', 'ai-formula': 'AI formula' };
-    if (labels[cmdId]) recordUndoAction(labels[cmdId]);
+    if (labels[cmdId] && !cmdId.startsWith('ai')) recordUndoAction(labels[cmdId]);
     updateToolbarState();
     updateUndoRedo();
   } catch (e) { console.error('slash command:', e); }

@@ -15,7 +15,10 @@ Rudra Code is a modular, pure-Rust SDK for document workflows. It reads, writes,
 | **Collaborative** | Fugue CRDT for conflict-free multi-user editing |
 | **Layout engine** | Pagination, text shaping (rustybuzz), font subsetting, PDF export |
 | **Web editor** | Production-grade browser editor with toolbar, comments, track changes |
+| **PDF viewer** | Built-in PDF viewer with annotations (highlight, comment, draw, redact) |
 | **Spreadsheet** | Canvas-based spreadsheet with 60+ formulas, charts, and real-time collab |
+| **AI integration** | Optional AI sidecar (llama.cpp with Qwen2.5-3B) for document assistance |
+| **Self-hostable** | Single Docker image with white-labeling support |
 | **Embeddable** | Rust library, WASM module, C shared library, npm packages, or Docker |
 
 ## Architecture
@@ -24,7 +27,7 @@ Rudra Code is a modular, pure-Rust SDK for document workflows. It reads, writes,
 Layer 1: Core Engine (Rust)     — Format I/O, document model, operations, CRDT
 Layer 2: Server (Rust/Axum)     — REST API, WebSocket collab, storage, auth, admin
 Layer 3: Client SDK (JS/TS)     — Embeddable editor, headless API, React/Vue components
-Layer 4: Platform Features      — White-labeling, integration mode, webhooks
+Layer 4: Platform Features      — White-labeling, integration mode, webhooks, AI sidecar
 ```
 
 Each layer is independently usable:

@@ -42,6 +42,11 @@ export function findParagraphEl(node, offset) {
     if (n.nodeType === 1 && n.dataset?.nodeId) {
       const tag = n.tagName.toLowerCase();
       if (tag === 'p' || /^h[1-6]$/.test(tag)) return n;
+      // Bug R8: If cursor is inside a table cell, find the first paragraph child
+      if (tag === 'td' || tag === 'th') {
+        const para = n.querySelector('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
+        if (para) return para;
+      }
     }
     n = n.parentNode;
   }
@@ -81,29 +86,60 @@ export function isInsideNonEditable(node, container) {
 }
 
 export function countCharsToPoint(container, targetNode, targetOffset) {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-  let count = 0, node;
-  while ((node = walker.nextNode())) {
-    // Skip text inside non-editable elements (list markers, etc.)
-    if (isInsideNonEditable(node, container)) continue;
-    if (node === targetNode) {
-      return count + Array.from(node.textContent.substring(0, targetOffset)).length;
-    }
-    count += Array.from(node.textContent).length;
-  }
-  if (targetNode.nodeType === 1) {
-    const kids = targetNode.childNodes;
-    const w2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-    let c = 0, n2;
-    while ((n2 = w2.nextNode())) {
-      if (isInsideNonEditable(n2, container)) continue;
-      for (let i = 0; i < targetOffset && i < kids.length; i++) {
-        if (kids[i].contains(n2) || kids[i] === n2) { c += Array.from(n2.textContent).length; break; }
+  try {
+    // D14: Guard against deeply nested inline formatting (bold in italic in link etc.)
+    // If nesting depth exceeds 20, flatten to the nearest text node to avoid traversal issues.
+    let depth = 0;
+    let depthNode = targetNode;
+    while (depthNode && depthNode !== container) { depth++; depthNode = depthNode.parentNode; }
+    let effectiveTarget = targetNode;
+    let effectiveOffset = targetOffset;
+    if (depth > 20) {
+      // Flatten: find the nearest text node descendant or the target itself
+      if (targetNode.nodeType !== 3) {
+        const flatWalker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+        const firstText = flatWalker.nextNode();
+        if (firstText) {
+          effectiveTarget = firstText;
+          effectiveOffset = 0;
+        }
       }
     }
-    return c;
+
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    let count = 0, node;
+    while ((node = walker.nextNode())) {
+      // Skip text inside non-editable elements (list markers, etc.)
+      if (isInsideNonEditable(node, container)) continue;
+      // D14: Skip text nodes inside hidden elements or zero-content placeholders
+      if (node.parentElement?.closest('[style*="display:none"], [style*="display: none"], [hidden], .equation-placeholder')) continue;
+      if (node === effectiveTarget) {
+        const text = node.textContent || '';
+        const safeOffset = Math.min(effectiveOffset, text.length);
+        return count + Array.from(text.substring(0, safeOffset)).length;
+      }
+      count += Array.from(node.textContent).length;
+    }
+    if (effectiveTarget.nodeType === 1) {
+      const kids = effectiveTarget.childNodes;
+      const w2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let c = 0, n2;
+      while ((n2 = w2.nextNode())) {
+        if (isInsideNonEditable(n2, container)) continue;
+        // D14: Skip hidden/placeholder nodes in fallback walker too
+        if (n2.parentElement?.closest('[style*="display:none"], [style*="display: none"], [hidden], .equation-placeholder')) continue;
+        for (let i = 0; i < effectiveOffset && i < kids.length; i++) {
+          if (kids[i].contains(n2) || kids[i] === n2) { c += Array.from(n2.textContent).length; break; }
+        }
+      }
+      return c;
+    }
+    return count;
+  } catch (e) {
+    // D14: Prevent selection mapping crashes with deeply nested formatting
+    console.warn('countCharsToPoint: selection mapping error, returning 0', e);
+    return 0;
   }
-  return count;
 }
 
 export function getSelectionInfo() {
@@ -215,6 +251,8 @@ export function setCursorAtOffset(el, charOffset) {
     // Skip text inside non-editable elements (list markers, peer cursors, etc.)
     if (isInsideNonEditable(node, el)) continue;
     if (node.parentElement?.closest?.('.peer-cursor')) continue;
+    // D14: Skip text nodes inside hidden elements or zero-content placeholders
+    if (node.parentElement?.closest('[style*="display:none"], [style*="display: none"], [hidden], .equation-placeholder')) continue;
     const chars = Array.from(node.textContent);
     if (counted + chars.length >= charOffset) {
       const range = document.createRange();
@@ -344,6 +382,8 @@ export function getEditableText(el) {
   let node;
   while ((node = walker.nextNode())) {
     if (isInsideNonEditable(node, el)) continue;
+    // D14: Skip text nodes inside hidden elements or zero-content placeholders
+    if (node.parentElement?.closest('[style*="display:none"], [style*="display: none"], [hidden], .equation-placeholder')) continue;
     text += node.textContent;
   }
   return text;

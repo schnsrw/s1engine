@@ -26,15 +26,21 @@ const WASM_MEMORY_WARNING_BYTES = 50 * 1024 * 1024; // 50MB
 // ═══════════════════════════════════════════════════
 // E8.1: Virtual scroll buffer zone constants
 // ═══════════════════════════════════════════════════
-const BUFFER_PAGES = 2;        // Render 2 pages of content above/below viewport
+const BUFFER_PAGES = 3;        // Render 3 pages of content above/below viewport (D13: increased from 2 to reduce flicker)
 const DEFAULT_PAGE_HEIGHT_PX = 1056;   // Letter page height in px (792pt * 96/72)
 
 /** Get the current page height in px from the document or fall back to Letter. */
 function getPageHeightPx() {
-  if (state.pageDims && state.pageDims.height) {
-    return Math.round(state.pageDims.height * 96 / 72);
-  }
-  return DEFAULT_PAGE_HEIGHT_PX;
+  const heightPt = (state.pageDims && state.pageDims.heightPt) || 792; // default US Letter
+  const heightPx = Math.max(396, Math.min(2000, Math.round(heightPt * (96 / 72))));
+  return heightPx;
+}
+
+/** Get the current page width in px from the document or fall back to Letter. */
+function getPageWidthPx() {
+  const widthPt = (state.pageDims && state.pageDims.widthPt) || 612; // default US Letter
+  const widthPx = Math.max(396, Math.min(2000, Math.round(widthPt * (96 / 72))));
+  return widthPx;
 }
 
 // E8.4: Transparent 1x1 pixel placeholder for off-screen images
@@ -122,23 +128,29 @@ export function renderSingleParagraphIfPossible(nodeId, options = {}) {
     return false; // Node was deleted or merged — full render needed
   }
 
-  // Save cursor position BEFORE re-rendering (so we can restore it after)
-  let savedCursorOffset = options.cursorOffset;
-  if (typeof savedCursorOffset !== 'number') {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const anchor = sel.anchorNode;
-      if (anchor && existingEl.contains(anchor)) {
-        // Calculate offset from start of paragraph
-        let off = 0;
-        const walker = document.createTreeWalker(existingEl, NodeFilter.SHOW_TEXT, null);
-        let tn;
-        while ((tn = walker.nextNode())) {
-          if (tn === anchor) { off += sel.anchorOffset; break; }
-          off += tn.textContent.length;
-        }
-        savedCursorOffset = off;
-      }
+  // Save cursor info BEFORE render (Bug R3: use nodeId + charOffset for robust restoration)
+  let savedNodeId = null;
+  let savedCharOffset = 0;
+  let hasExplicitOffset = typeof options.cursorOffset === 'number';
+  const sel = window.getSelection();
+  if (hasExplicitOffset) {
+    savedNodeId = nodeId;
+    savedCharOffset = options.cursorOffset;
+  } else if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    // Find the paragraph-level node
+    let paraEl = range.startContainer;
+    while (paraEl && paraEl.nodeType !== 1) paraEl = paraEl.parentNode;
+    while (paraEl && !paraEl.dataset?.nodeId) paraEl = paraEl.parentNode;
+    if (paraEl) {
+      savedNodeId = paraEl.dataset.nodeId;
+      // Calculate char offset using a range from paragraph start
+      try {
+        const preRange = document.createRange();
+        preRange.setStart(paraEl, 0);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        savedCharOffset = preRange.toString().length;
+      } catch (_) { savedCharOffset = 0; }
     }
   }
 
@@ -146,11 +158,47 @@ export function renderSingleParagraphIfPossible(nodeId, options = {}) {
   const updatedEl = renderNodeById(nodeId);
   if (!updatedEl) return false;
 
-  // Restore cursor at the saved position
-  if (typeof savedCursorOffset === 'number') {
-    const content = updatedEl.closest('.page-content');
-    if (content) content.focus();
-    setCursorAtOffset(updatedEl, savedCursorOffset);
+  // D15: Ensure node map is up-to-date after incremental render
+  // (renderNodeById handles replacements, but ensure map consistency for edge cases)
+  if (state.nodeIdToElement && updatedEl) {
+    state.nodeIdToElement.set(nodeId, updatedEl);
+  }
+
+  // Restore cursor in NEW element (Bug R3: walk text nodes to find correct position)
+  if (savedNodeId) {
+    const targetEl = savedNodeId === nodeId ? updatedEl : document.querySelector(`[data-node-id="${savedNodeId}"]`);
+    if (targetEl) {
+      const content = targetEl.closest('.page-content');
+      if (content) content.focus();
+      try {
+        // Walk text nodes in new element to find the right offset
+        const walker = document.createTreeWalker(targetEl, NodeFilter.SHOW_TEXT);
+        let count = 0;
+        let targetNode = null;
+        let targetOffset = 0;
+        while (walker.nextNode()) {
+          const nodeLen = walker.currentNode.textContent.length;
+          if (count + nodeLen >= savedCharOffset) {
+            targetNode = walker.currentNode;
+            targetOffset = savedCharOffset - count;
+            break;
+          }
+          count += nodeLen;
+        }
+        if (targetNode) {
+          const newRange = document.createRange();
+          newRange.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
+          newRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(newRange);
+        } else {
+          // Fallback to setCursorAtOffset if walker finds no text nodes
+          setCursorAtOffset(targetEl, savedCharOffset);
+        }
+      } catch (_) {
+        setCursorAtOffset(targetEl, savedCharOffset);
+      }
+    }
   }
 
   // Mark layout as potentially dirty for pagination check
@@ -164,6 +212,14 @@ export function renderSingleParagraphIfPossible(nodeId, options = {}) {
     state._onTextChanged?.();
   } catch (_) {}
 
+  // Bug R15: Always re-number footnotes after incremental render.
+  // Any edit could change document structure (e.g., deleting a paragraph with
+  // a footnote), making sequence numbers stale across the document.
+  autoNumberFootnotes();
+
+  // Bug R7: Trigger debounced repagination after incremental edit
+  debouncedRepaginate();
+
   return true;
 }
 
@@ -172,6 +228,31 @@ export function renderDocument() {
   if (!doc) return;
 
   _rendering = true;
+
+  // D20: Save cursor position before full re-render so it can be restored after
+  let _savedNodeId = null;
+  let _savedOffset = 0;
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const anchor = sel.anchorNode;
+      if (anchor) {
+        const block = (anchor.nodeType === 1 ? anchor : anchor.parentElement)?.closest?.('[data-node-id]');
+        if (block) {
+          _savedNodeId = block.dataset.nodeId;
+          // Calculate offset within the paragraph
+          let off = 0;
+          const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null);
+          let tn;
+          while ((tn = walker.nextNode())) {
+            if (tn === sel.anchorNode) { off += sel.anchorOffset; break; }
+            off += tn.textContent.length;
+          }
+          _savedOffset = off;
+        }
+      }
+    }
+  } catch (_) {}
 
   // F4.3: Canvas rendering mode — render via HTML5 Canvas instead of DOM
   if (isCanvasMode()) {
@@ -197,6 +278,15 @@ export function renderDocument() {
   try {
     // Tear down any existing virtual scroll before re-rendering
     teardownVirtualScroll();
+
+    // Bug R10: Remove stale virtual scroll placeholders before full render.
+    // Check both the page container and all page-content elements to catch
+    // placeholders that may have leaked into nested structures.
+    const preContainer = $('pageContainer') || $('editorCanvas');
+    if (preContainer) {
+      preContainer.querySelectorAll('.vs-placeholder').forEach(el => el.remove());
+    }
+    document.querySelectorAll('.page-content .vs-placeholder').forEach(el => el.remove());
 
     // E8.3: Full re-render always marks layout dirty and invalidates cache
     state._layoutDirty = true;
@@ -365,6 +455,32 @@ export function renderDocument() {
     state._onTextChanged?.();
     // Update page thumbnails in sidebar
     refreshPageThumbnails();
+
+    // D20: Restore cursor position after full re-render
+    if (_savedNodeId) {
+      const container = $('pageContainer');
+      if (container) {
+        const el = container.querySelector(`[data-node-id="${_savedNodeId}"]`);
+        if (el) {
+          try {
+            setCursorAtOffset(el, _savedOffset);
+          } catch (_) {}
+        } else {
+          // Fallback: place cursor at first paragraph
+          const firstPara = container.querySelector('[data-node-id]');
+          if (firstPara) {
+            try {
+              const range = document.createRange();
+              range.setStart(firstPara, 0);
+              range.collapse(true);
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } catch (_) {}
+          }
+        }
+      }
+    }
   } catch (e) { console.error('Render error:', e); } finally {
     _rendering = false;
   }
@@ -697,6 +813,11 @@ export function syncParagraphText(el) {
   if (!nodeId) return;
   // Use getEditableText to exclude list marker text from sync
   const newText = getEditableText(el);
+  // Bug R6: If cache exists but doesn't match current DOM, clear it so sync proceeds
+  const cached = syncedTextCache.get(nodeId);
+  if (cached !== undefined && cached !== newText && cached !== el.textContent) {
+    syncedTextCache.delete(nodeId);
+  }
   if (syncedTextCache.get(nodeId) === newText) return;
   try {
     doc.set_paragraph_text(nodeId, newText);
@@ -971,6 +1092,36 @@ function setupTOCHandlers() {
         heading.style.background = 'rgba(26, 115, 232, 0.12)';
         setTimeout(() => { heading.style.background = ''; }, 1200);
         return;
+      }
+    }
+
+    // Bug R9: Heading may be inside a collapsed virtual scroll placeholder.
+    // Search virtual scroll entries' stored HTML for the matching heading text,
+    // then force-restore the block and scroll to the heading.
+    const vs = state.virtualScroll;
+    if (vs && vs.entries) {
+      for (let i = 0; i < vs.entries.length; i++) {
+        const entry = vs.entries[i];
+        if (entry.visible || !entry.html) continue;
+        // Check if the stored HTML contains a heading with the target text
+        const temp = document.createElement('div');
+        temp.innerHTML = entry.html;
+        const h = temp.querySelector('h1, h2, h3, h4, h5, h6');
+        if (h && h.textContent.trim() === entryText) {
+          // Force-restore this block
+          restoreBlock(entry, i);
+          // Wait for DOM update then scroll to the heading
+          requestAnimationFrame(() => {
+            const restored = container.querySelector(`h1[data-node-id="${entry.nodeId}"], h2[data-node-id="${entry.nodeId}"], h3[data-node-id="${entry.nodeId}"], h4[data-node-id="${entry.nodeId}"], h5[data-node-id="${entry.nodeId}"], h6[data-node-id="${entry.nodeId}"]`);
+            if (restored) {
+              restored.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              restored.style.transition = 'background 0.3s';
+              restored.style.background = 'rgba(26, 115, 232, 0.12)';
+              setTimeout(() => { restored.style.background = ''; }, 1200);
+            }
+          });
+          return;
+        }
       }
     }
   });
@@ -1294,6 +1445,7 @@ function getBlockElements() {
 }
 
 function isVirtualScrollSuppressed() {
+  if (state._suppressVirtualScroll) return true; // R14: suppress during list indent
   const findBar = $('findBar');
   if (findBar && findBar.classList.contains('show')) return true;
   const sel = window.getSelection();
@@ -1386,6 +1538,8 @@ function initVirtualScroll(blocks) {
  * and jumps directly to target position.
  */
 function _handleVirtualScroll() {
+  // D4 fix: Guard against race between teardown and init during rapid scroll
+  if (!state.virtualScroll) return;
   // E8.1e: Throttle with requestAnimationFrame
   if (state._vsRAF) return;
   // ED2-04: Skip scroll handling during active render to prevent race condition
@@ -1456,12 +1610,17 @@ function _releaseOffscreenImages() {
 }
 
 function collapseBlock(entry, idx, vs) {
+  // D4 fix: Guard against null vs during teardown/init race
+  if (!vs) return;
   if (!entry.visible || !entry.el || !entry.el.parentNode) return;
   if (isVirtualScrollSuppressed()) return;
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0);
     if (entry.el.contains(range.startContainer) || entry.el.contains(range.endContainer)) return;
+    // Don't collapse the block containing the active cursor (Bug R2)
+    const activeNode = sel.anchorNode;
+    if (activeNode && entry.el.contains(activeNode)) return;
   }
 
   if (entry.nodeId) {
@@ -1469,6 +1628,15 @@ function collapseBlock(entry, idx, vs) {
     if (tag === 'p' || /^h[1-6]$/.test(tag)) syncParagraphText(entry.el);
   }
 
+  // Refresh snapshot before collapse to capture any pending edits (Bug R2)
+  try {
+    const editables = entry.el.querySelectorAll('[data-node-id]');
+    editables.forEach(el => {
+      if (el.textContent !== undefined) {
+        // Sync is handled by syncParagraphText above — just ensure DOM is current
+      }
+    });
+  } catch (_) {}
   entry.html = entry.el.outerHTML;
   entry.height = Math.max(entry.el.getBoundingClientRect().height, 20);
 

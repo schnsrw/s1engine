@@ -6,6 +6,50 @@ import { updatePageBreaks } from './pagination.js';
 import { broadcastOp } from './collab.js';
 
 /**
+ * Custom modal prompt for toolbar actions (replaces browser prompt()).
+ */
+function _toolbarPrompt(message, defaultValue) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const h3 = document.createElement('h3');
+    h3.textContent = message;
+    modal.appendChild(h3);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    input.value = defaultValue || '';
+    input.style.cssText = 'width:100%;padding:8px;margin:8px 0 16px;border:1px solid #dadce0;border-radius:4px;font-size:14px;box-sizing:border-box;';
+    modal.appendChild(input);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'modal-cancel';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'OK';
+    okBtn.className = 'modal-ok primary';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+    cancelBtn.onclick = () => close(null);
+    okBtn.onclick = () => close(input.value);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(input.value);
+      if (e.key === 'Escape') close(null);
+    });
+    input.focus();
+    input.select();
+  });
+}
+
+/**
  * Collect all paragraph-level node IDs between startNodeId and endNodeId (inclusive).
  * Walks only direct children of .page-content across pages (O(pages * blocks_per_page)),
  * skipping deeply nested elements for better performance on large documents.
@@ -525,24 +569,28 @@ function ensureFloatingToolbar() {
     } else if (action === 'highlight') {
       applyFormat('highlightColor', 'FFFF00');
     } else if (action === 'link') {
-      const url = prompt('Enter URL:');
-      if (url && url.trim()) {
-        try {
-          new URL(url.trim().startsWith('http') ? url.trim() : 'https://' + url.trim());
-          applyFormat('hyperlinkUrl', url.trim());
-        } catch (_) { alert('Invalid URL'); }
-      }
-    } else if (action === 'comment') {
-      const text = prompt('Add comment:');
-      if (text && text.trim()) {
-        const info = getSelectionInfo();
-        if (info && !info.collapsed && state.doc) {
+      _toolbarPrompt('Enter URL:').then(url => {
+        if (url && url.trim()) {
           try {
-            state.doc.insert_comment(info.startNodeId, info.endNodeId, 'User', text.trim());
-            import('./render.js').then(m => m.renderDocument());
-          } catch (e) { console.error('insert comment:', e); }
+            new URL(url.trim().startsWith('http') ? url.trim() : 'https://' + url.trim());
+            applyFormat('hyperlinkUrl', url.trim());
+          } catch (_) {
+            import('./toolbar-handlers.js').then(m => m.showToast('Invalid URL', 'error'));
+          }
         }
-      }
+      });
+    } else if (action === 'comment') {
+      _toolbarPrompt('Add comment:').then(text => {
+        if (text && text.trim()) {
+          const info = getSelectionInfo();
+          if (info && !info.collapsed && state.doc) {
+            try {
+              state.doc.insert_comment(info.startNodeId, info.endNodeId, 'User', text.trim());
+              import('./render.js').then(m => m.renderDocument());
+            } catch (e) { console.error('insert comment:', e); }
+          }
+        }
+      });
     }
   });
   document.body.appendChild(el);

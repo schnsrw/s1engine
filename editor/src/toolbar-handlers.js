@@ -12,6 +12,79 @@ import { showShareDialog, broadcastOp } from './collab.js';
 import { trackEvent, getStats, clearStats, getSessionDuration } from './analytics.js';
 import { getLastError, clearErrors } from './error-tracking.js';
 
+// ── Custom modal helpers (replace browser confirm/prompt) ─────
+
+function showConfirmModal(message) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const h3 = document.createElement('h3');
+    h3.textContent = message;
+    modal.appendChild(h3);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'modal-cancel';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Confirm';
+    okBtn.className = 'modal-ok primary';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+    cancelBtn.onclick = () => close(false);
+    okBtn.onclick = () => close(true);
+    overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+    okBtn.focus();
+  });
+}
+
+function showPromptModal(message, defaultValue) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    const h3 = document.createElement('h3');
+    h3.textContent = message;
+    modal.appendChild(h3);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'modal-input';
+    input.value = defaultValue || '';
+    input.style.cssText = 'width:100%;padding:8px;margin:8px 0 16px;border:1px solid #dadce0;border-radius:4px;font-size:14px;box-sizing:border-box;';
+    modal.appendChild(input);
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.className = 'modal-cancel';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'OK';
+    okBtn.className = 'modal-ok primary';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = (val) => { document.body.removeChild(overlay); resolve(val); };
+    cancelBtn.onclick = () => close(null);
+    okBtn.onclick = () => close(input.value);
+    overlay.onclick = (e) => { if (e.target === overlay) close(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(input.value);
+      if (e.key === 'Escape') close(null);
+    });
+    input.focus();
+    input.select();
+  });
+}
+
 // ── Selection save/restore for modal dialogs ─────
 // Saves the current DOM selection before a modal opens, restores it after close.
 // We store both the DOM Range (fast path) and node ID + offset info (survives re-renders).
@@ -1044,6 +1117,7 @@ function initFormatPainter() {
         if (copyFormatFromSelection()) {
           enterFormatPainter('once');
           announce('Format Painter: select text to apply formatting');
+          showToast('Format painter active — click a paragraph to apply', 'info', 3000);
           trackEvent('toolbar', 'format-painter-once');
         }
         clickCount = 0;
@@ -1055,6 +1129,7 @@ function initFormatPainter() {
       if (copyFormatFromSelection()) {
         enterFormatPainter('sticky');
         announce('Format Painter locked: select text to apply, press Escape to exit');
+        showToast('Format painter locked — click paragraphs to apply, press Escape to exit', 'info', 4000);
         trackEvent('toolbar', 'format-painter-sticky');
       }
     }
@@ -1121,11 +1196,14 @@ function enterFormatPainter(mode) {
   const btn = $('btnFormatPainter');
   if (btn) {
     btn.classList.add('format-painter-active');
+    btn.classList.add('active');
     btn.setAttribute('aria-pressed', 'true');
   }
   // Set crosshair cursor on all page content areas
   const page = $('pageContainer');
   if (page) page.classList.add('format-painter-cursor');
+  // D21: Toggle body class for global cursor override
+  document.body.classList.add('format-painter-active');
 }
 
 /**
@@ -1137,10 +1215,13 @@ export function exitFormatPainter() {
   const btn = $('btnFormatPainter');
   if (btn) {
     btn.classList.remove('format-painter-active');
+    btn.classList.remove('active');
     btn.setAttribute('aria-pressed', 'false');
   }
   const page = $('pageContainer');
   if (page) page.classList.remove('format-painter-cursor');
+  // D21: Remove body class for global cursor override
+  document.body.classList.remove('format-painter-active');
 }
 
 /**
@@ -1149,7 +1230,12 @@ export function exitFormatPainter() {
  * Returns true if format was applied, false otherwise.
  */
 export function applyFormatPainter() {
-  if (!state.formatPainterMode || !state.copiedFormat || !state.doc) return false;
+  if (!state.formatPainterMode) return false;
+  // D10: If copiedFormat or doc is missing, the painter is in a stale state — force clear
+  if (!state.copiedFormat || !state.doc) {
+    exitFormatPainter();
+    return false;
+  }
   const info = getSelectionInfo();
   if (!info || info.collapsed) return false;
 
@@ -1190,6 +1276,8 @@ export function applyFormatPainter() {
     return true;
   } catch (e) {
     console.error('Format Painter: failed to apply formatting:', e);
+    // D10: Always exit format painter on error to prevent stale active state
+    exitFormatPainter();
     return false;
   }
 }
@@ -2319,16 +2407,20 @@ function refreshHistory() {
     });
 
     list.querySelectorAll('.version-restore').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const id = parseInt(btn.dataset.id);
         if (!id || !state.engine) return;
-        if (!confirm('Restore this version? Current unsaved changes will be lost.')) return;
-        restoreVersion(id).then(() => {
+        const confirmed = await showConfirmModal('Restore this version? Current unsaved changes will be lost.');
+        if (!confirmed) return;
+        try {
+          showToast('Restoring version...', 'info');
+          await restoreVersion(id);
           refreshHistory();
-        }).catch(e => {
+          showToast('Version restored', 'info', 2000);
+        } catch (e) {
           showToast('Failed to restore version: ' + e.message, 'error');
           console.error('restore version:', e);
-        });
+        }
       });
     });
   });
@@ -2784,7 +2876,7 @@ function initDarkMode() {
   if (!btn) return;
 
   // Restore saved preference
-  const saved = localStorage.getItem('s1-theme');
+  let saved; try { saved = localStorage.getItem('s1-theme'); } catch (_) {}
   if (saved === 'dark' || saved === 'light') {
     document.documentElement.setAttribute('data-theme', saved);
   }
@@ -2797,7 +2889,7 @@ function initDarkMode() {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', () => {
       // Only react if user hasn't set an explicit preference
-      const explicit = localStorage.getItem('s1-theme');
+      let explicit; try { explicit = localStorage.getItem('s1-theme'); } catch (_) {}
       if (!explicit) {
         updateDarkModeIcon();
       }
@@ -5776,15 +5868,15 @@ function initSaveAsTemplate() {
   const btn = $('btnSaveTemplate');
   if (!btn) return;
 
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     closeAllMenus();
     if (!state.doc) {
       showToast('No document open to save as template.', 'error');
       return;
     }
 
-    // Prompt for template name
-    const name = prompt('Template name:');
+    // Prompt for template name using custom modal
+    const name = await showPromptModal('Template name:', '');
     if (!name || !name.trim()) return;
 
     try {

@@ -65,8 +65,8 @@
 | S5.3 | **Cross-sheet references** — Sheet1!A1 in formulas, SheetLookup trait | MEDIUM | DONE |
 | S5.4 | **Array formulas** — CSE (Ctrl+Shift+Enter) | MEDIUM | DONE |
 | S5.5 | **Hyperlinks** — Ctrl+Click to follow, blue underline, insert dialog | MEDIUM | DONE |
-| S5.6 | **Shapes/drawings** — basic shapes, text boxes | LOW | NOT STARTED |
-| S5.7 | **Mobile/touch** — responsive layout, touch gestures | MEDIUM | NOT STARTED |
+| S5.6 | **Shapes/drawings** — basic shapes, text boxes | LOW | DONE |
+| S5.7 | **Mobile/touch** — responsive layout, touch gestures | MEDIUM | DONE |
 
 ## Summary
 
@@ -76,8 +76,8 @@
 | S2: Data Intelligence | 8 | HIGH | **DONE** |
 | S3: Visualization | 6 | CRITICAL | **DONE** |
 | S4: Collaboration | 8 | HIGH | **DONE** |
-| S5: Advanced | 7 | MEDIUM | **MOSTLY DONE** (6/7) |
-| **Total** | **51** | | **48/51 DONE (94%)** |
+| S5: Advanced | 7 | MEDIUM | **DONE** (7/7) |
+| **Total** | **51** | | **51/51 DONE (100%)** |
 
 ## Additional Items (User Reported)
 
@@ -94,4 +94,4 @@
 | U9 | **Number formats** — currency/percentage/date display | CRITICAL | DONE (format agent) |
 | U10 | **Find & Replace** (Ctrl+F/Ctrl+H) | HIGH | DONE (format agent) |
 | U11 | **Format preservation on copy/paste** | HIGH | DONE |
-| U12 | **Table detection in imported data** | MEDIUM | NOT STARTED |
+| U12 | **Table detection in imported data** | MEDIUM | DONE |

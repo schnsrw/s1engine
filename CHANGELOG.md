@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+**Spreadsheet Engine (s1-format-xlsx)**
+- XLSX reader/writer: cells, formulas, styles, merged cells, frozen panes, column/row sizing, preserved parts for round-trip fidelity
+- ODS reader/writer: value types, formulas (OpenFormula syntax conversion), styles, round-trip (16 tests)
+- CSV/TSV parser: RFC 4180, delimiter auto-detect (comma/tab/semicolon/pipe), streaming for large files, BOM handling (40 tests)
+- Formula engine: tokenizer, recursive-descent parser, 60+ functions (SUM, AVERAGE, VLOOKUP, IF, INDEX, MATCH, LEFT, RIGHT, MID, LEN, TRIM, CONCATENATE, ROUND, ABS, COUNTIF, SUMIF, NOW, TODAY, etc.), dependency graph with topological sort, circular reference detection, array formula support (93 tests)
+- Canvas-based spreadsheet grid UI: virtual scrolling, cell selection/editing, formula bar, sheet tabs, column/row resize/insert/delete, copy/paste, undo/redo, freeze panes, auto-fill, sort, filter
+- Conditional formatting: rules, color scales, dialog
+- Data validation: dropdown lists, number ranges, error toast
+- Cell comments: red triangle indicator, hover tooltip, insert/edit/delete
+- Charts: column/bar (grouped multi-series), line/area (multi-series), pie/doughnut (percentage labels), sparklines (inline mini-charts), chart customization (title, legend, draggable, resizable)
+- Pivot tables: basic dialog with row/col/value fields, aggregation
+- Spreadsheet real-time collaboration: WebSocket cell/format sync, peer cursor overlay
+- Number formats: currency, percentage, date, time, scientific
+- Find & Replace for spreadsheets (Ctrl+F/H)
+- Named ranges, cross-sheet references (Sheet1!A1), text to columns, hyperlinks in cells
+- Formula autocomplete, syntax highlighting, keyboard shortcuts help (Ctrl+/)
+- Merge/unmerge cells UI, paste special (values/formulas/formatting/transpose)
+- XLSX export from UI (JS ZIP builder), print to PDF via HTML table
+
+**AI Integration**
+- AI sidecar integration (llama.cpp with Qwen2.5-3B model) for document assistance
+- Optional deployment — does not affect core engine operation
+
+**Editor Enhancements**
 - Styles panel with set_paragraph_style_id WASM API (Title, Subtitle, Quote, Code)
 - Header/footer inline editing (double-click to edit, page number fields)
 - Track changes UI (Editing/Suggesting/Viewing modes, Review menu, TC panel)

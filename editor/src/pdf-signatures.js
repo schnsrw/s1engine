@@ -334,6 +334,10 @@ function onPlacementClick(e) {
       imageData: _sigImageData,
       isSignature: true,
     });
+    if (state.pdfAnnotations.length >= 5000) {
+      import('./toolbar-handlers.js').then(m => m.showToast('Maximum annotations reached (5000)', 'error')).catch(() => {});
+      return;
+    }
     state.pdfAnnotations.push(ann);
     state.pdfModified = true;
 
