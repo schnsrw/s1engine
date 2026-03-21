@@ -1,4 +1,4 @@
-# s1engine Editor — Multi-stage Docker Build
+# Rudra Office — Multi-stage Docker Build
 #
 # Builds WASM bindings, bundles the web editor, and runs the relay server.
 #

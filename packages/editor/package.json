@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/editor",
+  "name": "@rudra/editor",
   "version": "1.0.1",
-  "description": "Embeddable document editor component powered by s1engine — drop-in DOCX/ODT/PDF editing for any web app",
+  "description": "Embeddable document editor component powered by Rudra Code — drop-in DOCX/ODT/PDF editing for any web app",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -28,7 +28,7 @@
     "dev": "vite"
   },
   "peerDependencies": {
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/wasm": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

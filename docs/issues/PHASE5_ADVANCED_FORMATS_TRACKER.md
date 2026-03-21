@@ -1,8 +1,19 @@
 # Phase 5 — Advanced Format Support Tracker
 
-> Complex OOXML/ODF features found in enterprise documents.
-> **ZIP preservation infrastructure now handles round-trip for most items.**
+> Last updated: 2026-03-21
+> **Status: COMPLETE** — All 7 items resolved. ZIP preservation handles round-trip for all.
 > See `ZIP_PRESERVATION_TRACKER.md` for the `preserved_parts` mechanism.
+>
+> | Item | Steps | Done | Skipped |
+> |------|-------|------|---------|
+> | Q6 SmartArt | 5 | 4 | 1 (SVG generation — XL effort) |
+> | Q7 Charts | 5 | 4 | 1 (Chart.js — XL effort) |
+> | Q8 OLE Objects | 4 | 4 | 0 |
+> | P4 VBA Macros | 6 | 5 | 1 (execution — out of scope) |
+> | Q10 ODT Columns | 4 | 4 | 0 |
+> | Q9 Custom XML | 3 | 3 | 0 |
+> | Q13 ODT DB Fields | 3 | 3 | 0 |
+> | **Total** | **30** | **27** | **3** |
 
 ## Q6: SmartArt Diagrams
 

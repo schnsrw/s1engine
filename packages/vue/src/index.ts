@@ -1,5 +1,5 @@
 /**
- * @s1engine/vue — Vue 3 adapter for the s1engine editor.
+ * @rudra/vue — Vue 3 adapter for the Rudra Office editor.
  *
  * @example
  * ```vue
@@ -13,14 +13,14 @@
  * </template>
  *
  * <script setup>
- * import { S1EditorVue } from '@s1engine/vue';
+ * import { S1EditorVue } from '@rudra/vue';
  * </script>
  * ```
  */
 
 import { defineComponent, ref, onMounted, onUnmounted, h, type PropType } from 'vue';
-import { S1Editor, Toolbars } from '@s1engine/editor';
-import type { EditorOptions, ToolbarConfig, Format } from '@s1engine/editor';
+import { S1Editor, Toolbars } from '@rudra/editor';
+import type { EditorOptions, ToolbarConfig, Format } from '@rudra/editor';
 
 export const S1EditorVue = defineComponent({
   name: 'S1Editor',
@@ -80,5 +80,5 @@ export const S1EditorVue = defineComponent({
   },
 });
 
-export { S1Editor, Toolbars } from '@s1engine/editor';
-export type { EditorOptions, Format, ToolbarConfig } from '@s1engine/editor';
+export { S1Editor, Toolbars } from '@rudra/editor';
+export type { EditorOptions, Format, ToolbarConfig } from '@rudra/editor';

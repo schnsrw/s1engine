@@ -1,5 +1,8 @@
 # ZIP Entry Preservation — Detailed Tracker
 
+> Last updated: 2026-03-21
+> **Status: COMPLETE** — All preservation targets implemented and tested.
+>
 > DOCX/ODT files are ZIP archives. Many entries contain data that s1engine doesn't semantically model but MUST preserve on round-trip to avoid data loss.
 
 ## Architecture

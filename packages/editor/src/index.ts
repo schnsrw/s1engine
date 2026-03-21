@@ -1,10 +1,10 @@
 /**
- * @s1engine/editor — Embeddable document editor component.
+ * @rudra/editor — Embeddable document editor component.
  *
  * @example
  * ```ts
- * import { S1Editor } from '@s1engine/editor';
- * import '@s1engine/editor/style.css';
+ * import { S1Editor } from '@rudra/editor';
+ * import '@rudra/editor/style.css';
  *
  * const editor = await S1Editor.create(document.getElementById('editor'), {
  *   theme: 'default',
@@ -20,7 +20,7 @@
  * @packageDocumentation
  */
 
-import type { EditorOptions, Format, ToolbarConfig, Theme } from '@s1engine/sdk';
+import type { EditorOptions, Format, ToolbarConfig, Theme } from '@rudra/sdk';
 
 /** Toolbar presets. */
 export const Toolbars = {
@@ -247,4 +247,4 @@ export class S1Editor {
 }
 
 // Re-export types
-export type { EditorOptions, Format, ToolbarConfig, ToolbarItem, Theme } from '@s1engine/sdk';
+export type { EditorOptions, Format, ToolbarConfig, ToolbarItem, Theme } from '@rudra/sdk';

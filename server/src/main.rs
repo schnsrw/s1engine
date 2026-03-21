@@ -1,4 +1,4 @@
-//! s1-server — Unified document editing server.
+//! rudra-server — Unified document editing server.
 //!
 //! Single binary that serves:
 //! - Static editor files (HTML/JS/CSS/WASM) at `/`
@@ -190,7 +190,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("═══════════════════════════════════════");
-    tracing::info!("  s1-server v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!("  rudra-server v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("───────────────────────────────────────");
     tracing::info!("  Editor:    http://{}/", addr);
     tracing::info!("  API:       http://{}/api/v1/", addr);

@@ -1,6 +1,6 @@
 # C FFI API
 
-s1engine provides C-compatible bindings via opaque handles.
+Rudra Code provides C-compatible bindings via opaque handles.
 
 ## Build
 

@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/wasm",
+  "name": "@rudra/wasm",
   "version": "1.0.1",
-  "description": "WebAssembly bindings for s1engine — read, write, edit, and convert DOCX, ODT, PDF documents in the browser",
+  "description": "WebAssembly bindings for Rudra Code — read, write, edit, and convert DOCX, ODT, PDF documents in the browser",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",

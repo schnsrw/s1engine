@@ -1,5 +1,5 @@
 /**
- * Font loading for s1 editor.
+ * Font loading for Rudra Office.
  *
  * Downloads font files from Google Fonts CDN and loads them into the
  * WasmFontDatabase for accurate document rendering.

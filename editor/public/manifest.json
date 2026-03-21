@@ -1,7 +1,7 @@
 {
-  "name": "s1 Editor",
-  "short_name": "s1",
-  "description": "Collaborative document editor powered by s1engine",
+  "name": "Rudra Office",
+  "short_name": "Rudra",
+  "description": "Collaborative document editor powered by Rudra Code",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

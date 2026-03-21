@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-docker run -p 8787:8787 s1engine/editor
+docker run -p 8787:8787 rudra/editor
 ```
 
 Open `http://localhost:8787` in your browser.

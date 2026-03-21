@@ -1,4 +1,4 @@
-# s1engine Specification Index
+# Rudra Code Specification Index
 
 > Each feature area has its own specification document.
 > Process: Research → Spec → Break → Fix → Implement → Test → Verify

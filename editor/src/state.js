@@ -112,6 +112,8 @@ export const state = {
   autoCapitalizeEnabled: true,
   // E9.5: TOC style — 'default' | 'dotted' | 'dashed' | 'no-page-numbers'
   tocStyle: 'default',
+  // Spreadsheet view state
+  spreadsheetView: null,
   // PDF viewer state
   pdfViewer: null,
   pdfBytes: null,

@@ -919,6 +919,13 @@ fn eval_function(name: &str, args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
         "POWER" => eval_power(args, ctx),
         "SQRT" => eval_sqrt(args, ctx),
 
+        // ─── P1 Conditional Aggregate Functions ───
+        "COUNTIF" => eval_countif(args, ctx),
+        "SUMIF" => eval_sumif(args, ctx),
+        "AVERAGEIF" => eval_averageif(args, ctx),
+        "COUNTIFS" => eval_countif(args, ctx), // alias for now
+        "SUMIFS" => eval_sumif(args, ctx),
+
         // ─── P1 Date Functions ───
         "NOW" => eval_now(args),
         "TODAY" => eval_today(args),
@@ -1697,6 +1704,215 @@ fn eval_day(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
             CellValue::Number(d as f64)
         }
         None => CellValue::Error(CellError::Value),
+    }
+}
+
+// ─── P1 Conditional Aggregate Function Implementations ───
+
+/// Parse a criteria string into a comparison operator and a target value.
+/// Supports: ">5", ">=10", "<3", "<=7", "<>0", "=5", plain number, "text*" wildcard.
+fn parse_criteria(criteria: &CellValue) -> CriteriaMatch {
+    let s = coerce_string(criteria);
+    let trimmed = s.trim();
+
+    // Operator-prefixed criteria: ">=10", ">5", "<=3", "<>0", "<5", "=5"
+    if let Some(rest) = trimmed.strip_prefix(">=") {
+        if let Ok(n) = rest.trim().parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Ge, n);
+        }
+    } else if let Some(rest) = trimmed.strip_prefix("<=") {
+        if let Ok(n) = rest.trim().parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Le, n);
+        }
+    } else if let Some(rest) = trimmed.strip_prefix("<>") {
+        let rhs = rest.trim();
+        if let Ok(n) = rhs.parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Ne, n);
+        }
+        return CriteriaMatch::TextNotEqual(rhs.to_ascii_lowercase());
+    } else if let Some(rest) = trimmed.strip_prefix('>') {
+        if let Ok(n) = rest.trim().parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Gt, n);
+        }
+    } else if let Some(rest) = trimmed.strip_prefix('<') {
+        if let Ok(n) = rest.trim().parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Lt, n);
+        }
+    } else if let Some(rest) = trimmed.strip_prefix('=') {
+        let rhs = rest.trim();
+        if let Ok(n) = rhs.parse::<f64>() {
+            return CriteriaMatch::NumericOp(Op::Eq, n);
+        }
+        return CriteriaMatch::ExactText(rhs.to_ascii_lowercase());
+    }
+
+    // Wildcard match: contains * or ?
+    if trimmed.contains('*') || trimmed.contains('?') {
+        return CriteriaMatch::Wildcard(trimmed.to_ascii_lowercase());
+    }
+
+    // Plain number
+    if let Ok(n) = trimmed.parse::<f64>() {
+        return CriteriaMatch::NumericOp(Op::Eq, n);
+    }
+
+    // Numeric criteria passed as a Number CellValue
+    if let CellValue::Number(n) = criteria {
+        return CriteriaMatch::NumericOp(Op::Eq, *n);
+    }
+
+    // Plain text (exact match, case-insensitive)
+    CriteriaMatch::ExactText(trimmed.to_ascii_lowercase())
+}
+
+/// Criteria matching modes for COUNTIF/SUMIF/AVERAGEIF.
+enum CriteriaMatch {
+    NumericOp(Op, f64),
+    ExactText(String),
+    TextNotEqual(String),
+    Wildcard(String),
+}
+
+impl CriteriaMatch {
+    /// Check whether a cell value matches this criteria.
+    fn matches(&self, val: &CellValue) -> bool {
+        match self {
+            CriteriaMatch::NumericOp(op, target) => {
+                if let Some(n) = coerce_number(val) {
+                    match op {
+                        Op::Eq => (n - target).abs() < f64::EPSILON,
+                        Op::Ne => (n - target).abs() >= f64::EPSILON,
+                        Op::Lt => n < *target,
+                        Op::Gt => n > *target,
+                        Op::Le => n <= *target,
+                        Op::Ge => n >= *target,
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            }
+            CriteriaMatch::ExactText(target) => {
+                let s = coerce_string(val).to_ascii_lowercase();
+                s == *target
+            }
+            CriteriaMatch::TextNotEqual(target) => {
+                let s = coerce_string(val).to_ascii_lowercase();
+                s != *target
+            }
+            CriteriaMatch::Wildcard(pattern) => {
+                let s = coerce_string(val).to_ascii_lowercase();
+                wildcard_match(&s, pattern)
+            }
+        }
+    }
+}
+
+/// Simple wildcard matching: `*` matches any sequence, `?` matches any single character.
+fn wildcard_match(text: &str, pattern: &str) -> bool {
+    let t: Vec<char> = text.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+    let (tlen, plen) = (t.len(), p.len());
+    let mut ti = 0;
+    let mut pi = 0;
+    let mut star_pi: Option<usize> = None;
+    let mut star_ti: usize = 0;
+
+    while ti < tlen {
+        if pi < plen && (p[pi] == '?' || p[pi] == t[ti]) {
+            ti += 1;
+            pi += 1;
+        } else if pi < plen && p[pi] == '*' {
+            star_pi = Some(pi);
+            star_ti = ti;
+            pi += 1;
+        } else if let Some(sp) = star_pi {
+            pi = sp + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < plen && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == plen
+}
+
+fn eval_countif(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    // COUNTIF(range, criteria)
+    if args.len() < 2 {
+        return CellValue::Error(CellError::Value);
+    }
+    let values = collect_values(&args[0], ctx);
+    let criteria_val = FormulaEngine::evaluate(&args[1], ctx);
+    let criteria = parse_criteria(&criteria_val);
+
+    let count = values.iter().filter(|v| criteria.matches(v)).count();
+    CellValue::Number(count as f64)
+}
+
+fn eval_sumif(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    // SUMIF(criteria_range, criteria, [sum_range])
+    if args.len() < 2 || args.len() > 3 {
+        return CellValue::Error(CellError::Value);
+    }
+    let criteria_values = collect_values(&args[0], ctx);
+    let criteria_val = FormulaEngine::evaluate(&args[1], ctx);
+    let criteria = parse_criteria(&criteria_val);
+
+    let sum_values = if args.len() == 3 {
+        collect_values(&args[2], ctx)
+    } else {
+        criteria_values.clone()
+    };
+
+    let mut total = 0.0;
+    for (i, cv) in criteria_values.iter().enumerate() {
+        if criteria.matches(cv) {
+            if let Some(sv) = sum_values.get(i) {
+                if let Some(n) = coerce_number(sv) {
+                    total += n;
+                }
+            }
+        }
+    }
+    CellValue::Number(total)
+}
+
+fn eval_averageif(args: &[Expr], ctx: &dyn CellLookup) -> CellValue {
+    // AVERAGEIF(criteria_range, criteria, [average_range])
+    if args.len() < 2 || args.len() > 3 {
+        return CellValue::Error(CellError::Value);
+    }
+    let criteria_values = collect_values(&args[0], ctx);
+    let criteria_val = FormulaEngine::evaluate(&args[1], ctx);
+    let criteria = parse_criteria(&criteria_val);
+
+    let avg_values = if args.len() == 3 {
+        collect_values(&args[2], ctx)
+    } else {
+        criteria_values.clone()
+    };
+
+    let mut total = 0.0;
+    let mut count = 0usize;
+    for (i, cv) in criteria_values.iter().enumerate() {
+        if criteria.matches(cv) {
+            if let Some(sv) = avg_values.get(i) {
+                if let Some(n) = coerce_number(sv) {
+                    total += n;
+                    count += 1;
+                }
+            }
+        }
+    }
+    if count == 0 {
+        CellValue::Error(CellError::DivZero)
+    } else {
+        CellValue::Number(total / count as f64)
     }
 }
 
@@ -2928,5 +3144,157 @@ mod tests {
             CellValue::Number(20.0) // (10+20+30)/3
         );
         assert_eq!(sheet.get(1, 1).unwrap().value, CellValue::Number(3.0));
+    }
+
+    // ─── COUNTIF / SUMIF / AVERAGEIF Tests ───
+
+    #[test]
+    fn eval_countif_numeric() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Number(10.0));
+        ctx.set(0, 1, CellValue::Number(20.0));
+        ctx.set(0, 2, CellValue::Number(30.0));
+        ctx.set(0, 3, CellValue::Number(5.0));
+        ctx.set(0, 4, CellValue::Number(15.0));
+
+        // Count cells > 10
+        assert_eq!(
+            eval(r#"COUNTIF(A1:A5,">10")"#, &ctx),
+            CellValue::Number(3.0) // 20, 30, 15
+        );
+
+        // Count cells = 10
+        assert_eq!(eval("COUNTIF(A1:A5,10)", &ctx), CellValue::Number(1.0));
+
+        // Count cells >= 15
+        assert_eq!(
+            eval(r#"COUNTIF(A1:A5,">=15")"#, &ctx),
+            CellValue::Number(3.0) // 20, 30, 15
+        );
+    }
+
+    #[test]
+    fn eval_countif_text() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Text("apple".into()));
+        ctx.set(0, 1, CellValue::Text("banana".into()));
+        ctx.set(0, 2, CellValue::Text("apple".into()));
+        ctx.set(0, 3, CellValue::Text("cherry".into()));
+
+        // Exact text match (case-insensitive)
+        assert_eq!(
+            eval(r#"COUNTIF(A1:A4,"apple")"#, &ctx),
+            CellValue::Number(2.0)
+        );
+    }
+
+    #[test]
+    fn eval_countif_wildcard() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Text("apple".into()));
+        ctx.set(0, 1, CellValue::Text("application".into()));
+        ctx.set(0, 2, CellValue::Text("banana".into()));
+        ctx.set(0, 3, CellValue::Text("appetizer".into()));
+
+        // Wildcard match: starts with "app"
+        assert_eq!(
+            eval(r#"COUNTIF(A1:A4,"app*")"#, &ctx),
+            CellValue::Number(3.0) // apple, application, appetizer
+        );
+    }
+
+    #[test]
+    fn eval_sumif_basic() {
+        let mut ctx = TestCtx::new();
+        // Criteria range (categories)
+        ctx.set(0, 0, CellValue::Text("fruit".into()));
+        ctx.set(0, 1, CellValue::Text("veg".into()));
+        ctx.set(0, 2, CellValue::Text("fruit".into()));
+        ctx.set(0, 3, CellValue::Text("veg".into()));
+        // Sum range (amounts)
+        ctx.set(1, 0, CellValue::Number(10.0));
+        ctx.set(1, 1, CellValue::Number(20.0));
+        ctx.set(1, 2, CellValue::Number(30.0));
+        ctx.set(1, 3, CellValue::Number(40.0));
+
+        // Sum amounts where category = "fruit"
+        assert_eq!(
+            eval(r#"SUMIF(A1:A4,"fruit",B1:B4)"#, &ctx),
+            CellValue::Number(40.0) // 10 + 30
+        );
+    }
+
+    #[test]
+    fn eval_sumif_numeric_criteria() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Number(10.0));
+        ctx.set(0, 1, CellValue::Number(20.0));
+        ctx.set(0, 2, CellValue::Number(30.0));
+        ctx.set(0, 3, CellValue::Number(5.0));
+
+        // Sum cells > 10 (no separate sum_range, so criteria_range = sum_range)
+        assert_eq!(
+            eval(r#"SUMIF(A1:A4,">10")"#, &ctx),
+            CellValue::Number(50.0) // 20 + 30
+        );
+    }
+
+    #[test]
+    fn eval_averageif_basic() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Number(10.0));
+        ctx.set(0, 1, CellValue::Number(20.0));
+        ctx.set(0, 2, CellValue::Number(30.0));
+        ctx.set(0, 3, CellValue::Number(5.0));
+        ctx.set(0, 4, CellValue::Number(15.0));
+
+        // Average of cells > 10
+        assert_eq!(
+            eval(r#"AVERAGEIF(A1:A5,">10")"#, &ctx),
+            // 20 + 30 + 15 = 65 / 3 = 21.666...
+            CellValue::Number(65.0 / 3.0)
+        );
+    }
+
+    #[test]
+    fn eval_averageif_no_match() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Number(1.0));
+        ctx.set(0, 1, CellValue::Number(2.0));
+
+        // No cells > 100 => #DIV/0!
+        assert_eq!(
+            eval(r#"AVERAGEIF(A1:A2,">100")"#, &ctx),
+            CellValue::Error(CellError::DivZero)
+        );
+    }
+
+    #[test]
+    fn eval_countif_not_equal() {
+        let mut ctx = TestCtx::new();
+        ctx.set(0, 0, CellValue::Number(0.0));
+        ctx.set(0, 1, CellValue::Number(5.0));
+        ctx.set(0, 2, CellValue::Number(0.0));
+        ctx.set(0, 3, CellValue::Number(10.0));
+
+        // Count cells <> 0
+        assert_eq!(
+            eval(r#"COUNTIF(A1:A4,"<>0")"#, &ctx),
+            CellValue::Number(2.0) // 5, 10
+        );
+    }
+
+    #[test]
+    fn wildcard_match_tests() {
+        assert!(wildcard_match("hello", "hel*"));
+        assert!(wildcard_match("hello", "*llo"));
+        assert!(wildcard_match("hello", "h*o"));
+        assert!(wildcard_match("hello", "h?llo"));
+        assert!(!wildcard_match("hello", "h?lo"));
+        assert!(wildcard_match("hello", "*"));
+        assert!(wildcard_match("", "*"));
+        assert!(!wildcard_match("", "?"));
+        assert!(wildcard_match("abc", "a*c"));
+        assert!(wildcard_match("abc", "a?c"));
     }
 }

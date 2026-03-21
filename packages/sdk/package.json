@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/sdk",
+  "name": "@rudra/sdk",
   "version": "1.0.1",
-  "description": "Headless JavaScript/TypeScript SDK for s1engine — document manipulation, format conversion, collaboration",
+  "description": "Headless JavaScript/TypeScript SDK for Rudra Code — document manipulation, format conversion, collaboration",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "dev": "tsc --watch"
   },
   "peerDependencies": {
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/wasm": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0"

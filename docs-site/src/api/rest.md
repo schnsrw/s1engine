@@ -1,6 +1,6 @@
 # REST API
 
-The s1-server provides a REST API for document management.
+The rudra-server provides a REST API for document management.
 
 ## Base URL
 

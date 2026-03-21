@@ -3,13 +3,13 @@
 ## Install
 
 ```bash
-npm install @s1engine/react @s1engine/editor @s1engine/wasm
+npm install @rudra/react @rudra/editor @rudra/wasm
 ```
 
 ## Usage
 
 ```tsx
-import { S1EditorComponent } from '@s1engine/react';
+import { S1EditorComponent } from '@rudra/react';
 import { useRef } from 'react';
 
 function MyEditor() {

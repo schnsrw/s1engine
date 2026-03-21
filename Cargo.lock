@@ -2234,6 +2234,7 @@ dependencies = [
  "js-sys",
  "s1-crdt",
  "s1-format-pdf",
+ "s1-format-xlsx",
  "s1-layout",
  "s1-model",
  "s1-ops",

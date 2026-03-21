@@ -1,7 +1,7 @@
 # Phase 4 — Enterprise & Compliance Tracker
 
-> Last updated: 2026-03-20
-> **Status: COMPLETE** — All actionable items done. Crypto-dependent items (signature validation, PDF/A full compliance) deferred to dedicated sprint.
+> Last updated: 2026-03-21
+> **Status: COMPLETE** — 45/46 steps done. Only veraPDF testing deferred.
 
 ## E5/O2: Per-Document Permission Enforcement — COMPLETE
 
@@ -54,7 +54,7 @@
 | 5 | `OutputIntent` dictionary | DONE (already existed) |
 | 6 | Validation with veraPDF | NOT TESTED |
 
-## Q12: ODT Change Tracking — PRESERVATION + PARSING DONE
+## Q12: ODT Change Tracking — COMPLETE
 
 | Step | Description | Status |
 |------|-------------|--------|
@@ -92,11 +92,11 @@
 |---------|-------|------|----------|
 | Permissions | 7 | 7 | 0 |
 | Form Controls | 8 | 8 | 0 |
-| Digital Signatures | 10 | 8 | 2 |
+| Digital Signatures | 10 | 10 | 0 |
 | PDF/A | 6 | 5 | 1 |
-| ODT Change Tracking | 6 | 5 | 1 |
+| ODT Change Tracking | 6 | 6 | 0 |
 | Presence/Heartbeat | 5 | 5 | 0 |
 | Error Tracking | 4 | 4 | 0 |
-| **Total** | **46** | **42** | **4** |
+| **Total** | **46** | **45** | **1** |
 
-Deferred items: document re-signing (needs private key), certificate management UI, veraPDF testing, ODT accept/reject.
+Deferred items: veraPDF testing for PDF/A compliance validation.

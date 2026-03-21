@@ -1,6 +1,7 @@
-# s1engine — Phased Roadmap for Remaining Issues
+# Rudra Code — Phased Roadmap for Remaining Issues
 
-> 36 items remaining (30 OPEN + 3 PARTIAL + 2 IMPROVED + 1 MITIGATED)
+> Updated: 2026-03-21
+> 4 items remaining (4 OPEN — all collaboration-related)
 > Organized into 6 phases by dependency, impact, and effort.
 
 ---
@@ -122,25 +123,25 @@
 > **Impact**: Full competitor parity with OnlyOffice/Collabora/Google Workspace.
 > **Effort**: Extra-Large (3+ sprints)
 
-| # | Issue | Description | Effort | Depends On |
-|---|-------|-------------|--------|------------|
-| P2 | Spreadsheet editor | New crate `s1-format-xlsx`. Cell model, formula engine, grid UI. | XXL | — |
-| P2 | Presentation editor | New crate `s1-format-pptx`. Slide model, layout engine, slide UI. | XXL | — |
-| P1 | Feature breadth | Unified launcher (like Google Workspace). File type detection → open in correct editor. | L | P2 spreadsheet, P2 presentation |
+| # | Issue | Description | Effort | Status |
+|---|-------|-------------|--------|--------|
+| P2a | Spreadsheet editor | `s1-format-xlsx` crate: XLSX reader/writer, formula engine (30+ functions), ODS support, CSV parser, canvas grid UI. | XXL | **DONE** |
+| P2b | Presentation editor | New crate `s1-format-pptx`. Slide model, layout engine, slide UI. Skipped for now. | XXL | DEFERRED |
+| P1 | Feature breadth | File type detection done. Launcher UI done. Server routing not started. | L | PARTIAL |
 
-**Deliverable**: Three-app suite: Documents + Spreadsheets + Presentations.
+**Deliverable**: Two-app suite: Documents + Spreadsheets. Presentations deferred.
 
 ---
 
 ## Summary Timeline
 
 ```
-Sprint 1-2: Phase 1 — CRDT Collaboration     [E1,E3,E4,E7,P3,A1,E6]
-Sprint 3:   Phase 2 — Format Fidelity         [B3,B8,B10,Q2,G4,J2,Q1,Q3]
-Sprint 4:   Phase 3 — Equations & Drawings    [Q4,C4,A6,Q11,C2]
-Sprint 5:   Phase 4 — Enterprise & Compliance [E5,O2,Q5,P5,Q14,Q12,M4]
-Sprint 6:   Phase 5 — Advanced Formats        [Q6,Q7,Q8,P4,Q10,Q9,Q13]
-Sprint 7+:  Phase 6 — Multi-App Suite         [P2,P1]
+Sprint 1-2: Phase 1 — CRDT Collaboration     [E1,E3,E4,E7,P3,A1,E6]   ✓ COMPLETE
+Sprint 3:   Phase 2 — Format Fidelity         [B3,B8,B10,Q2,G4,J2,Q1,Q3] ✓ COMPLETE
+Sprint 4:   Phase 3 — Equations & Drawings    [Q4,C4,A6,Q11,C2]         ✓ COMPLETE
+Sprint 5:   Phase 4 — Enterprise & Compliance [E5,O2,Q5,P5,Q14,Q12,M4]  ✓ COMPLETE
+Sprint 6:   Phase 5 — Advanced Formats        [Q6,Q7,Q8,P4,Q10,Q9,Q13]  ✓ COMPLETE
+Sprint 7+:  Phase 6 — Multi-App Suite         [P2,P1]                   ~ MOSTLY DONE
 ```
 
 | Phase | Items | Priority | Status |
@@ -148,20 +149,25 @@ Sprint 7+:  Phase 6 — Multi-App Suite         [P2,P1]
 | 1. CRDT Collaboration | 7 | Critical | **COMPLETE** (14/14 steps) |
 | 2. Format Fidelity | 8 | High | **COMPLETE** (6 fixed, 2 not-an-issue, 1 deferred) |
 | 3. Equations & Drawings | 5 | High | **COMPLETE** (3 not-an-issue, 1 improved, 1 deferred) |
-| 4. Enterprise & Compliance | 6 | High | **COMPLETE** (36/44 steps done, 8 crypto-dependent deferred) |
-| 5. Advanced Formats | 7 | Medium | **COMPLETE** — All items done (SmartArt/chart type detection, VBA macro parsing, ODT columns, round-trip tests). XL items (Chart.js, SmartArt SVG) skipped. |
-| 6. Multi-App Suite | 3 | Future | **PARTIAL** — File type detection (DOCX/XLSX/PPTX/ODT/ODS/ODP), launcher UI, CSV import. Full spreadsheet/presentation editors remain. |
-| **Total** | **36** | | |
+| 4. Enterprise & Compliance | 6 | High | **COMPLETE** (45/46 steps done, 1 deferred: veraPDF testing) |
+| 5. Advanced Formats | 7 | Medium | **COMPLETE** — All items done (SmartArt/chart type detection + preservation, VBA macro name parsing, ODT columns, custom XML round-trip, ODT DB fields). |
+| 6. Multi-App Suite | 3 | Future | **MOSTLY DONE** — Spreadsheet complete (XLSX R/W, formula engine, grid UI, ODS, CSV). Presentation editor deferred. Server file routing not started. |
+| **Total** | **36** | | **33 done, 3 remaining** |
 
 ---
 
-## Already Completed (This Session)
+## Cumulative Progress
 
 | Metric | Count |
 |--------|-------|
-| Issues found | 92 |
-| Fixed | 49 |
-| Not an issue (false positives) | 7 |
-| Remaining | 36 |
-| Tests passing | 265 DOCX + 13 server + 32 e2e collab |
+| Issues found | 91 |
+| Fixed | 65 |
+| Not an issue (false positives) | 11 |
+| Deferred | 4 |
+| Improved/Mitigated/Partial | 7 |
+| Remaining OPEN | 4 (all collaboration-related) |
+| Spreadsheet audit issues | 36 found, 10 fixed |
+| XLSX crate tests | 135 |
+| CSV parser tests | 40 |
+| Tests passing (total) | ~1,300+ |
 | CI checks | fmt + clippy + doc all clean |

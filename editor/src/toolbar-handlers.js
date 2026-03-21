@@ -864,7 +864,7 @@ export function initToolbar() {
   // About dialog — simple alert
   if ($('menuAbout')) $('menuAbout').addEventListener('click', () => {
     closeAllMenus();
-    showToast('s1engine Editor v1.0 — WASM-powered document editor. AGPL-3.0 License.', 'info', 6000);
+    showToast('Rudra Office v1.0 — powered by Rudra Code. WASM-powered document editor. AGPL-3.0 License.', 'info', 6000);
   });
 
   // E10.5: Usage Statistics modal

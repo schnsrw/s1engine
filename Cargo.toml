@@ -45,6 +45,7 @@ s1-convert = { version = "1.0.1", path = "crates/s1-convert" }
 s1-layout = { version = "1.0.1", path = "crates/s1-layout" }
 s1-text = { version = "1.0.1", path = "crates/s1-text" }
 s1-crdt = { version = "1.0.1", path = "crates/s1-crdt" }
+s1-format-xlsx = { version = "1.0.1", path = "crates/s1-format-xlsx" }
 s1engine = { version = "1.0.1", path = "crates/s1engine" }
 
 # External dependencies

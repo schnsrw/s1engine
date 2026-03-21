@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build WASM npm package for @s1engine/wasm
+# Build WASM npm package for @rudra/wasm
 # Usage: ./scripts/build-wasm-npm.sh [--release]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

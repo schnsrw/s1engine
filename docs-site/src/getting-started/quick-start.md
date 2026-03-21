@@ -1,6 +1,6 @@
 # Quick Start
 
-Get up and running with s1engine in 5 minutes.
+Get up and running with Rudra Code in 5 minutes.
 
 ## Option 1: Rust Library
 
@@ -21,7 +21,7 @@ println!("{}", doc.to_plain_text());
 let doc = DocumentBuilder::new()
     .title("My Report")
     .heading(1, "Introduction")
-    .text("Built with s1engine.")
+    .text("Built with Rudra Code.")
     .build();
 
 // Export to PDF
@@ -32,11 +32,11 @@ std::fs::write("output.pdf", pdf_bytes)?;
 ## Option 2: npm / WASM (Browser)
 
 ```bash
-npm install @s1engine/wasm
+npm install @rudra/wasm
 ```
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 
 await init();
 const engine = new WasmEngine();
@@ -47,7 +47,7 @@ const html = doc.to_html();
 ## Option 3: Docker (Full Editor)
 
 ```bash
-docker run -p 8787:8787 s1engine/editor
+docker run -p 8787:8787 rudra/editor
 ```
 
 Open `http://localhost:8787` in your browser.

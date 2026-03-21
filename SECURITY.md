@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in s1engine, please report it responsibly.
+If you discover a security vulnerability in Rudra Code, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
@@ -30,7 +30,7 @@ Instead, please email security concerns to the maintainers or use GitHub's priva
 
 ## Security Measures
 
-s1engine implements the following security measures:
+Rudra Code implements the following security measures:
 
 ### Input Validation
 

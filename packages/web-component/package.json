@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/web-component",
+  "name": "@rudra/web-component",
   "version": "1.0.1",
-  "description": "Web Component (<s1-editor>) for embedding the s1engine document editor",
+  "description": "Web Component (<s1-editor>) for embedding the Rudra Office document editor",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -13,11 +13,11 @@
   "types": "./dist/index.d.ts",
   "files": ["dist/", "README.md"],
   "peerDependencies": {
-    "@s1engine/editor": "^1.0.0",
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/editor": "^1.0.0",
+    "@rudra/wasm": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
   },
-  "keywords": ["s1engine", "web-component", "custom-element", "editor", "document"]
+  "keywords": ["rudra", "web-component", "custom-element", "editor", "document"]
 }

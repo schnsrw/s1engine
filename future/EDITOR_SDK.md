@@ -2,42 +2,42 @@
 
 ## Overview
 
-The s1engine Editor SDK is a set of JavaScript/TypeScript packages that allow developers to embed a document editor into any web application. The SDK is framework-agnostic at its core, with thin adapters for React, Vue, and Web Components.
+The Rudra Code Editor SDK is a set of JavaScript/TypeScript packages that allow developers to embed a document editor into any web application. The SDK is framework-agnostic at its core, with thin adapters for React, Vue, and Web Components.
 
 ## Package Hierarchy
 
 ```
-@s1engine/wasm          Base WASM engine (auto-generated from Rust)
+@rudra/wasm          Base WASM engine (auto-generated from Rust)
     ↑
-@s1engine/sdk           Headless SDK (wraps WASM, no UI)
+@rudra/sdk           Headless SDK (wraps WASM, no UI)
     ↑
-@s1engine/editor        Full editor with UI (toolbar, renderer, etc.)
+@rudra/editor        Full editor with UI (toolbar, renderer, etc.)
     ↑
-@s1engine/react         React adapter
-@s1engine/vue           Vue adapter
-@s1engine/web-component Web Component wrapper
+@rudra/react         React adapter
+@rudra/vue           Vue adapter
+@rudra/web-component Web Component wrapper
 ```
 
 Each package can be used independently:
-- **@s1engine/wasm** — Direct WASM access for advanced users
-- **@s1engine/sdk** — Headless document processing (conversion, text extraction)
-- **@s1engine/editor** — Full WYSIWYG editor
-- **@s1engine/react** — React component wrapping @s1engine/editor
+- **@rudra/wasm** — Direct WASM access for advanced users
+- **@rudra/sdk** — Headless document processing (conversion, text extraction)
+- **@rudra/editor** — Full WYSIWYG editor
+- **@rudra/react** — React component wrapping @rudra/editor
 
 ---
 
-## @s1engine/sdk — Headless SDK
+## @rudra/sdk — Headless SDK
 
 ### Installation
 
 ```bash
-npm install @s1engine/sdk
+npm install @rudra/sdk
 ```
 
 ### Quick Start
 
 ```typescript
-import { S1Engine } from '@s1engine/sdk'
+import { S1Engine } from '@rudra/sdk'
 
 // Initialize engine (loads WASM)
 const engine = await S1Engine.init()
@@ -299,18 +299,18 @@ interface CollabSession {
 
 ---
 
-## @s1engine/editor — Embeddable Editor
+## @rudra/editor — Embeddable Editor
 
 ### Installation
 
 ```bash
-npm install @s1engine/editor
+npm install @rudra/editor
 ```
 
 ### Quick Start
 
 ```typescript
-import { S1Editor } from '@s1engine/editor'
+import { S1Editor } from '@rudra/editor'
 
 const editor = await S1Editor.create(
   document.getElementById('editor-container'),
@@ -347,7 +347,7 @@ editor.open(bytes)
 <body>
   <div id="editor-container"></div>
   <script type="module">
-    import { S1Editor } from '@s1engine/editor'
+    import { S1Editor } from '@rudra/editor'
 
     const editor = await S1Editor.create(
       document.getElementById('editor-container')
@@ -636,18 +636,18 @@ interface Theme {
 
 ---
 
-## @s1engine/react — React Adapter
+## @rudra/react — React Adapter
 
 ### Installation
 
 ```bash
-npm install @s1engine/react
+npm install @rudra/react
 ```
 
 ### Usage
 
 ```tsx
-import { S1Editor, useS1Engine } from '@s1engine/react'
+import { S1Editor, useS1Engine } from '@rudra/react'
 
 function MyApp() {
   const editorRef = useRef<S1EditorHandle>(null)
@@ -745,12 +745,12 @@ interface S1EditorHandle {
 
 ---
 
-## @s1engine/vue — Vue Adapter
+## @rudra/vue — Vue Adapter
 
 ### Installation
 
 ```bash
-npm install @s1engine/vue
+npm install @rudra/vue
 ```
 
 ### Usage
@@ -771,7 +771,7 @@ npm install @s1engine/vue
 
 <script setup>
 import { ref } from 'vue'
-import { S1Editor } from '@s1engine/vue'
+import { S1Editor } from '@rudra/vue'
 
 const editorRef = ref(null)
 
@@ -800,19 +800,19 @@ async function onSave(doc) {
 
 ---
 
-## @s1engine/web-component — Web Component
+## @rudra/web-component — Web Component
 
 ### Installation
 
 ```bash
-npm install @s1engine/web-component
+npm install @rudra/web-component
 ```
 
 ### Usage
 
 ```html
 <script type="module">
-  import '@s1engine/web-component'
+  import '@rudra/web-component'
 </script>
 
 <s1-editor
@@ -883,23 +883,23 @@ Each package is built with its own bundler configuration:
 
 | Package | Build Tool | Output |
 |---------|-----------|--------|
-| @s1engine/wasm | wasm-pack | ESM + .wasm |
-| @s1engine/sdk | Rollup | ESM + CJS + .d.ts |
-| @s1engine/editor | Vite (lib mode) | ESM + CJS + CSS + .d.ts |
-| @s1engine/react | Rollup | ESM + CJS + .d.ts |
-| @s1engine/vue | Vite | ESM + .d.ts |
-| @s1engine/web-component | Rollup | ESM (single file) |
+| @rudra/wasm | wasm-pack | ESM + .wasm |
+| @rudra/sdk | Rollup | ESM + CJS + .d.ts |
+| @rudra/editor | Vite (lib mode) | ESM + CJS + CSS + .d.ts |
+| @rudra/react | Rollup | ESM + CJS + .d.ts |
+| @rudra/vue | Vite | ESM + .d.ts |
+| @rudra/web-component | Rollup | ESM (single file) |
 
 ### Bundle Sizes (targets)
 
 | Package | Size (gzipped) |
 |---------|---------------|
-| @s1engine/wasm | ~1.5 MB |
-| @s1engine/sdk | ~15 KB |
-| @s1engine/editor | ~80 KB (+ CSS ~20 KB) |
-| @s1engine/react | ~5 KB |
-| @s1engine/vue | ~5 KB |
-| @s1engine/web-component | ~3 KB |
+| @rudra/wasm | ~1.5 MB |
+| @rudra/sdk | ~15 KB |
+| @rudra/editor | ~80 KB (+ CSS ~20 KB) |
+| @rudra/react | ~5 KB |
+| @rudra/vue | ~5 KB |
+| @rudra/web-component | ~3 KB |
 | **Total (editor + WASM)** | **~1.6 MB** |
 
 ### Tree Shaking
@@ -912,7 +912,7 @@ For quick prototyping without a bundler:
 
 ```html
 <script type="module">
-  import { S1Editor } from 'https://cdn.jsdelivr.net/npm/@s1engine/editor/dist/index.js'
+  import { S1Editor } from 'https://cdn.jsdelivr.net/npm/@rudra/editor/dist/index.js'
 
   const editor = await S1Editor.create(document.body)
 </script>

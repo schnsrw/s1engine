@@ -1,7 +1,7 @@
 [book]
-title = "s1engine — Open-Source Document Engine SDK in Rust"
+title = "Rudra Code — Open-Source Document Engine SDK in Rust"
 description = "Read, write, edit, and convert DOCX, ODT, PDF, and Markdown documents with CRDT collaboration and WASM support. Self-hosted alternative to OnlyOffice and Google Docs."
-authors = ["s1engine contributors"]
+authors = ["Rudra Code contributors"]
 language = "en"
 src = "src"
 
@@ -14,4 +14,4 @@ preferred-dark-theme = "ayu"
 git-repository-url = "https://github.com/schnsrw/s1engine"
 edit-url-template = "https://github.com/schnsrw/s1engine/edit/main/docs-site/{path}"
 site-url = "/s1engine/"
-description = "s1engine documentation — a pure Rust document engine SDK with DOCX, ODT, PDF, Markdown support, CRDT collaboration, WASM bindings, and a self-hosted web editor."
+description = "Rudra Code documentation — a pure Rust document engine SDK with DOCX, ODT, PDF, Markdown support, CRDT collaboration, WASM bindings, and a self-hosted web editor (Rudra Office)."

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The plugin system allows consumers to extend s1engine's editor and server without forking. Plugins can add toolbar buttons, side panels, keyboard shortcuts, document processors, and server-side hooks.
+The plugin system allows consumers to extend Rudra Code's editor and server without forking. Plugins can add toolbar buttons, side panels, keyboard shortcuts, document processors, and server-side hooks.
 
 ## Design Principles
 
@@ -273,10 +273,10 @@ interface PluginStorage {
 ### Comments Plugin
 
 ```typescript
-// @s1engine/plugin-comments
+// @rudra/plugin-comments
 
 const commentsPlugin: S1Plugin = {
-  name: '@s1engine/plugin-comments',
+  name: '@rudra/plugin-comments',
   version: '1.0.0',
   displayName: 'Comments',
 
@@ -327,7 +327,7 @@ const commentsPlugin: S1Plugin = {
 
 ```typescript
 const findReplacePlugin: S1Plugin = {
-  name: '@s1engine/plugin-find-replace',
+  name: '@rudra/plugin-find-replace',
   version: '1.0.0',
   displayName: 'Find & Replace',
 
@@ -370,7 +370,7 @@ const findReplacePlugin: S1Plugin = {
 
 ```typescript
 const wordCountPlugin: S1Plugin = {
-  name: '@s1engine/plugin-word-count',
+  name: '@rudra/plugin-word-count',
   version: '1.0.0',
 
   init(ctx: PluginContext) {
@@ -394,7 +394,7 @@ const wordCountPlugin: S1Plugin = {
 
 ```typescript
 const trackChangesPlugin: S1Plugin = {
-  name: '@s1engine/plugin-track-changes',
+  name: '@rudra/plugin-track-changes',
   version: '1.0.0',
 
   init(ctx: PluginContext) {
@@ -448,7 +448,7 @@ const trackChangesPlugin: S1Plugin = {
 
 ```typescript
 const versionHistoryPlugin: S1Plugin = {
-  name: '@s1engine/plugin-version-history',
+  name: '@rudra/plugin-version-history',
   version: '1.0.0',
 
   init(ctx: PluginContext) {
@@ -607,9 +607,9 @@ impl DocumentHooks for CompliancePlugin {
 ### Client-Side
 
 ```typescript
-import { S1Editor } from '@s1engine/editor'
-import { commentsPlugin } from '@s1engine/plugin-comments'
-import { findReplacePlugin } from '@s1engine/plugin-find-replace'
+import { S1Editor } from '@rudra/editor'
+import { commentsPlugin } from '@rudra/plugin-comments'
+import { findReplacePlugin } from '@rudra/plugin-find-replace'
 import { myCustomPlugin } from './my-plugin'
 
 const editor = await S1Editor.create(container, {
@@ -645,7 +645,7 @@ max_file_size_mb = 100
 
 ```typescript
 // my-plugin.ts
-import type { S1Plugin, PluginContext } from '@s1engine/editor'
+import type { S1Plugin, PluginContext } from '@rudra/editor'
 
 export function myPlugin(options: MyPluginOptions = {}): S1Plugin {
   return {
@@ -694,7 +694,7 @@ Plugins run in the same JavaScript context as the editor (no iframe/worker isola
 {
   name: 'my-plugin',
   editorVersion: '>=1.0.0 <2.0.0',  // works with editor 1.x
-  dependencies: ['@s1engine/plugin-comments']  // requires comments plugin
+  dependencies: ['@rudra/plugin-comments']  // requires comments plugin
 }
 
 // Editor checks on load

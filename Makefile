@@ -60,16 +60,16 @@ demo-only: ## Start demo server (without rebuilding WASM)
 
 # ─── Docker ─────────────────────────────────────────────────────────
 
-docker-build: ## Build Docker image for s1 editor
+docker-build: ## Build Docker image for Rudra Office
 	docker build -t s1-editor .
 
-docker-run: ## Run s1 editor in Docker (port 8787)
+docker-run: ## Run Rudra Office in Docker (port 8787)
 	docker run -p 8787:8787 -v s1-editor-data:/app/data s1-editor
 
-docker-compose-up: ## Start s1 editor with docker compose
+docker-compose-up: ## Start Rudra Office with docker compose
 	docker compose up -d
 
-docker-compose-down: ## Stop s1 editor docker compose
+docker-compose-down: ## Stop Rudra Office docker compose
 	docker compose down
 
 # ─── Clean ───────────────────────────────────────────────────────────

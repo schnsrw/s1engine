@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-npm install @s1engine/vue @s1engine/editor @s1engine/wasm
+npm install @rudra/vue @rudra/editor @rudra/wasm
 ```
 
 ## Usage
@@ -22,7 +22,7 @@ npm install @s1engine/vue @s1engine/editor @s1engine/wasm
 
 <script setup>
 import { ref } from 'vue';
-import { S1EditorVue } from '@s1engine/vue';
+import { S1EditorVue } from '@rudra/vue';
 
 const editor = ref(null);
 const onReady = () => console.log('Ready');

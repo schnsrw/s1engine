@@ -1,7 +1,8 @@
-// s1 editor — Entry Point
+// Rudra Office — Entry Point
 // Wires all modules together and initializes the WASM engine.
 
 import './styles.css';
+import './spreadsheet.css';
 import { state, $ } from './state.js';
 import { initInput, initPinchToZoom, initTableCellAnnouncements } from './input.js';
 import { initFileHandlers, newDocument, openFile, setDetectFormat, checkAutoRecover, updatePdfStatusBar } from './file.js';
@@ -81,6 +82,7 @@ async function boot() {
     initPropertiesPanel();
     renderRuler();
     initPdfToolbar();
+    initSpreadsheetToolbar();
 
     // Expose state for testing
     window.__s1_state = state;
@@ -329,6 +331,54 @@ function initPdfToolbar() {
       e.preventDefault();
       $('pdfSave')?.click();
     }
+  });
+}
+
+function initSpreadsheetToolbar() {
+  $('ssUndo')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.undo();
+  });
+  $('ssRedo')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.redo();
+  });
+  $('ssCut')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.cutCells();
+  });
+  $('ssCopy')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.copyCells();
+  });
+  $('ssPaste')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.pasteCells();
+  });
+  $('ssSortAsc')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.sort(state.spreadsheetView.selectedCell.col, true);
+  });
+  $('ssSortDesc')?.addEventListener('click', () => {
+    if (state.spreadsheetView) state.spreadsheetView.sort(state.spreadsheetView.selectedCell.col, false);
+  });
+  $('ssFilter')?.addEventListener('click', () => {
+    if (!state.spreadsheetView) return;
+    const col = state.spreadsheetView.selectedCell.col;
+    if (state.spreadsheetView.filterState[col]) {
+      state.spreadsheetView.removeFilter(col);
+    } else {
+      state.spreadsheetView.addFilter(col);
+    }
+  });
+  $('ssFreeze')?.addEventListener('click', () => {
+    if (!state.spreadsheetView) return;
+    const { col, row } = state.spreadsheetView.selectedCell;
+    // Toggle: if already frozen at this position, unfreeze
+    if (state.spreadsheetView.frozenCols === col && state.spreadsheetView.frozenRows === row) {
+      state.spreadsheetView.freezePanes(0, 0);
+    } else {
+      state.spreadsheetView.freezePanes(col, row);
+    }
+  });
+  $('ssExportCSV')?.addEventListener('click', () => {
+    if (!state.spreadsheetView) return;
+    const filename = $('docName')?.value || 'spreadsheet';
+    state.spreadsheetView.downloadCSV(filename);
   });
 }
 

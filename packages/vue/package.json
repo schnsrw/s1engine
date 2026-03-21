@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/vue",
+  "name": "@rudra/vue",
   "version": "1.0.1",
-  "description": "Vue 3 component for the s1engine document editor",
+  "description": "Vue 3 component for the Rudra Office document editor",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -14,12 +14,12 @@
   "files": ["dist/", "README.md"],
   "peerDependencies": {
     "vue": "^3.3.0",
-    "@s1engine/editor": "^1.0.0",
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/editor": "^1.0.0",
+    "@rudra/wasm": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
     "vue": "^3.3.0"
   },
-  "keywords": ["s1engine", "vue", "editor", "document", "docx"]
+  "keywords": ["rudra", "vue", "editor", "document", "docx"]
 }

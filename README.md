@@ -1,17 +1,17 @@
-# s1engine
+# Rudra Code
 
 [![CI](https://github.com/schnsrw/s1engine/actions/workflows/ci.yml/badge.svg)](https://github.com/schnsrw/s1engine/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a browser-based editor.
+A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a browser-based editor (**Rudra Office**).
 
 **1,390+ tests** · **Zero C/C++ dependencies** · **AGPL-3.0**
 
 > **[Format Compatibility & Known Limitations](docs/COMPATIBILITY.md)** — what works, what's partial, what's not supported.
 
-## What is s1engine?
+## What is Rudra Code?
 
-s1engine is a modular Rust SDK that powers document workflows across desktop, server, and web. It combines format conversion (DOCX, ODT, PDF, TXT, Markdown), a Fugue CRDT core for collaboration, and native/WASM/FFI bindings so the same engine can be embedded in editors, clients, and services.
+Rudra Code is a modular Rust SDK that powers document workflows across desktop, server, and web. It combines format conversion (DOCX, ODT, PDF, TXT, Markdown), a Fugue CRDT core for collaboration, and native/WASM/FFI bindings so the same engine can be embedded in editors, clients, and services.
 
 ## Highlights
 
@@ -19,12 +19,12 @@ s1engine is a modular Rust SDK that powers document workflows across desktop, se
 - **Pure Rust** — Zero C/C++ dependencies. Compiles to native, WASM, and C FFI
 - **Collaborative** — Fugue CRDT for multi-user editing with conflict resolution
 - **Layout engine** — Pagination, text shaping (rustybuzz), font subsetting, PDF export
-- **Web editor** — S1 Editor: browser-based document editor with toolbar, comments, track changes, and PDF viewer
+- **Web editor** — Rudra Office: browser-based document editor with toolbar, comments, track changes, and PDF viewer
 - **Embeddable** — Use as a Rust library, WASM module, or C shared library
 
-## Why s1engine?
+## Why Rudra Code?
 
-| | s1engine | LibreOffice | OnlyOffice | Collabora | Google Docs |
+| | Rudra Code | LibreOffice | OnlyOffice | Collabora | Google Docs |
 |---|---|---|---|---|---|
 | **Embeddable SDK** | Yes — Rust, WASM, C FFI | No (monolithic) | Partial (JS client) | Partial (LibreOffice fork) | No |
 | **Pure Rust** | Yes — zero C/C++ deps | C++ | C++/JS | C++ | Proprietary |
@@ -34,7 +34,7 @@ s1engine is a modular Rust SDK that powers document workflows across desktop, se
 | **Document model** | CRDT-ready tree with unique IDs | Legacy DOM | Custom | Legacy DOM | Proprietary |
 | **License** | AGPL-3.0 | MPL-2.0 | AGPL-3.0 | MPL-2.0 | Proprietary |
 
-**Use s1engine if you need:**
+**Use Rudra Code if you need:**
 - A Rust library for reading/writing DOCX, ODT, PDF, or Markdown
 - A self-hosted document editor you can embed in your product (like OnlyOffice Document Server, but in Rust)
 - WASM-powered document editing in the browser without server-side rendering
@@ -79,7 +79,7 @@ let doc = DocumentBuilder::new()
     .heading(1, "Introduction")
     .paragraph(|p| {
         p.text("Built with ")
-         .bold("s1engine")
+         .bold("Rudra Code")
          .text(" — a document SDK in Rust.")
     })
     .table(|t| {
@@ -113,9 +113,9 @@ std::fs::write("output.odt", doc.export(Format::Odt)?)?;
 | `doc-legacy` | Legacy DOC binary parsing | No |
 | `crdt` | CRDT collaboration primitives | No |
 
-## S1 Editor
+## Rudra Office
 
-S1 Editor is the WASM-powered web interface that lets teams collaborate on DOCX, ODT, PDF, TXT, and Markdown content through the same engine used in the Rust SDK. Multi-page layout, annotations, track-changes, and export tools appear inside the browser canvas while Fugue CRDT keeps collaborators in sync.
+Rudra Office is the WASM-powered web interface that lets teams collaborate on DOCX, ODT, PDF, TXT, and Markdown content through the same engine used in the Rust SDK. Multi-page layout, annotations, track-changes, and export tools appear inside the browser canvas while Fugue CRDT keeps collaborators in sync.
 
 ### Experience highlights
 
@@ -263,7 +263,7 @@ make clean          # Clean build artifacts
 | Hyperlinks | Yes | Yes | Yes | Export | — | — |
 | Track Changes | Yes | — | — | — | — | — |
 
-*PDF viewing is available in S1 Editor via PDF.js integration.
+*PDF viewing is available in Rudra Office via PDF.js integration.
 
 ## Documentation
 
@@ -298,7 +298,7 @@ For commercial licensing options (proprietary use without AGPL obligations), con
 
 ## Acknowledgments
 
-s1engine uses these pure-Rust libraries:
+Rudra Code uses these pure-Rust libraries:
 
 - [rustybuzz](https://github.com/RazrFalcon/rustybuzz) — Text shaping (HarfBuzz port)
 - [ttf-parser](https://github.com/RazrFalcon/ttf-parser) — Font parsing

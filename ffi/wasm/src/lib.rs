@@ -11370,6 +11370,635 @@ impl WasmPdfEditor {
     }
 }
 
+// ─── WasmSpreadsheet ─────────────────────────────────────
+
+/// WASM bindings for spreadsheet operations (XLSX, ODS, CSV).
+///
+/// Provides a JavaScript-friendly API for opening, editing, and exporting
+/// spreadsheet files from the browser or Node.js.
+#[wasm_bindgen]
+pub struct WasmSpreadsheet {
+    inner: s1_format_xlsx::Workbook,
+}
+
+#[wasm_bindgen]
+impl WasmSpreadsheet {
+    /// Create a new empty spreadsheet with one sheet.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: s1_format_xlsx::Workbook::new(),
+        }
+    }
+
+    /// Open a spreadsheet from bytes (auto-detect XLSX, ODS, CSV).
+    ///
+    /// Detection is based on file magic bytes:
+    /// - XLSX/ODS: ZIP signature (PK header)
+    /// - CSV: plain text fallback
+    pub fn open(data: &[u8]) -> Result<WasmSpreadsheet, JsError> {
+        // Try to detect format from magic bytes
+        if data.len() >= 4 && &data[0..4] == b"PK\x03\x04" {
+            // ZIP-based format — try XLSX first, then ODS
+            if let Ok(wb) = s1_format_xlsx::read(data) {
+                return Ok(WasmSpreadsheet { inner: wb });
+            }
+            if let Ok(wb) = s1_format_xlsx::read_ods(data) {
+                return Ok(WasmSpreadsheet { inner: wb });
+            }
+            Err(JsError::new(
+                "Failed to parse ZIP-based spreadsheet as XLSX or ODS",
+            ))
+        } else {
+            // Try as CSV
+            let text = String::from_utf8_lossy(data);
+            let wb = parse_csv_to_workbook(&text, ',');
+            Ok(WasmSpreadsheet { inner: wb })
+        }
+    }
+
+    /// Get the number of sheets.
+    pub fn sheet_count(&self) -> usize {
+        self.inner.sheets.len()
+    }
+
+    /// Get sheet names as a JSON array.
+    pub fn sheet_names_json(&self) -> String {
+        let names: Vec<&str> = self.inner.sheets.iter().map(|s| s.name.as_str()).collect();
+        serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Get cell value as string.
+    ///
+    /// Returns an empty string for empty or out-of-range cells.
+    pub fn get_cell(&self, sheet: usize, col: u32, row: u32) -> String {
+        if let Some(s) = self.inner.sheets.get(sheet) {
+            if let Some(cell) = s.get(col, row) {
+                cell.value.to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    /// Set cell value (auto-detect type: number, boolean, or text).
+    pub fn set_cell(&mut self, sheet: usize, col: u32, row: u32, value: &str) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            let cell_value = parse_cell_value_auto(value);
+            s.set(col, row, cell_value);
+        }
+    }
+
+    /// Set cell formula.
+    pub fn set_formula(&mut self, sheet: usize, col: u32, row: u32, formula: &str) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            s.set_formula(col, row, formula, s1_format_xlsx::CellValue::Empty);
+        }
+    }
+
+    /// Get a visible range of cells as JSON for rendering.
+    ///
+    /// Returns a JSON object:
+    /// ```json
+    /// {
+    ///   "cells": [{"col":0,"row":0,"value":"Hello","formula":null,"styleId":0}, ...],
+    ///   "colWidths": [8.43, 15.0, ...],
+    ///   "rowHeights": [15.0, 20.0, ...]
+    /// }
+    /// ```
+    pub fn get_visible_range_json(
+        &self,
+        sheet: usize,
+        start_col: u32,
+        start_row: u32,
+        end_col: u32,
+        end_row: u32,
+    ) -> String {
+        let Some(s) = self.inner.sheets.get(sheet) else {
+            return r#"{"cells":[],"colWidths":[],"rowHeights":[]}"#.to_string();
+        };
+
+        let mut cells = Vec::new();
+        for r in start_row..=end_row {
+            for c in start_col..=end_col {
+                if let Some(cell) = s.get(c, r) {
+                    let value_str = cell.value.to_string();
+                    let formula_json = match &cell.formula {
+                        Some(f) => format!("\"{}\"", escape_json_string(f)),
+                        None => "null".to_string(),
+                    };
+                    cells.push(format!(
+                        r#"{{"col":{},"row":{},"value":"{}","formula":{},"styleId":{}}}"#,
+                        c,
+                        r,
+                        escape_json_string(&value_str),
+                        formula_json,
+                        cell.style_id,
+                    ));
+                }
+            }
+        }
+
+        let mut col_widths = Vec::new();
+        for c in start_col..=end_col {
+            let w = s.column_widths.get(&c).copied().unwrap_or(8.43);
+            col_widths.push(format!("{w}"));
+        }
+
+        let mut row_heights = Vec::new();
+        for r in start_row..=end_row {
+            let h = s.row_heights.get(&r).copied().unwrap_or(15.0);
+            row_heights.push(format!("{h}"));
+        }
+
+        format!(
+            r#"{{"cells":[{}],"colWidths":[{}],"rowHeights":[{}]}}"#,
+            cells.join(","),
+            col_widths.join(","),
+            row_heights.join(","),
+        )
+    }
+
+    /// Recalculate all formulas in a sheet.
+    pub fn recalculate(&mut self, sheet: usize) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            s.recalculate();
+        }
+    }
+
+    /// Sort rows by a column value.
+    ///
+    /// Sorts all data rows in the sheet by the specified column.
+    pub fn sort_by_column(&mut self, sheet: usize, col: u32, ascending: bool) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            sort_sheet_by_column(s, col, ascending);
+        }
+    }
+
+    /// Export as XLSX bytes.
+    pub fn export_xlsx(&self) -> Result<Vec<u8>, JsError> {
+        s1_format_xlsx::write(&self.inner).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Export as ODS bytes.
+    pub fn export_ods(&self) -> Result<Vec<u8>, JsError> {
+        s1_format_xlsx::write_ods(&self.inner).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Export a sheet as CSV string.
+    pub fn export_csv(&self, sheet: usize) -> String {
+        if let Some(s) = self.inner.sheets.get(sheet) {
+            s.to_csv(',')
+        } else {
+            String::new()
+        }
+    }
+
+    /// Get dimensions (max col, max row) as JSON string: `"[cols,rows]"`.
+    pub fn dimensions(&self, sheet: usize) -> String {
+        if let Some(s) = self.inner.sheets.get(sheet) {
+            let (cols, rows) = s.dimensions();
+            format!("[{cols},{rows}]")
+        } else {
+            "[0,0]".to_string()
+        }
+    }
+
+    /// Insert a row after the given row index.
+    ///
+    /// All rows at `after_row + 1` and below are shifted down.
+    pub fn insert_row(&mut self, sheet: usize, after_row: u32) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            insert_row_in_sheet(s, after_row);
+        }
+    }
+
+    /// Delete a row and shift remaining rows up.
+    pub fn delete_row(&mut self, sheet: usize, row: u32) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            delete_row_in_sheet(s, row);
+        }
+    }
+
+    /// Insert a column after the given column index.
+    ///
+    /// All columns at `after_col + 1` and beyond are shifted right.
+    pub fn insert_column(&mut self, sheet: usize, after_col: u32) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            insert_column_in_sheet(s, after_col);
+        }
+    }
+
+    /// Delete a column and shift remaining columns left.
+    pub fn delete_column(&mut self, sheet: usize, col: u32) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            delete_column_in_sheet(s, col);
+        }
+    }
+
+    /// Add a new sheet with the given name.
+    pub fn add_sheet(&mut self, name: &str) {
+        self.inner.sheets.push(s1_format_xlsx::Sheet {
+            name: name.to_string(),
+            ..Default::default()
+        });
+    }
+
+    /// Delete a sheet by index.
+    pub fn delete_sheet(&mut self, index: usize) {
+        if index < self.inner.sheets.len() {
+            self.inner.sheets.remove(index);
+        }
+    }
+
+    /// Rename a sheet by index.
+    pub fn rename_sheet(&mut self, index: usize, name: &str) {
+        if let Some(s) = self.inner.sheets.get_mut(index) {
+            s.name = name.to_string();
+        }
+    }
+
+    /// Set or clear frozen panes on a sheet.
+    ///
+    /// Pass `col=0, row=0` to unfreeze.
+    pub fn freeze_panes(&mut self, sheet: usize, col: u32, row: u32) {
+        if let Some(s) = self.inner.sheets.get_mut(sheet) {
+            if col == 0 && row == 0 {
+                s.frozen_pane = None;
+            } else {
+                s.frozen_pane = Some(s1_format_xlsx::CellRef::new(col, row));
+            }
+        }
+    }
+
+    /// Get merged cells as JSON array: `[{"start":"A1","end":"C3"}, ...]`.
+    pub fn merged_cells_json(&self, sheet: usize) -> String {
+        if let Some(s) = self.inner.sheets.get(sheet) {
+            let entries: Vec<String> = s
+                .merged_cells
+                .iter()
+                .map(|r| {
+                    format!(
+                        r#"{{"start":"{}","end":"{}"}}"#,
+                        r.start.to_a1(),
+                        r.end.to_a1()
+                    )
+                })
+                .collect();
+            format!("[{}]", entries.join(","))
+        } else {
+            "[]".to_string()
+        }
+    }
+}
+
+impl Default for WasmSpreadsheet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ─── Spreadsheet helper functions ─────────────────────────
+
+/// Parse a string value, auto-detecting type.
+fn parse_cell_value_auto(value: &str) -> s1_format_xlsx::CellValue {
+    if value.is_empty() {
+        return s1_format_xlsx::CellValue::Empty;
+    }
+    // Boolean
+    match value.to_uppercase().as_str() {
+        "TRUE" => return s1_format_xlsx::CellValue::Boolean(true),
+        "FALSE" => return s1_format_xlsx::CellValue::Boolean(false),
+        _ => {}
+    }
+    // Number
+    if let Ok(n) = value.parse::<f64>() {
+        return s1_format_xlsx::CellValue::Number(n);
+    }
+    // Text
+    s1_format_xlsx::CellValue::Text(value.to_string())
+}
+
+/// Parse CSV text into a Workbook.
+fn parse_csv_to_workbook(text: &str, delimiter: char) -> s1_format_xlsx::Workbook {
+    let mut wb = s1_format_xlsx::Workbook::new();
+    let sheet = wb.sheets.first_mut().unwrap();
+
+    for (row_idx, line) in text.lines().enumerate() {
+        let mut col_idx = 0u32;
+        let mut chars = line.chars().peekable();
+
+        while chars.peek().is_some() {
+            let value = if chars.peek() == Some(&'"') {
+                // Quoted field
+                chars.next(); // consume opening quote
+                let mut field = String::new();
+                loop {
+                    match chars.next() {
+                        Some('"') => {
+                            if chars.peek() == Some(&'"') {
+                                chars.next();
+                                field.push('"');
+                            } else {
+                                break;
+                            }
+                        }
+                        Some(c) => field.push(c),
+                        None => break,
+                    }
+                }
+                // Consume delimiter after closing quote
+                if chars.peek() == Some(&delimiter) {
+                    chars.next();
+                }
+                field
+            } else {
+                // Unquoted field
+                let mut field = String::new();
+                loop {
+                    match chars.peek() {
+                        Some(&c) if c == delimiter => {
+                            chars.next();
+                            break;
+                        }
+                        Some(_) => {
+                            field.push(chars.next().unwrap());
+                        }
+                        None => break,
+                    }
+                }
+                field
+            };
+
+            if !value.is_empty() {
+                sheet.set(col_idx, row_idx as u32, parse_cell_value_auto(&value));
+            }
+            col_idx += 1;
+        }
+    }
+
+    wb
+}
+
+/// Sort a sheet's data rows by a specific column.
+fn sort_sheet_by_column(sheet: &mut s1_format_xlsx::Sheet, col: u32, ascending: bool) {
+    let (max_col, max_row) = sheet.dimensions();
+    if max_row == 0 {
+        return;
+    }
+
+    // Collect all row data
+    let mut row_data: Vec<(u32, std::collections::BTreeMap<u32, s1_format_xlsx::Cell>)> =
+        Vec::new();
+    for r in 0..max_row {
+        let mut row_cells = std::collections::BTreeMap::new();
+        for c in 0..max_col {
+            let ref_cell = s1_format_xlsx::CellRef::new(c, r);
+            if let Some(cell) = sheet.cells.remove(&ref_cell) {
+                row_cells.insert(c, cell);
+            }
+        }
+        row_data.push((r, row_cells));
+    }
+
+    // Sort by the specified column
+    row_data.sort_by(|(_, a_cells), (_, b_cells)| {
+        let a_val = a_cells
+            .get(&col)
+            .map(|c| &c.value)
+            .unwrap_or(&s1_format_xlsx::CellValue::Empty);
+        let b_val = b_cells
+            .get(&col)
+            .map(|c| &c.value)
+            .unwrap_or(&s1_format_xlsx::CellValue::Empty);
+
+        let cmp = compare_cell_values(a_val, b_val);
+        if ascending {
+            cmp
+        } else {
+            cmp.reverse()
+        }
+    });
+
+    // Write sorted rows back
+    sheet.cells.clear();
+    for (new_row, (_, row_cells)) in row_data.into_iter().enumerate() {
+        for (c, cell) in row_cells {
+            sheet
+                .cells
+                .insert(s1_format_xlsx::CellRef::new(c, new_row as u32), cell);
+        }
+    }
+}
+
+/// Compare two cell values for sorting.
+fn compare_cell_values(
+    a: &s1_format_xlsx::CellValue,
+    b: &s1_format_xlsx::CellValue,
+) -> std::cmp::Ordering {
+    use s1_format_xlsx::CellValue;
+    use std::cmp::Ordering;
+
+    fn rank(v: &CellValue) -> u8 {
+        match v {
+            CellValue::Empty => 0,
+            CellValue::Number(_) | CellValue::Date(_) => 1,
+            CellValue::Text(_) => 2,
+            CellValue::Boolean(_) => 3,
+            CellValue::Error(_) => 4,
+        }
+    }
+
+    let ra = rank(a);
+    let rb = rank(b);
+    if ra != rb {
+        return ra.cmp(&rb);
+    }
+
+    match (a, b) {
+        (CellValue::Number(na), CellValue::Number(nb))
+        | (CellValue::Date(na), CellValue::Date(nb)) => {
+            na.partial_cmp(nb).unwrap_or(Ordering::Equal)
+        }
+        (CellValue::Text(sa), CellValue::Text(sb)) => sa.cmp(sb),
+        (CellValue::Boolean(ba), CellValue::Boolean(bb)) => ba.cmp(bb),
+        _ => Ordering::Equal,
+    }
+}
+
+/// Insert a row after `after_row`, shifting cells below down by one.
+fn insert_row_in_sheet(sheet: &mut s1_format_xlsx::Sheet, after_row: u32) {
+    let new_row = after_row + 1;
+    // Collect all cells that need to move
+    let cells_to_move: Vec<(s1_format_xlsx::CellRef, s1_format_xlsx::Cell)> = sheet
+        .cells
+        .iter()
+        .filter(|(r, _)| r.row >= new_row)
+        .map(|(r, c)| (*r, c.clone()))
+        .collect();
+
+    // Remove them
+    for (r, _) in &cells_to_move {
+        sheet.cells.remove(r);
+    }
+
+    // Re-insert shifted down
+    for (r, c) in cells_to_move {
+        sheet
+            .cells
+            .insert(s1_format_xlsx::CellRef::new(r.col, r.row + 1), c);
+    }
+
+    // Shift row heights
+    let heights_to_move: Vec<(u32, f64)> = sheet
+        .row_heights
+        .iter()
+        .filter(|(&r, _)| r >= new_row)
+        .map(|(&r, &h)| (r, h))
+        .collect();
+    for (r, _) in &heights_to_move {
+        sheet.row_heights.remove(r);
+    }
+    for (r, h) in heights_to_move {
+        sheet.row_heights.insert(r + 1, h);
+    }
+}
+
+/// Delete a row, shifting cells below up by one.
+fn delete_row_in_sheet(sheet: &mut s1_format_xlsx::Sheet, row: u32) {
+    // Remove cells in the target row
+    let to_remove: Vec<s1_format_xlsx::CellRef> = sheet
+        .cells
+        .keys()
+        .filter(|r| r.row == row)
+        .copied()
+        .collect();
+    for r in to_remove {
+        sheet.cells.remove(&r);
+    }
+
+    // Shift cells below the deleted row up
+    let cells_to_move: Vec<(s1_format_xlsx::CellRef, s1_format_xlsx::Cell)> = sheet
+        .cells
+        .iter()
+        .filter(|(r, _)| r.row > row)
+        .map(|(r, c)| (*r, c.clone()))
+        .collect();
+    for (r, _) in &cells_to_move {
+        sheet.cells.remove(r);
+    }
+    for (r, c) in cells_to_move {
+        sheet
+            .cells
+            .insert(s1_format_xlsx::CellRef::new(r.col, r.row - 1), c);
+    }
+
+    // Shift row heights
+    sheet.row_heights.remove(&row);
+    let heights_to_move: Vec<(u32, f64)> = sheet
+        .row_heights
+        .iter()
+        .filter(|(&r, _)| r > row)
+        .map(|(&r, &h)| (r, h))
+        .collect();
+    for (r, _) in &heights_to_move {
+        sheet.row_heights.remove(r);
+    }
+    for (r, h) in heights_to_move {
+        sheet.row_heights.insert(r - 1, h);
+    }
+}
+
+/// Insert a column after `after_col`, shifting cells to the right.
+fn insert_column_in_sheet(sheet: &mut s1_format_xlsx::Sheet, after_col: u32) {
+    let new_col = after_col + 1;
+
+    let cells_to_move: Vec<(s1_format_xlsx::CellRef, s1_format_xlsx::Cell)> = sheet
+        .cells
+        .iter()
+        .filter(|(r, _)| r.col >= new_col)
+        .map(|(r, c)| (*r, c.clone()))
+        .collect();
+    for (r, _) in &cells_to_move {
+        sheet.cells.remove(r);
+    }
+    for (r, c) in cells_to_move {
+        sheet
+            .cells
+            .insert(s1_format_xlsx::CellRef::new(r.col + 1, r.row), c);
+    }
+
+    // Shift column widths
+    let widths_to_move: Vec<(u32, f64)> = sheet
+        .column_widths
+        .iter()
+        .filter(|(&c, _)| c >= new_col)
+        .map(|(&c, &w)| (c, w))
+        .collect();
+    for (c, _) in &widths_to_move {
+        sheet.column_widths.remove(c);
+    }
+    for (c, w) in widths_to_move {
+        sheet.column_widths.insert(c + 1, w);
+    }
+}
+
+/// Delete a column, shifting cells to the left.
+fn delete_column_in_sheet(sheet: &mut s1_format_xlsx::Sheet, col: u32) {
+    // Remove cells in the target column
+    let to_remove: Vec<s1_format_xlsx::CellRef> = sheet
+        .cells
+        .keys()
+        .filter(|r| r.col == col)
+        .copied()
+        .collect();
+    for r in to_remove {
+        sheet.cells.remove(&r);
+    }
+
+    // Shift cells to the right of the deleted column left
+    let cells_to_move: Vec<(s1_format_xlsx::CellRef, s1_format_xlsx::Cell)> = sheet
+        .cells
+        .iter()
+        .filter(|(r, _)| r.col > col)
+        .map(|(r, c)| (*r, c.clone()))
+        .collect();
+    for (r, _) in &cells_to_move {
+        sheet.cells.remove(r);
+    }
+    for (r, c) in cells_to_move {
+        sheet
+            .cells
+            .insert(s1_format_xlsx::CellRef::new(r.col - 1, r.row), c);
+    }
+
+    // Shift column widths
+    sheet.column_widths.remove(&col);
+    let widths_to_move: Vec<(u32, f64)> = sheet
+        .column_widths
+        .iter()
+        .filter(|(&c, _)| c > col)
+        .map(|(&c, &w)| (c, w))
+        .collect();
+    for (c, _) in &widths_to_move {
+        sheet.column_widths.remove(c);
+    }
+    for (c, w) in widths_to_move {
+        sheet.column_widths.insert(c - 1, w);
+    }
+}
+
+/// Escape a string for JSON embedding.
+fn escape_json_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
