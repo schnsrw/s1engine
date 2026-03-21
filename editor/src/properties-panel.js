@@ -177,6 +177,9 @@ export function detectContextAndUpdate() {
     if (el) el.style.display = 'none';
   });
 
+  // P4 Step 5: Always populate document info (macros, etc.) when panel is open
+  populateDocInfo();
+
   const contextLabel = $('propsContextLabel');
 
   switch (newContext) {
@@ -849,4 +852,40 @@ function applySectionColumns(cols) {
     renderDocument();
     updateUndoRedo();
   } catch (e) { console.error('props panel: columns', e); }
+}
+
+// ─── Document Info (macros, signatures) ──────────
+// P4 Step 5: Show VBA macro names in properties panel
+export function populateDocInfo() {
+  if (!state.doc) return;
+
+  const infoSection = $('propsDocInfo');
+  const macrosGroup = $('propsDocMacros');
+  const macroList = $('propsMacroList');
+  if (!infoSection || !macrosGroup || !macroList) return;
+
+  try {
+    const meta = state.doc.metadata_json ? JSON.parse(state.doc.metadata_json()) : {};
+    const props = meta.custom_properties || {};
+
+    if (props.hasMacros === 'true') {
+      infoSection.style.display = '';
+      macrosGroup.style.display = '';
+
+      const names = props.macroNames || '';
+      if (names) {
+        const modules = names.split(',').map(n => n.trim()).filter(Boolean);
+        macroList.innerHTML = modules
+          .map(n => `<div style="padding:2px 0;border-bottom:1px solid #f0f0f0">${n}</div>`)
+          .join('');
+      } else {
+        macroList.textContent = 'Macros detected (names unavailable)';
+      }
+    } else {
+      infoSection.style.display = 'none';
+      macrosGroup.style.display = 'none';
+    }
+  } catch (e) {
+    console.debug('props panel: doc info error', e);
+  }
 }

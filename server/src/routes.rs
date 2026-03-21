@@ -77,6 +77,9 @@ pub async fn create_document(
             // Detect format from filename
             let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
 
+            // Detect file type from bytes (Phase 6: multi-app routing)
+            let detected_type = s1_convert::detect_file_type(&data);
+
             let meta = DocumentMeta {
                 id: doc_id.clone(),
                 filename: filename.clone(),
@@ -104,6 +107,11 @@ pub async fn create_document(
                     "size": data.len(),
                     "wordCount": word_count,
                     "title": doc.metadata().title,
+                    "detectedType": detected_type.extension(),
+                    "detectedTypeLabel": detected_type.label(),
+                    "isDocument": detected_type.is_document(),
+                    "isSpreadsheet": detected_type.is_spreadsheet(),
+                    "isPresentation": detected_type.is_presentation(),
                 })),
             ));
         }
@@ -433,6 +441,11 @@ pub async fn upload_file(
             let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
             let word_count = doc.to_plain_text().split_whitespace().count();
 
+            // Detect file type from bytes (Phase 6: multi-app routing)
+            let detected_type = s1_convert::detect_file_type(&data);
+            let detected_type_str = detected_type.extension().to_string();
+            let detected_label = detected_type.label().to_string();
+
             state
                 .sessions
                 .create(
@@ -452,6 +465,11 @@ pub async fn upload_file(
                     "filename": filename,
                     "size": data.len(),
                     "wordCount": word_count,
+                    "detectedType": detected_type_str,
+                    "detectedTypeLabel": detected_label,
+                    "isDocument": detected_type.is_document(),
+                    "isSpreadsheet": detected_type.is_spreadsheet(),
+                    "isPresentation": detected_type.is_presentation(),
                     "editorUrl": format!("/?file={}", file_id),
                     "wsUrl": format!("/ws/edit/{}", file_id),
                 })),

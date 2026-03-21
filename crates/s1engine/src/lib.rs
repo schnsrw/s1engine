@@ -92,6 +92,15 @@ pub use s1_layout::{
 #[cfg(feature = "layout")]
 pub use s1_text as text;
 
+// Convert module support (feature-gated).
+#[cfg(feature = "convert")]
+pub use s1_convert as convert;
+
+#[cfg(feature = "convert")]
+pub use s1_convert::{
+    csv_to_docx, csv_to_model, detect_file_type, docx_to_csv, model_to_csv, FileType,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

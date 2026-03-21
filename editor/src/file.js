@@ -694,6 +694,33 @@ export function initFileHandlers() {
   $('btnOpen').addEventListener('click', () => $('fileInput').click());
   $('welcomeOpen').addEventListener('click', () => $('fileInput').click());
 
+  // Suite launcher buttons (Phase 6)
+  const suiteSpreadsheet = $('suiteSpreadsheet');
+  if (suiteSpreadsheet) {
+    suiteSpreadsheet.addEventListener('click', () => {
+      showToast('Spreadsheet editor is planned for a future release.', 'info', 5000);
+    });
+  }
+  const suitePresentation = $('suitePresentation');
+  if (suitePresentation) {
+    suitePresentation.addEventListener('click', () => {
+      showToast('Presentation editor is planned for a future release.', 'info', 5000);
+    });
+  }
+  const suiteCSV = $('suiteCSV');
+  if (suiteCSV) {
+    suiteCSV.addEventListener('click', () => $('csvInput').click());
+  }
+  const csvInput = $('csvInput');
+  if (csvInput) {
+    csvInput.addEventListener('change', e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => openFile(new Uint8Array(r.result), f.name);
+      r.readAsArrayBuffer(f); e.target.value = '';
+    });
+  }
+
   $('fileInput').addEventListener('change', e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();

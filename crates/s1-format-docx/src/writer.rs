@@ -241,7 +241,7 @@ pub fn write(doc: &DocumentModel) -> Result<Vec<u8>, DocxError> {
 /// private key requires canonicalization of the `SignedInfo` element, which
 /// is outside the scope of this library.
 ///
-/// After calling this function, call [`write`] to produce the final DOCX bytes
+/// After calling this function, call [`write()`] to produce the final DOCX bytes
 /// with the signature embedded.
 ///
 /// # Arguments

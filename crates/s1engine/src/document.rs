@@ -574,6 +574,11 @@ impl Document {
                 let font_db = s1_text::FontDatabase::empty();
                 self.export_pdf(&font_db)
             }
+            #[cfg(feature = "convert")]
+            Format::Csv => {
+                let csv_text = s1_convert::model_to_csv(&self.model);
+                Ok(csv_text.into_bytes())
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::UnsupportedFormat(format!(
                 "{:?} export not available (check feature flags)",

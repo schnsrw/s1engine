@@ -2038,6 +2038,7 @@ dependencies = [
  "s1-format-odt",
  "s1-model",
  "thiserror",
+ "zip",
 ]
 
 [[package]]

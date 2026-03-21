@@ -8898,6 +8898,27 @@ fn render_table_clean(model: &DocumentModel, table_id: NodeId, html: &mut String
             return;
         }
     };
+
+    // Q10: Emit <colgroup> with column widths if available
+    if let Some(widths_str) = table
+        .attributes
+        .get_string(&AttributeKey::TableColumnWidths)
+    {
+        let widths: Vec<&str> = widths_str.split(',').collect();
+        if widths.iter().any(|w| w.contains("pt")) {
+            html.push_str("<colgroup>");
+            for w in &widths {
+                let trimmed = w.trim();
+                if trimmed.contains("pt") {
+                    html.push_str(&format!("<col style=\"width:{trimmed}\">"));
+                } else {
+                    html.push_str("<col>");
+                }
+            }
+            html.push_str("</colgroup>");
+        }
+    }
+
     for &row_id in &table.children {
         if let Some(row) = model.node(row_id) {
             if row.node_type == NodeType::TableRow {
@@ -9059,52 +9080,81 @@ fn render_drawing(model: &DocumentModel, drawing_id: NodeId, html: &mut String) 
         .get_string(&AttributeKey::ShapeType)
         .unwrap_or("shape");
 
-    // Check raw XML for special drawing types (diagrams, charts, OLE objects)
+    // Check ShapeType prefix and raw XML for special drawing types
     let raw_xml = node
         .attributes
         .get_string(&AttributeKey::ShapeRawXml)
         .unwrap_or("");
 
-    let is_diagram = raw_xml.contains("dgm:")
+    let is_diagram = shape_type.starts_with("diagram:")
+        || raw_xml.contains("dgm:")
         || raw_xml.contains("/diagram")
         || raw_xml.contains("diagramLayout")
         || raw_xml.contains("diagrams/");
-    let is_chart = raw_xml.contains("c:chart") || raw_xml.contains("/chart");
+    let is_chart = shape_type.starts_with("chart:")
+        || raw_xml.contains("c:chart")
+        || raw_xml.contains("/chart");
     let is_ole = raw_xml.contains("OLEObject")
         || raw_xml.contains("oleObject")
         || raw_xml.contains("/embeddings/");
 
     // Render specialized placeholders for non-image drawing types
     if is_diagram {
+        // Extract diagram subtype from ShapeType (e.g., "diagram:hierarchy" -> "Hierarchy")
+        let subtype = shape_type.strip_prefix("diagram:").unwrap_or("generic");
+        let label = if subtype != "generic" {
+            let mut chars = subtype.chars();
+            let capitalized: String = match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            };
+            format!("SmartArt Diagram ({capitalized})")
+        } else {
+            "SmartArt Diagram".to_string()
+        };
         html.push_str(&format!(
             "<div class=\"vml-shape diagram-placeholder\" data-node-id=\"{r}:{c}\" \
              style=\"display:inline-block;width:{w}pt;min-height:{h}pt;\
              border:1px solid #c4c7cc;border-radius:4px;background:#fafbfc;\
              padding:8px;margin:4px 0;box-sizing:border-box;overflow:hidden;\
              text-align:center;line-height:{h}pt\" \
-             title=\"SmartArt Diagram\">\
-             <span style=\"color:#666;font-size:11px\">SmartArt Diagram</span></div>",
+             title=\"{lbl}\">\
+             <span style=\"color:#666;font-size:11px\">{lbl}</span></div>",
             r = drawing_id.replica,
             c = drawing_id.counter,
             w = width,
             h = height,
+            lbl = label,
         ));
         return;
     }
 
     if is_chart {
+        // Extract chart subtype from ShapeType (e.g., "chart:bar" -> "Bar Chart")
+        let subtype = shape_type.strip_prefix("chart:").unwrap_or("generic");
+        let label = if subtype != "generic" {
+            let mut chars = subtype.chars();
+            let capitalized: String = match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            };
+            format!("{capitalized} Chart")
+        } else {
+            "Chart".to_string()
+        };
         html.push_str(&format!(
             "<div class=\"vml-shape chart-placeholder\" data-node-id=\"{r}:{c}\" \
              style=\"display:inline-block;width:{w}pt;min-height:{h}pt;\
              border:1px solid #c4c7cc;border-radius:4px;background:#fafbfc;\
              padding:8px;margin:4px 0;box-sizing:border-box;overflow:hidden;\
              text-align:center;line-height:{h}pt\" \
-             title=\"Chart\">\
-             <span style=\"color:#666;font-size:11px\">Chart</span></div>",
+             title=\"{lbl}\">\
+             <span style=\"color:#666;font-size:11px\">{lbl}</span></div>",
             r = drawing_id.replica,
             c = drawing_id.counter,
             w = width,
             h = height,
+            lbl = label,
         ));
         return;
     }
@@ -9372,6 +9422,27 @@ fn render_table(model: &DocumentModel, table_id: NodeId, html: &mut String) {
             return;
         }
     };
+
+    // Q10: Emit <colgroup> with column widths if available
+    if let Some(widths_str) = table
+        .attributes
+        .get_string(&AttributeKey::TableColumnWidths)
+    {
+        let widths: Vec<&str> = widths_str.split(',').collect();
+        if widths.iter().any(|w| w.contains("pt")) {
+            html.push_str("<colgroup>");
+            for w in &widths {
+                let trimmed = w.trim();
+                if trimmed.contains("pt") {
+                    html.push_str(&format!("<col style=\"width:{trimmed}\">"));
+                } else {
+                    html.push_str("<col>");
+                }
+            }
+            html.push_str("</colgroup>");
+        }
+    }
+
     for &row_id in &table.children {
         render_node(model, row_id, html);
     }
@@ -9757,11 +9828,36 @@ fn table_cell_to_json(cell: &s1_layout::LayoutTableCell, model: &DocumentModel, 
 
 /// Detect the format of a document from its bytes.
 ///
-/// Returns one of: "docx", "odt", "pdf", "txt".
+/// Returns one of: "docx", "odt", "pdf", "txt", "csv", "xlsx", "pptx", "ods", "odp", "doc".
 #[wasm_bindgen]
 pub fn detect_format(data: &[u8]) -> String {
     let fmt = s1engine::Format::detect(data);
     fmt.extension().to_string()
+}
+
+/// Detect the file type from bytes with extended metadata.
+///
+/// Returns a JSON string with fields:
+/// - `type`: file extension (e.g., "docx", "xlsx", "pptx")
+/// - `label`: human-readable label (e.g., "Excel Spreadsheet")
+/// - `mime`: MIME type
+/// - `isDocument`: boolean
+/// - `isSpreadsheet`: boolean
+/// - `isPresentation`: boolean
+/// - `isSupported`: whether s1engine can open this file
+#[wasm_bindgen]
+pub fn detect_file_type(data: &[u8]) -> String {
+    let ft = s1engine::detect_file_type(data);
+    format!(
+        "{{\"type\":\"{}\",\"label\":\"{}\",\"mime\":\"{}\",\"isDocument\":{},\"isSpreadsheet\":{},\"isPresentation\":{},\"isSupported\":{}}}",
+        ft.extension(),
+        ft.label(),
+        ft.mime_type(),
+        ft.is_document(),
+        ft.is_spreadsheet(),
+        ft.is_presentation(),
+        ft.is_supported(),
+    )
 }
 
 // --- WasmCollabDocument (P.6: Collaboration API) ---

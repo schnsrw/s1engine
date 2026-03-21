@@ -60,6 +60,10 @@ impl Engine {
             Format::Doc => {
                 s1_convert::doc_reader::read_doc(data).map_err(|e| Error::Format(e.to_string()))?
             }
+            #[cfg(feature = "convert")]
+            Format::Csv => {
+                s1_convert::csv_to_model(data).map_err(|e| Error::Format(e.to_string()))?
+            }
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(Error::UnsupportedFormat(format!(

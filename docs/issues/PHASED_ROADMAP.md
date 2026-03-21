@@ -149,8 +149,8 @@ Sprint 7+:  Phase 6 — Multi-App Suite         [P2,P1]
 | 2. Format Fidelity | 8 | High | **COMPLETE** (6 fixed, 2 not-an-issue, 1 deferred) |
 | 3. Equations & Drawings | 5 | High | **COMPLETE** (3 not-an-issue, 1 improved, 1 deferred) |
 | 4. Enterprise & Compliance | 6 | High | **COMPLETE** (36/44 steps done, 8 crypto-dependent deferred) |
-| 5. Advanced Formats | 7 | Medium | **PARTIAL** — ZIP preservation handles round-trip for SmartArt/charts/OLE/VBA/customXml. Visual rendering deferred. |
-| 6. Multi-App Suite | 3 | Future | **DEFERRED** (individual tracker: `PHASE6_MULTI_APP_TRACKER.md`) |
+| 5. Advanced Formats | 7 | Medium | **COMPLETE** — All items done (SmartArt/chart type detection, VBA macro parsing, ODT columns, round-trip tests). XL items (Chart.js, SmartArt SVG) skipped. |
+| 6. Multi-App Suite | 3 | Future | **PARTIAL** — File type detection (DOCX/XLSX/PPTX/ODT/ODS/ODP), launcher UI, CSV import. Full spreadsheet/presentation editors remain. |
 | **Total** | **36** | | |
 
 ---

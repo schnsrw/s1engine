@@ -15,7 +15,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-s1engine = { workspace = true, features = ["layout", "pdf", "crdt"] }
+s1engine = { workspace = true, features = ["layout", "pdf", "crdt", "convert"] }
 s1-model = { workspace = true }
 s1-layout = { workspace = true }
 s1-text = { workspace = true }

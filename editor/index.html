@@ -210,7 +210,8 @@
   </div>
 
   <!-- Hidden file inputs (used by JS) -->
-  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf" hidden>
+  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf,.csv" hidden>
+  <input type="file" id="csvInput" accept=".csv" hidden>
   <input type="file" id="imageInput" accept="image/*" hidden>
 
   <!-- Toolbar -->
@@ -464,12 +465,31 @@
     <h2>Welcome to s1 editor</h2>
     <p>A professional document editor powered by s1engine — full DOCX, ODT, PDF, and Markdown support with real-time formatting.</p>
     <div class="actions">
-      <button class="big-btn primary" id="welcomeNew"><span class="msi">note_add</span> New Document</button>
-      <button class="big-btn" id="welcomeOpen"><span class="msi">folder_open</span> Open File</button>
+      <button class="big-btn primary" id="welcomeNew" title="Create a new blank document"><span class="msi">note_add</span> New Document</button>
+      <button class="big-btn" id="welcomeOpen" title="Open a file from your computer"><span class="msi">folder_open</span> Open File</button>
+    </div>
+    <div class="welcome-suite" id="welcomeSuite">
+      <div class="welcome-suite-label">Other apps</div>
+      <div class="welcome-suite-btns">
+        <button class="suite-btn" id="suiteSpreadsheet" title="Open a spreadsheet (coming soon)">
+          <span class="msi suite-icon suite-icon-sheets">table_chart</span>
+          <span class="suite-label">Spreadsheet</span>
+          <span class="suite-badge">Coming soon</span>
+        </button>
+        <button class="suite-btn" id="suitePresentation" title="Open a presentation (coming soon)">
+          <span class="msi suite-icon suite-icon-slides">slideshow</span>
+          <span class="suite-label">Presentation</span>
+          <span class="suite-badge">Coming soon</span>
+        </button>
+        <button class="suite-btn" id="suiteCSV" title="Import a CSV file as a document table">
+          <span class="msi suite-icon suite-icon-csv">grid_on</span>
+          <span class="suite-label">Import CSV</span>
+        </button>
+      </div>
     </div>
     <div class="drop-zone" id="dropZone">
       <span class="msi drop-icon">upload_file</span>
-      <span>Drop a DOCX, ODT, PDF, TXT, or Markdown file here</span>
+      <span>Drop a DOCX, ODT, PDF, TXT, CSV, or Markdown file here</span>
     </div>
   </div>
 
@@ -764,6 +784,14 @@
             <option value="2">2 columns</option>
             <option value="3">3 columns</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Document Info (macros, signatures, etc.) -->
+      <div class="props-section" id="propsDocInfo" style="display:none">
+        <div class="props-group" id="propsDocMacros" style="display:none">
+          <label class="props-label">VBA Macros</label>
+          <div class="props-info-box" id="propsMacroList" style="font-size:12px;color:#555;padding:6px 8px;background:#fff8e1;border:1px solid #ffe082;border-radius:4px;max-height:120px;overflow-y:auto"></div>
         </div>
       </div>
     </div>

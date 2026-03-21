@@ -24,7 +24,8 @@ pub mod stylesheet;
 pub mod summary_info;
 
 pub use convert::{
-    convert, convert_to_model, convert_with_warnings, detect_format, is_supported,
-    validate_conversion, ConvertWarning, SourceFormat, TargetFormat,
+    convert, convert_to_model, convert_with_warnings, csv_to_docx, csv_to_model, detect_file_type,
+    detect_format, docx_to_csv, is_supported, model_to_csv, validate_conversion, ConvertWarning,
+    FileType, SourceFormat, TargetFormat,
 };
 pub use error::ConvertError;
