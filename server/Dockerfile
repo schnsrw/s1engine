@@ -1,8 +1,8 @@
-# s1-server — API Server Docker Image
+# rudra-server — API Server Docker Image
 #
 # Usage:
-#   docker build -t s1engine/server -f server/Dockerfile .
-#   docker run -p 8080:8080 -v ./data:/data s1engine/server
+#   docker build -t rudra/server -f server/Dockerfile .
+#   docker run -p 8080:8080 -v ./data:/data rudra/server
 #
 # Environment variables:
 #   S1_PORT=8080          Port to listen on

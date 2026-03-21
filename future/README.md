@@ -1,8 +1,8 @@
-# s1engine — Open-Source Platform Plan
+# Rudra Code — Open-Source Platform Plan
 
 ## Purpose
 
-This directory contains the complete planning documentation for transforming s1engine from a standalone Rust document engine library into a fully integrable, white-label-ready, open-source document editing platform that other products can embed via APIs.
+This directory contains the complete planning documentation for transforming Rudra Code from a standalone Rust document engine library into a fully integrable, white-label-ready, open-source document editing platform that other products can embed via APIs.
 
 ## Document Index
 
@@ -31,7 +31,7 @@ The s1engine core is **complete and production-tested**:
 - CRDT-based collaboration with Fugue text + Kleppmann tree
 - Layout engine with Knuth-Plass line breaking
 - WASM bindings (wasm-bindgen) + C FFI (cbindgen)
-- Production web editor ("S1 Editor") — vanilla JS, multi-page, collaboration-ready
+- Production web editor ("Rudra Office") — vanilla JS, multi-page, collaboration-ready
 - Docker deployment with multi-stage builds
 
 ## What This Plan Adds

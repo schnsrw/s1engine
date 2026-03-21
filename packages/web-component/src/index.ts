@@ -1,9 +1,9 @@
 /**
- * @s1engine/web-component — Custom element for the s1engine editor.
+ * @rudra/web-component — Custom element for the Rudra Office editor.
  *
  * @example
  * ```html
- * <script type="module" src="@s1engine/web-component"></script>
+ * <script type="module" src="@rudra/web-component"></script>
  * <s1-editor
  *   theme="default"
  *   toolbar="standard"
@@ -11,8 +11,8 @@
  * ```
  */
 
-import { S1Editor, Toolbars } from '@s1engine/editor';
-import type { Format } from '@s1engine/editor';
+import { S1Editor, Toolbars } from '@rudra/editor';
+import type { Format } from '@rudra/editor';
 
 export class S1EditorElement extends HTMLElement {
   private editor: S1Editor | null = null;
@@ -96,4 +96,4 @@ if (!customElements.get('s1-editor')) {
   customElements.define('s1-editor', S1EditorElement);
 }
 
-export { Toolbars } from '@s1engine/editor';
+export { Toolbars } from '@rudra/editor';

@@ -2,7 +2,7 @@
 
 ## Overview
 
-s1engine is distributed through multiple channels to reach every type of consumer: Rust developers, JavaScript/TypeScript developers, DevOps teams, and end users.
+Rudra Code is distributed through multiple channels to reach every type of consumer: Rust developers, JavaScript/TypeScript developers, DevOps teams, and end users.
 
 ## Distribution Channels
 
@@ -17,21 +17,21 @@ s1engine is distributed through multiple channels to reach every type of consume
 │ crates.io    │ s1-format-*  │ Rust devs      │ Format I/O only  │
 │ crates.io    │ s1-server    │ Rust devs      │ API server       │
 ├──────────────┼──────────────┼───────────────┼──────────────────┤
-│ npm          │ @s1engine/wasm│ JS devs       │ Raw WASM access  │
-│ npm          │ @s1engine/sdk │ JS devs       │ Headless API     │
-│ npm          │ @s1engine/editor│ JS devs     │ Embeddable UI    │
-│ npm          │ @s1engine/react│ React devs   │ React component  │
-│ npm          │ @s1engine/vue │ Vue devs      │ Vue component    │
-│ npm          │ @s1engine/web-component│ All  │ Universal embed  │
+│ npm          │ @rudra/wasm  │ JS devs        │ Raw WASM access  │
+│ npm          │ @rudra/sdk   │ JS devs        │ Headless API     │
+│ npm          │ @rudra/editor│ JS devs        │ Embeddable UI    │
+│ npm          │ @rudra/react │ React devs     │ React component  │
+│ npm          │ @rudra/vue   │ Vue devs       │ Vue component    │
+│ npm          │ @rudra/web-component│ All     │ Universal embed  │
 ├──────────────┼──────────────┼───────────────┼──────────────────┤
-│ Docker Hub   │ s1engine/editor│ DevOps       │ Self-hosted UI   │
-│ Docker Hub   │ s1engine/server│ DevOps       │ API server       │
-│ Docker Hub   │ s1engine/all-in-one│DevOps    │ Full platform    │
+│ Docker Hub   │ rudra/editor │ DevOps         │ Self-hosted UI   │
+│ Docker Hub   │ rudra/server │ DevOps         │ API server       │
+│ Docker Hub   │ rudra/all-in-one│DevOps       │ Full platform    │
 ├──────────────┼──────────────┼───────────────┼──────────────────┤
 │ GitHub       │ s1engine     │ All            │ Source code      │
 │ GitHub       │ Releases     │ All            │ Pre-built bins   │
 ├──────────────┼──────────────┼───────────────┼──────────────────┤
-│ CDN          │ @s1engine/*  │ Quick start    │ No-build embed   │
+│ CDN          │ @rudra/*     │ Quick start    │ No-build embed   │
 └──────────────┴──────────────┴───────────────┴──────────────────┘
 ```
 
@@ -175,11 +175,11 @@ packages/
     └── LICENSE
 ```
 
-### package.json (example: @s1engine/editor)
+### package.json (example: @rudra/editor)
 
 ```json
 {
-  "name": "@s1engine/editor",
+  "name": "@rudra/editor",
   "version": "1.0.0",
   "description": "Embeddable document editor with DOCX, PDF, and collaboration support",
   "license": "AGPL-3.0-or-later",
@@ -209,10 +209,10 @@ packages/
     "word-processor", "embeddable", "white-label"
   ],
   "peerDependencies": {
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/wasm": "^1.0.0"
   },
   "dependencies": {
-    "@s1engine/sdk": "^1.0.0"
+    "@rudra/sdk": "^1.0.0"
   },
   "sideEffects": ["*.css"]
 }
@@ -247,12 +247,12 @@ jobs:
           cd packages/web-component && npm ci && npm run build
 
       # Publish in order
-      - name: Publish @s1engine/wasm
+      - name: Publish @rudra/wasm
         run: cd packages/wasm && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @s1engine/sdk
+      - name: Publish @rudra/sdk
         run: cd packages/sdk && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -266,7 +266,7 @@ jobs:
 
 ### Image Variants
 
-#### s1engine/editor (Static Editor)
+#### rudra/editor (Static Editor)
 
 ```dockerfile
 # Serves the editor as a static site
@@ -278,10 +278,10 @@ EXPOSE 80
 
 **Usage:**
 ```bash
-docker run -p 8080:80 s1engine/editor
+docker run -p 8080:80 rudra/editor
 ```
 
-#### s1engine/server (API Server)
+#### rudra/server (API Server)
 
 ```dockerfile
 # Rust binary server
@@ -297,10 +297,10 @@ docker run -p 8080:8080 \
   -e S1_STORAGE_BACKEND=s3 \
   -e S1_STORAGE_S3_BUCKET=my-docs \
   -e S1_AUTH_JWT_SECRET=mysecret \
-  s1engine/server
+  rudra/server
 ```
 
-#### s1engine/all-in-one (Server + Editor + Collab)
+#### rudra/all-in-one (Server + Editor + Collab)
 
 ```dockerfile
 # Everything in one container
@@ -309,7 +309,7 @@ docker run -p 8080:8080 \
 
 **Usage:**
 ```bash
-docker run -p 8080:8080 s1engine/all-in-one
+docker run -p 8080:8080 rudra/all-in-one
 # Editor at http://localhost:8080
 # API at http://localhost:8080/api/v1
 # WebSocket at ws://localhost:8080/ws/collab
@@ -322,14 +322,14 @@ version: '3.8'
 
 services:
   editor:
-    image: s1engine/editor
+    image: rudra/editor
     ports:
       - "3000:80"
     depends_on:
       - server
 
   server:
-    image: s1engine/server
+    image: rudra/server
     ports:
       - "8080:8080"
     environment:
@@ -369,11 +369,11 @@ volumes:
 ### Image Tags
 
 ```
-s1engine/server:latest          # Latest stable release
-s1engine/server:1.0.0           # Specific version
-s1engine/server:1.0             # Latest patch in minor
-s1engine/server:1               # Latest minor in major
-s1engine/server:edge            # Latest commit on main (unstable)
+rudra/server:latest          # Latest stable release
+rudra/server:1.0.0           # Specific version
+rudra/server:1.0             # Latest patch in minor
+rudra/server:1               # Latest minor in major
+rudra/server:edge            # Latest commit on main (unstable)
 ```
 
 ---
@@ -420,16 +420,16 @@ For consumers who want to embed the editor without a bundler:
 
 ```html
 <script type="module">
-  import { S1Editor } from 'https://cdn.jsdelivr.net/npm/@s1engine/editor@1.0.0/dist/index.js'
+  import { S1Editor } from 'https://cdn.jsdelivr.net/npm/@rudra/editor@1.0.0/dist/index.js'
 </script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@s1engine/editor@1.0.0/dist/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@rudra/editor@1.0.0/dist/style.css">
 ```
 
 ### unpkg
 
 ```html
 <script type="module">
-  import { S1Editor } from 'https://unpkg.com/@s1engine/editor@1.0.0/dist/index.js'
+  import { S1Editor } from 'https://unpkg.com/@rudra/editor@1.0.0/dist/index.js'
 </script>
 ```
 
@@ -439,7 +439,7 @@ Consumers can mirror packages on their own CDN:
 
 ```bash
 # Download and host on your CDN
-npx @s1engine/editor --output ./cdn/s1engine/
+npx @rudra/editor --output ./cdn/s1engine/
 # Upload ./cdn/s1engine/ to your CDN
 ```
 
@@ -451,14 +451,14 @@ Quick reference for how to install based on use case:
 
 | I want to... | Install |
 |--------------|---------|
-| Embed an editor in React | `npm install @s1engine/react` |
-| Embed an editor in Vue | `npm install @s1engine/vue` |
-| Embed an editor in any framework | `npm install @s1engine/editor` |
-| Use editor via Web Component | `npm install @s1engine/web-component` |
-| Process documents in JS (no UI) | `npm install @s1engine/sdk` |
+| Embed an editor in React | `npm install @rudra/react` |
+| Embed an editor in Vue | `npm install @rudra/vue` |
+| Embed an editor in any framework | `npm install @rudra/editor` |
+| Use editor via Web Component | `npm install @rudra/web-component` |
+| Process documents in JS (no UI) | `npm install @rudra/sdk` |
 | Process documents in Rust | `cargo add s1engine` |
-| Run a document API server | `docker run s1engine/server` |
-| Self-host the editor | `docker run s1engine/all-in-one` |
+| Run a document API server | `docker run rudra/server` |
+| Self-host the editor | `docker run rudra/all-in-one` |
 | Convert DOCX to PDF (CLI) | Download binary from GitHub Releases |
 | Quick prototype (no install) | CDN link in HTML |
 
@@ -471,11 +471,11 @@ All packages share the same version number and are released together:
 ```
 s1engine (Rust)         1.0.0
 s1-model (Rust)         1.0.0
-@s1engine/wasm (npm)    1.0.0
-@s1engine/sdk (npm)     1.0.0
-@s1engine/editor (npm)  1.0.0
-@s1engine/react (npm)   1.0.0
-s1engine/server (Docker) 1.0.0
+@rudra/wasm (npm)    1.0.0
+@rudra/sdk (npm)     1.0.0
+@rudra/editor (npm)  1.0.0
+@rudra/react (npm)   1.0.0
+rudra/server (Docker) 1.0.0
 ```
 
 This simplifies compatibility: if all packages are the same version, they're guaranteed to work together.

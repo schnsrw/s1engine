@@ -11,7 +11,7 @@
                     ┌────────────┘          └────────────┐
                     │                                    │
          ┌──────────▼──────────┐            ┌───────────▼──────────┐
-         │   @s1engine/editor  │            │   @s1engine/sdk       │
+         │   @rudra/editor  │            │   @rudra/sdk       │
          │   (Embeddable UI)   │            │   (Headless JS API)   │
          │                     │            │                       │
          │  - Drop-in editor   │            │  - No UI              │
@@ -21,7 +21,7 @@
          └──────────┬──────────┘            └───────────┬──────────┘
                     │                                    │
          ┌──────────▼────────────────────────────────────▼──────────┐
-         │                    @s1engine/wasm                         │
+         │                    @rudra/wasm                         │
          │               (WebAssembly Core Engine)                  │
          │                                                          │
          │   WasmEngine / WasmDocument / WasmLayoutConfig           │
@@ -197,16 +197,16 @@ crates/s1-server/
 4. Same language as core engine (one contributor skillset)
 5. Memory safety (no Node.js memory leaks under load)
 
-### C. Client SDK (JavaScript/TypeScript — new: `@s1engine/editor`, `@s1engine/sdk`)
+### C. Client SDK (JavaScript/TypeScript — new: `@rudra/editor`, `@rudra/sdk`)
 
 ```
 packages/
-├── wasm/                       # @s1engine/wasm (existing, repackaged)
+├── wasm/                       # @rudra/wasm (existing, repackaged)
 │   ├── s1engine_wasm_bg.wasm
 │   ├── s1engine_wasm.js
 │   └── s1engine_wasm.d.ts
 │
-├── sdk/                        # @s1engine/sdk (new — headless API)
+├── sdk/                        # @rudra/sdk (new — headless API)
 │   ├── src/
 │   │   ├── index.ts            # Main exports
 │   │   ├── engine.ts           # S1Engine class (wraps WASM)
@@ -218,7 +218,7 @@ packages/
 │   ├── package.json
 │   └── tsconfig.json
 │
-├── editor/                     # @s1engine/editor (new — embeddable UI)
+├── editor/                     # @rudra/editor (new — embeddable UI)
 │   ├── src/
 │   │   ├── index.ts            # Main export: S1Editor.create()
 │   │   ├── editor.ts           # Editor class (container, lifecycle)
@@ -246,16 +246,16 @@ packages/
 │   └── tsconfig.json
 │
 └── adapters/                   # Framework-specific wrappers
-    ├── react/                  # @s1engine/react
+    ├── react/                  # @rudra/react
     │   ├── src/
     │   │   ├── S1Editor.tsx    # React component
     │   │   └── useS1Engine.ts  # React hook
     │   └── package.json
-    ├── vue/                    # @s1engine/vue
+    ├── vue/                    # @rudra/vue
     │   ├── src/
     │   │   └── S1Editor.vue    # Vue component
     │   └── package.json
-    └── web-component/          # @s1engine/web-component
+    └── web-component/          # @rudra/web-component
         ├── src/
         │   └── s1-editor.ts    # Custom element
         └── package.json
@@ -372,7 +372,7 @@ Browser
 ┌────────────────────────────┐
 │  Consumer App              │
 │  ┌──────────────────────┐  │
-│  │  @s1engine/editor    │  │
+│  │  @rudra/editor    │  │
 │  │  (WASM engine inside)│  │
 │  └──────────────────────┘  │
 │  No server needed.         │
@@ -388,8 +388,8 @@ Browser
 ```
 Browser                          Consumer's Server
 ┌──────────────────────┐        ┌──────────────────────┐
-│  @s1engine/editor    │  REST  │  Consumer's API      │
-│  (WASM)              │ ──────▶│  + @s1engine/sdk     │
+│  @rudra/editor    │  REST  │  Consumer's API      │
+│  (WASM)              │ ──────▶│  + @rudra/sdk     │
 │                      │◀────── │  (server-side WASM   │
 └──────────────────────┘        │   or Rust native)    │
                                 └──────────────────────┘
@@ -402,7 +402,7 @@ Browser                          Consumer's Server
 ```
 Browser                     s1-server              Storage
 ┌──────────────────┐       ┌──────────────┐       ┌──────────┐
-│ @s1engine/editor │ REST  │              │       │          │
+│ @rudra/editor │ REST  │              │       │          │
 │ (WASM)           │──────▶│  REST API    │──────▶│  S3      │
 │                  │◀──────│  WebSocket   │◀──────│  or      │
 │                  │  WS   │  Auth        │       │  Postgres│
@@ -582,17 +582,17 @@ ffi/wasm (existing, repackaged)
 └── s1engine → (same tree as above)
 
 packages/sdk (new, TypeScript)
-└── @s1engine/wasm (compiled from ffi/wasm)
+└── @rudra/wasm (compiled from ffi/wasm)
 
 packages/editor (new, TypeScript)
-├── @s1engine/sdk
-└── @s1engine/wasm
+├── @rudra/sdk
+└── @rudra/wasm
 
 packages/adapters/react (new, TypeScript)
-└── @s1engine/editor
+└── @rudra/editor
 
 packages/adapters/vue (new, TypeScript)
-└── @s1engine/editor
+└── @rudra/editor
 ```
 
 ---

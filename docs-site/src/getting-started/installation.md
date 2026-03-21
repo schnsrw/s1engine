@@ -1,6 +1,6 @@
 # Installation
 
-s1engine can be used as a Rust library, WASM npm package, or Docker container.
+Rudra Code can be used as a Rust library, WASM npm package, or Docker container.
 
 ## Prerequisites
 

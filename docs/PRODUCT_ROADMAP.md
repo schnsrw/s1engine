@@ -1,11 +1,11 @@
-# s1engine — Product Roadmap
+# Rudra Code — Product Roadmap
 
 > From document engine to enterprise editing platform.
 > Created: 2026-03-19
 
 ## Vision
 
-s1engine becomes the open-source alternative to OnlyOffice/Collabora — a single Docker image that any product can embed for document editing, collaboration, and conversion. AGPL-3.0 licensed (with commercial dual-license), pure Rust, sub-200MB image.
+Rudra Code becomes the open-source alternative to OnlyOffice/Collabora — a single Docker image that any product can embed for document editing, collaboration, and conversion. AGPL-3.0 licensed (with commercial dual-license), pure Rust, sub-200MB image.
 
 ---
 

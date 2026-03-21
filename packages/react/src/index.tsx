@@ -1,9 +1,9 @@
 /**
- * @s1engine/react — React adapter for the s1engine editor.
+ * @rudra/react — React adapter for the Rudra Office editor.
  *
  * @example
  * ```tsx
- * import { S1EditorComponent } from '@s1engine/react';
+ * import { S1EditorComponent } from '@rudra/react';
  *
  * function MyApp() {
  *   return (
@@ -19,8 +19,8 @@
  */
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { S1Editor, Toolbars } from '@s1engine/editor';
-import type { EditorOptions, Format, ToolbarConfig } from '@s1engine/editor';
+import { S1Editor, Toolbars } from '@rudra/editor';
+import type { EditorOptions, Format, ToolbarConfig } from '@rudra/editor';
 
 export interface S1EditorProps extends Omit<EditorOptions, 'toolbar'> {
   /** Toolbar preset name or custom config. */
@@ -103,5 +103,5 @@ export const S1EditorComponent = forwardRef<S1EditorRef, S1EditorProps>(
   }
 );
 
-export { S1Editor, Toolbars } from '@s1engine/editor';
-export type { EditorOptions, Format, ToolbarConfig, ToolbarItem, Theme } from '@s1engine/editor';
+export { S1Editor, Toolbars } from '@rudra/editor';
+export type { EditorOptions, Format, ToolbarConfig, ToolbarItem, Theme } from '@rudra/editor';

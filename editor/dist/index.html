@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>s1 editor</title>
+  <title>Rudra Office</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#1a73e8">
   <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
-  <!-- s1engine Configuration — override these for integration -->
+  <!-- Rudra Code Configuration — override these for integration -->
   <script>
     window.S1_CONFIG = window.S1_CONFIG || {
       // Server API URL (for document CRUD, conversion)
@@ -19,7 +19,7 @@
       // Auto-connect to collaboration on load (requires relayUrl + room in URL)
       autoCollab: true,
       // Branding
-      productName: 's1 editor',
+      productName: 'Rudra Office',
       // Feature flags
       enableCollab: true,
       enablePdfViewer: true,
@@ -31,8 +31,8 @@
   <!-- KaTeX — equation rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script type="module" crossorigin src="/assets/index-0SluURt7.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CfYhdLry.css">
+  <script type="module" crossorigin src="/assets/index-6HAfHfGx.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-D9UArHh_.css">
 </head>
 <body>
 <a href="#pageContainer" class="skip-link">Skip to document</a>
@@ -40,8 +40,8 @@
   <!-- Title Bar -->
   <div class="menubar">
     <div class="logo">
-      <img src="/assets/logo-CBlYF38a.svg" alt="s1" width="28" height="28">
-      <span class="logo-text">s1 editor</span>
+      <img src="/assets/logo-CBlYF38a.svg" alt="Rudra" width="28" height="28">
+      <span class="logo-text">Rudra Office</span>
     </div>
     <div class="sep"></div>
     <input class="doc-name" id="docName" value="Untitled Document" spellcheck="false" title="Document name — click to rename">
@@ -205,14 +205,14 @@
         <div class="app-menu-sep" role="separator"></div>
         <button class="app-menu-entry" id="menuUsageStats" role="menuitem" tabindex="-1"><span class="msi">bar_chart</span> Usage Statistics</button>
         <div class="app-menu-sep" role="separator"></div>
-        <button class="app-menu-entry" id="menuAbout" role="menuitem" tabindex="-1"><span class="msi">info</span> About s1engine Editor</button>
+        <button class="app-menu-entry" id="menuAbout" role="menuitem" tabindex="-1"><span class="msi">info</span> About Rudra Office</button>
       </div>
     </div>
   </div>
 
   <!-- Hidden file inputs (used by JS) -->
-  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf,.csv" hidden>
-  <input type="file" id="csvInput" accept=".csv" hidden>
+  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf,.csv,.xlsx" hidden>
+  <input type="file" id="csvInput" accept=".csv,.xlsx" hidden>
   <input type="file" id="imageInput" accept="image/*" hidden>
 
   <!-- Toolbar -->
@@ -462,9 +462,9 @@
 
   <!-- Welcome Screen -->
   <div class="welcome" id="welcomeScreen">
-    <img src="/assets/logo-CBlYF38a.svg" alt="s1 editor" width="80" height="80" class="welcome-logo">
-    <h2>Welcome to s1 editor</h2>
-    <p>A professional document editor powered by s1engine — full DOCX, ODT, PDF, and Markdown support with real-time formatting.</p>
+    <img src="/assets/logo-CBlYF38a.svg" alt="Rudra Office" width="80" height="80" class="welcome-logo">
+    <h2>Welcome to Rudra Office</h2>
+    <p>A professional document editor powered by Rudra Code — full DOCX, ODT, PDF, and Markdown support with real-time formatting.</p>
     <div class="actions">
       <button class="big-btn primary" id="welcomeNew" title="Create a new blank document"><span class="msi">note_add</span> New Document</button>
       <button class="big-btn" id="welcomeOpen" title="Open a file from your computer"><span class="msi">folder_open</span> Open File</button>
@@ -472,19 +472,18 @@
     <div class="welcome-suite" id="welcomeSuite">
       <div class="welcome-suite-label">Other apps</div>
       <div class="welcome-suite-btns">
-        <button class="suite-btn" id="suiteSpreadsheet" title="Open a spreadsheet (coming soon)">
+        <button class="suite-btn" id="suiteSpreadsheet" title="Open a new blank spreadsheet">
           <span class="msi suite-icon suite-icon-sheets">table_chart</span>
           <span class="suite-label">Spreadsheet</span>
-          <span class="suite-badge">Coming soon</span>
         </button>
         <button class="suite-btn" id="suitePresentation" title="Open a presentation (coming soon)">
           <span class="msi suite-icon suite-icon-slides">slideshow</span>
           <span class="suite-label">Presentation</span>
           <span class="suite-badge">Coming soon</span>
         </button>
-        <button class="suite-btn" id="suiteCSV" title="Import a CSV file as a document table">
+        <button class="suite-btn" id="suiteCSV" title="Import a CSV or XLSX file into the spreadsheet editor">
           <span class="msi suite-icon suite-icon-csv">grid_on</span>
-          <span class="suite-label">Import CSV</span>
+          <span class="suite-label">Import CSV/XLSX</span>
         </button>
       </div>
     </div>
@@ -851,6 +850,30 @@
         </div>
         <div class="pdf-annot-list" id="pdfAnnotList"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Spreadsheet View -->
+  <div class="spreadsheet-view" id="spreadsheetView">
+    <div class="ss-toolbar" id="ssToolbar">
+      <button class="tb-btn" id="ssUndo" title="Undo (Ctrl+Z)"><span class="msi">undo</span></button>
+      <button class="tb-btn" id="ssRedo" title="Redo (Ctrl+Y)"><span class="msi">redo</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssCut" title="Cut (Ctrl+X)"><span class="msi">content_cut</span></button>
+      <button class="tb-btn" id="ssCopy" title="Copy (Ctrl+C)"><span class="msi">content_copy</span></button>
+      <button class="tb-btn" id="ssPaste" title="Paste (Ctrl+V)"><span class="msi">content_paste</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssSortAsc" title="Sort ascending (A-Z)"><span class="msi">arrow_upward</span></button>
+      <button class="tb-btn" id="ssSortDesc" title="Sort descending (Z-A)"><span class="msi">arrow_downward</span></button>
+      <button class="tb-btn" id="ssFilter" title="Toggle filter"><span class="msi">filter_list</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssFreeze" title="Freeze panes at selected cell"><span class="msi">push_pin</span></button>
+      <div class="tb-sep" role="separator"></div>
+      <button class="tb-btn" id="ssExportCSV" title="Export as CSV"><span class="msi">download</span></button>
+      <span class="tb-label" id="ssExportLabel">Export CSV</span>
+    </div>
+    <div class="spreadsheet-container" id="spreadsheetContainer">
+      <!-- SpreadsheetView renders here -->
     </div>
   </div>
 
@@ -1418,10 +1441,10 @@
 </div>
 
 <!-- E10.4: Welcome Dialog (first-run onboarding) -->
-<div class="modal-overlay" id="welcomeModal" role="dialog" aria-modal="true" aria-label="Welcome to s1 Editor">
+<div class="modal-overlay" id="welcomeModal" role="dialog" aria-modal="true" aria-label="Welcome to Rudra Office">
   <div class="modal" style="max-width:500px">
-    <h3><span class="msi modal-icon">description</span> Welcome to s1 Editor</h3>
-    <p style="font-size:14px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6">A collaborative document editor powered by s1engine.</p>
+    <h3><span class="msi modal-icon">description</span> Welcome to Rudra Office</h3>
+    <p style="font-size:14px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6">A collaborative document editor powered by Rudra Code.</p>
     <div class="welcome-features">
       <div class="welcome-feature-item">
         <span class="msi welcome-feature-icon">format_bold</span>

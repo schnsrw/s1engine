@@ -8,7 +8,7 @@ import type { Format, SourceFormat } from './types.js';
  *
  * @example
  * ```ts
- * import { S1Engine } from '@s1engine/sdk';
+ * import { S1Engine } from '@rudra/sdk';
  *
  * const engine = await S1Engine.init();
  * const doc = engine.create();
@@ -32,14 +32,14 @@ export class S1Engine {
   static async init(wasmUrl?: string): Promise<S1Engine> {
     try {
       // Dynamic import of the WASM module
-      // Consumers must have @s1engine/wasm installed as a peer dependency
+      // Consumers must have @rudra/wasm installed as a peer dependency
       let wasmModule: any;
       try {
-        wasmModule = await import('@s1engine/wasm');
+        wasmModule = await import('@rudra/wasm');
       } catch {
         throw new S1Error(
           ErrorCodes.INIT_FAILED,
-          'Could not load @s1engine/wasm. Install it: npm install @s1engine/wasm'
+          'Could not load @rudra/wasm. Install it: npm install @rudra/wasm'
         );
       }
 

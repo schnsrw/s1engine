@@ -1,6 +1,6 @@
-# @s1engine/wasm
+# @rudra/wasm
 
-WebAssembly bindings for [s1engine](https://github.com/schnsrw/s1engine) — a modular document engine built in Rust.
+WebAssembly bindings for [Rudra Code](https://github.com/schnsrw/s1engine) — a modular document engine built in Rust.
 
 ## Features
 
@@ -13,13 +13,13 @@ WebAssembly bindings for [s1engine](https://github.com/schnsrw/s1engine) — a m
 ## Installation
 
 ```bash
-npm install @s1engine/wasm
+npm install @rudra/wasm
 ```
 
 ## Quick Start
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 
 // Initialize WASM module
 await init();
@@ -45,7 +45,7 @@ console.log(doc2.to_plain_text());
 ### Vite
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 
 const engine = await init().then(() => new WasmEngine());
 ```

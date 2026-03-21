@@ -136,8 +136,9 @@ function doAutosave() {
         }
         const info = $('statusInfo');
         info._userMsg = true;
-        info.textContent = 'Auto-saved';
-        setTimeout(() => { info._userMsg = false; updateStatusBar(); }, 1500);
+        info.textContent = 'All changes saved';
+        info.style.color = '#1e8e3e';
+        setTimeout(() => { info._userMsg = false; info.style.color = ''; updateStatusBar(); }, 3000);
       };
     }).catch(e => {
       // ED2-25: Log autosave failures instead of silently swallowing
@@ -391,6 +392,11 @@ function resetEditorState() {
     state._lazyPageObserver.disconnect();
     state._lazyPageObserver = null;
   }
+  // Clean up spreadsheet viewer
+  if (state.spreadsheetView) {
+    state.spreadsheetView.destroy();
+    state.spreadsheetView = null;
+  }
   // Clean up PDF viewer (but preserve annotations until new PDF is opened)
   if (state.pdfViewer) {
     state.pdfViewer.destroy();
@@ -431,10 +437,27 @@ function isPdf(bytes) {
     bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
 }
 
+function showLoadingOverlay() {
+  const overlay = document.createElement('div');
+  overlay.className = 'loading-overlay';
+  overlay.innerHTML = '<div class="loading-spinner"></div>';
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function removeLoadingOverlay(overlay) {
+  if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+}
+
 export async function openFile(bytes, name) {
   if (!state.engine) return;
   // ED2-29: Close find bar when opening a new file
   closeFindBar();
+  const _loadingOverlay = showLoadingOverlay();
+  try { await _openFileImpl(bytes, name); } finally { removeLoadingOverlay(_loadingOverlay); }
+}
+
+async function _openFileImpl(bytes, name) {
 
   const ext = name?.split('.').pop()?.toLowerCase();
 
@@ -500,6 +523,40 @@ export async function openFile(bytes, name) {
     return;
   }
 
+  // CSV / XLSX detection — open in spreadsheet view
+  const isCSV = ext === 'csv';
+  const isXLSX = ext === 'xlsx' || (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4B && name?.toLowerCase().endsWith('.xlsx'));
+  if (isCSV || isXLSX) {
+    try {
+      resetEditorState();
+      const { SpreadsheetView } = await import('./spreadsheet.js');
+      state.currentFormat = isCSV ? 'CSV' : 'XLSX';
+      // Activate UI
+      $('welcomeScreen').style.display = 'none';
+      $('statusbar').classList.add('show');
+      switchView('spreadsheet');
+      // Create spreadsheet view
+      if (state.spreadsheetView) state.spreadsheetView.destroy();
+      const container = $('spreadsheetContainer');
+      state.spreadsheetView = new SpreadsheetView(container);
+      state.spreadsheetView.loadWorkbook(bytes, name);
+      if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
+      const info = $('statusInfo');
+      if (info) {
+        const sheet = state.spreadsheetView._sheet();
+        const cellCount = sheet ? Object.keys(sheet.cells).length : 0;
+        info.textContent = `${cellCount.toLocaleString()} cells`;
+      }
+      $('statusFormat').textContent = state.currentFormat;
+    } catch (e) {
+      console.error('Spreadsheet open error:', e);
+      showToast('Failed to open spreadsheet: ' + e.message, 'error');
+      switchView('editor');
+      $('welcomeScreen').style.display = '';
+    }
+    return;
+  }
+
   try {
     resetEditorState();
     let fmt = 'txt';
@@ -555,6 +612,7 @@ export function updatePdfStatusBar() {
 export function exportDoc(format) {
   const { doc } = state;
   if (!doc) return;
+  const overlay = showLoadingOverlay();
   try {
     syncAllText();
     trackEvent('export', format);
@@ -573,7 +631,7 @@ export function exportDoc(format) {
     const a = document.createElement('a');
     a.href = url; a.download = ($('docName').value || 'document') + '.' + format; a.click();
     URL.revokeObjectURL(url);
-  } catch (e) { showToast('Export failed: ' + e.message, 'error'); }
+  } catch (e) { showToast('Export failed: ' + e.message, 'error'); } finally { removeLoadingOverlay(overlay); }
 }
 
 function activateEditor() {
@@ -607,18 +665,27 @@ export function switchView(view) {
     state.pdfViewer = null;
   }
 
+  // Destroy spreadsheet view when switching away
+  if (state.currentView === 'spreadsheet' && view !== 'spreadsheet' && state.spreadsheetView) {
+    state.spreadsheetView.destroy();
+    state.spreadsheetView = null;
+  }
+
   state.currentView = view;
   // Show the editor wrapper (which contains pages panel + canvas + comments panel)
   const wrapper = $('editorWrapper');
   if (wrapper) wrapper.classList.toggle('show', view === 'editor');
   $('pdfView').classList.toggle('show', view === 'pdf');
-  // Hide doc editor chrome when in PDF mode
+  // Show spreadsheet view
+  const ssView = $('spreadsheetView');
+  if (ssView) ssView.classList.toggle('show', view === 'spreadsheet');
+  // Hide doc editor chrome when in PDF or spreadsheet mode
   $('toolbar').classList.toggle('show', view === 'editor');
   const menubar = $('appMenubar');
   if (menubar) menubar.classList.toggle('show', view === 'editor');
-  // Hide ruler in PDF mode
+  // Hide ruler in non-editor modes
   const ruler = $('ruler');
-  if (ruler) ruler.style.display = view === 'pdf' ? 'none' : '';
+  if (ruler) ruler.style.display = (view !== 'editor') ? 'none' : '';
   // Update legacy tab bar (hidden) and new status bar view buttons
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   document.querySelectorAll('.status-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -697,8 +764,28 @@ export function initFileHandlers() {
   // Suite launcher buttons (Phase 6)
   const suiteSpreadsheet = $('suiteSpreadsheet');
   if (suiteSpreadsheet) {
-    suiteSpreadsheet.addEventListener('click', () => {
-      showToast('Spreadsheet editor is planned for a future release.', 'info', 5000);
+    suiteSpreadsheet.addEventListener('click', async () => {
+      // Open a blank spreadsheet
+      try {
+        resetEditorState();
+        const { SpreadsheetView } = await import('./spreadsheet.js');
+        state.currentFormat = 'CSV';
+        $('welcomeScreen').style.display = 'none';
+        $('statusbar').classList.add('show');
+        switchView('spreadsheet');
+        if (state.spreadsheetView) state.spreadsheetView.destroy();
+        const container = $('spreadsheetContainer');
+        state.spreadsheetView = new SpreadsheetView(container);
+        // Create an empty workbook
+        state.spreadsheetView.loadWorkbook('', 'Sheet1.csv');
+        $('docName').value = 'Untitled Spreadsheet';
+        const info = $('statusInfo');
+        if (info) info.textContent = '0 cells';
+        $('statusFormat').textContent = 'CSV';
+      } catch (e) {
+        console.error('Spreadsheet open error:', e);
+        showToast('Failed to open spreadsheet: ' + e.message, 'error');
+      }
     });
   }
   const suitePresentation = $('suitePresentation');
@@ -713,6 +800,7 @@ export function initFileHandlers() {
   }
   const csvInput = $('csvInput');
   if (csvInput) {
+    csvInput.accept = '.csv,.xlsx';
     csvInput.addEventListener('change', e => {
       const f = e.target.files[0]; if (!f) return;
       const r = new FileReader();

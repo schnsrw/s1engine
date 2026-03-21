@@ -1,8 +1,8 @@
-# s1engine — AI Development Context
+# Rudra Code — AI Development Context
 
 ## What Is This Project?
 
-s1engine is a modular document engine SDK built in pure Rust. It reads, writes, edits, and converts document formats (DOCX, ODT, PDF, TXT). Includes CRDT-based collaborative editing.
+Rudra Code is a modular document engine SDK built in pure Rust. It reads, writes, edits, and converts document formats (DOCX, ODT, PDF, TXT). Includes CRDT-based collaborative editing. The browser-based editor is called **Rudra Office**.
 
 This is a **library**, not an application. Consumers build editors/tools on top of it.
 

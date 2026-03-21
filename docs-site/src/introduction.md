@@ -1,10 +1,10 @@
-# s1engine
+# Rudra Code
 
-s1engine is the open-source document engine that lets any product add Google Docs-grade editing, collaboration, and format conversion — embeddable in hours, not months.
+Rudra Code is the open-source document engine that lets any product add Google Docs-grade editing, collaboration, and format conversion — embeddable in hours, not months.
 
-## What is s1engine?
+## What is Rudra Code?
 
-A modular Rust SDK for document workflows. It reads, writes, edits, and converts documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a production web editor.
+A modular Rust SDK for document workflows. It reads, writes, edits, and converts documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a production web editor (Rudra Office).
 
 ## Key Features
 

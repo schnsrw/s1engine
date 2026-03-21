@@ -1,7 +1,7 @@
 {
-  "name": "@s1engine/react",
+  "name": "@rudra/react",
   "version": "1.0.1",
-  "description": "React component for the s1engine document editor",
+  "description": "React component for the Rudra Office document editor",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -15,13 +15,13 @@
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0",
-    "@s1engine/editor": "^1.0.0",
-    "@s1engine/wasm": "^1.0.0"
+    "@rudra/editor": "^1.0.0",
+    "@rudra/wasm": "^1.0.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
     "react": "^18.0.0",
     "@types/react": "^18.0.0"
   },
-  "keywords": ["s1engine", "react", "editor", "document", "docx"]
+  "keywords": ["rudra", "react", "editor", "document", "docx"]
 }

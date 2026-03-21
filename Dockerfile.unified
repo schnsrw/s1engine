@@ -1,10 +1,10 @@
-# s1-server — Unified Document Editing Server
+# rudra-server — Unified Document Editing Server
 #
 # Single image: Rust binary serves editor UI + REST API + WebSocket collab
 #
 # Usage:
-#   docker build -f Dockerfile.unified -t s1engine/server .
-#   docker run -p 8080:8080 s1engine/server
+#   docker build -f Dockerfile.unified -t rudra/server .
+#   docker run -p 8080:8080 rudra/server
 #
 # Open http://localhost:8080 in your browser.
 

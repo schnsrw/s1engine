@@ -1,13 +1,13 @@
 /**
- * Example: Embed s1engine editor in a React application.
+ * Example: Embed Rudra Office editor in a React application.
  *
  * Usage:
- *   npm install @s1engine/react @s1engine/editor @s1engine/wasm
+ *   npm install @rudra/react @rudra/editor @rudra/wasm
  *   npm run dev
  */
 
 import React, { useRef, useState } from 'react';
-import { S1EditorComponent, type S1EditorRef } from '@s1engine/react';
+import { S1EditorComponent, type S1EditorRef } from '@rudra/react';
 
 function App() {
   const editorRef = useRef<S1EditorRef>(null);

@@ -29,7 +29,7 @@ use s1engine::{DocumentBuilder, Format};
 let doc = DocumentBuilder::new()
     .title("My Report")
     .heading(1, "Introduction")
-    .text("Built with s1engine.")
+    .text("Built with Rudra Code.")
     .build();
 
 std::fs::write("output.docx", doc.export(Format::Docx)?)?;

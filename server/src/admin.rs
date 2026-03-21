@@ -549,7 +549,7 @@ fn get_memory_mb() -> f64 {
 
 const LOGIN_HTML: &str = r##"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>s1-server Admin Login</title>
+<title>Rudra Office Admin Login</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;height:100vh}
@@ -563,7 +563,7 @@ button:hover{background:#1557b0}
 .logo{text-align:center;margin-bottom:16px;font-size:24px;color:#1a73e8}
 </style></head><body>
 <div class="login-box">
-<div class="logo">s1-server</div>
+<div class="logo">Rudra Office</div>
 <h2>Admin Login</h2>
 <form method="POST" action="/admin/login">
 <label for="username">Username</label>
@@ -590,7 +590,7 @@ button:hover{background:#1557b0}
 .logo{text-align:center;margin-bottom:16px;font-size:24px;color:#1a73e8}
 </style></head><body>
 <div class="login-box">
-<div class="logo">s1-server</div>
+<div class="logo">Rudra Office</div>
 <h2>Admin Login</h2>
 <div class="error">Invalid username or password</div>
 <form method="POST" action="/admin/login">
@@ -604,7 +604,7 @@ button:hover{background:#1557b0}
 
 const ADMIN_HTML: &str = r##"<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>s1-server Admin</title>
+<title>Rudra Office Admin</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333}
@@ -630,7 +630,7 @@ td{padding:6px 8px;border-bottom:1px solid #f5f5f5}
 pre{font-size:11px;background:#f9f9f9;padding:10px;border-radius:4px;overflow-x:auto}
 </style></head><body>
 <div class="header">
-<h1>s1-server Admin</h1>
+<h1>Rudra Office Admin</h1>
 <span id="ver" style="font-size:11px;opacity:.6"></span>
 <a href="/admin/logout" class="logout">Logout</a>
 </div>

@@ -433,7 +433,7 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 
 ```javascript
 // Consumer's frontend
-import { S1Editor } from '@s1engine/editor'
+import { S1Editor } from '@rudra/editor'
 import { useAuth0 } from '@auth0/auth0-react'
 
 function Editor() {

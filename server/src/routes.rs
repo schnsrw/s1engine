@@ -39,7 +39,7 @@ pub async fn health() -> Json<Value> {
 /// Server info endpoint.
 pub async fn server_info() -> Json<Value> {
     Json(json!({
-        "name": "s1-server",
+        "name": "rudra-server",
         "version": env!("CARGO_PKG_VERSION"),
         "engine_version": "1.0.1",
         "supported_formats": {

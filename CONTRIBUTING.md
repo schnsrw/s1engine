@@ -1,6 +1,6 @@
-# Contributing to s1engine
+# Contributing to Rudra Code
 
-Thank you for your interest in contributing to s1engine. This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Rudra Code. This document provides guidelines and information for contributors.
 
 ## Getting Started
 

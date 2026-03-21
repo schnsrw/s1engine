@@ -1,9 +1,9 @@
 /**
- * @s1engine/sdk — Headless JavaScript/TypeScript SDK for s1engine.
+ * @rudra/sdk — Headless JavaScript/TypeScript SDK for Rudra Code.
  *
  * @example
  * ```ts
- * import { S1Engine } from '@s1engine/sdk';
+ * import { S1Engine } from '@rudra/sdk';
  *
  * const engine = await S1Engine.init();
  * const doc = engine.create();

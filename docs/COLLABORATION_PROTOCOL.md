@@ -1,4 +1,4 @@
-# s1engine Collaboration Protocol Specification v3.1
+# Rudra Code Collaboration Protocol Specification v3.1
 
 ## 1. Design Goals
 

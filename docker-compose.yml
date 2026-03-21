@@ -1,5 +1,5 @@
 services:
-  # Unified s1-server: serves editor UI + REST API + WebSocket collab
+  # Unified rudra-server: serves editor UI + REST API + WebSocket collab
   # Single container, single port, single binary
   s1-server:
     build:

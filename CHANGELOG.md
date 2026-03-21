@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to s1engine will be documented in this file.
+All notable changes to Rudra Code will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-**S1 Editor**
+**Rudra Office**
 - PDF viewing via PDF.js (open, zoom, page navigation, text selection)
 - PDF annotation tools: highlight, comment, freehand draw, text box
 - PDF text editing: double-click to inline-edit text (overlay approach)
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added future/ directory with architecture docs (plugin system, REST/WebSocket API, editor SDK, distribution)
 
 ### Changed
-- Editor renamed from Folio to S1 Editor
+- Editor renamed from Folio to Rudra Office
 - Removed Pages and Text views from editor (simplified to Editor + PDF views)
 - File picker now accepts `.pdf` files
 - Editor menubar hidden when viewing PDFs

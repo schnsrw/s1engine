@@ -26,6 +26,7 @@
 pub mod error;
 pub mod formula;
 pub mod model;
+pub mod ods;
 pub mod reader;
 pub mod shared_strings;
 pub mod styles;
@@ -33,5 +34,6 @@ pub mod writer;
 
 pub use error::XlsxError;
 pub use model::*;
+pub use ods::{read_ods, write_ods};
 pub use reader::read;
 pub use writer::write;

@@ -3,13 +3,13 @@
 ## Install
 
 ```bash
-npm install @s1engine/wasm
+npm install @rudra/wasm
 ```
 
 ## Quick Start
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 
 await init();
 const engine = new WasmEngine();
@@ -31,7 +31,7 @@ const pdfBytes = doc2.to_pdf();
 ## With Vite
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 const engine = await init().then(() => new WasmEngine());
 ```
 

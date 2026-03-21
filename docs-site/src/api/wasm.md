@@ -3,7 +3,7 @@
 ## WasmEngine
 
 ```javascript
-import init, { WasmEngine } from '@s1engine/wasm';
+import init, { WasmEngine } from '@rudra/wasm';
 await init();
 
 const engine = new WasmEngine();

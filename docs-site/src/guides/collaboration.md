@@ -1,6 +1,6 @@
 # Collaboration Setup
 
-s1engine uses Fugue CRDT for conflict-free real-time editing.
+Rudra Code uses Fugue CRDT for conflict-free real-time editing.
 
 ## Architecture
 

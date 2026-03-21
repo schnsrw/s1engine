@@ -1,17 +1,17 @@
-# @s1engine/sdk
+# @rudra/sdk
 
-Headless JavaScript/TypeScript SDK for [s1engine](https://github.com/schnsrw/s1engine). Manipulate documents (DOCX, ODT, PDF, TXT, Markdown) in the browser without any UI.
+Headless JavaScript/TypeScript SDK for [Rudra Code](https://github.com/schnsrw/s1engine). Manipulate documents (DOCX, ODT, PDF, TXT, Markdown) in the browser without any UI.
 
 ## Installation
 
 ```bash
-npm install @s1engine/sdk @s1engine/wasm
+npm install @rudra/sdk @rudra/wasm
 ```
 
 ## Quick Start
 
 ```typescript
-import { S1Engine } from '@s1engine/sdk';
+import { S1Engine } from '@rudra/sdk';
 
 // Initialize
 const engine = await S1Engine.init();
