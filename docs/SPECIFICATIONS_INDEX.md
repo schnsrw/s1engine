@@ -19,6 +19,7 @@
 | 9 | **Performance** | [specs/PERFORMANCE_SPEC.md](specs/PERFORMANCE_SPEC.md) | v1.0 — Targets, benchmarks, profiling |
 | 10 | **Admin Panel** | [specs/ADMIN_PANEL_SPEC.md](specs/ADMIN_PANEL_SPEC.md) | v1.0 — Dashboard, errors, health, enhancement plan |
 | 11 | **E2E Test Plan** | [specs/E2E_TEST_PLAN.md](specs/E2E_TEST_PLAN.md) | v1.0 — Automated + manual scenarios |
+| 12 | **Spreadsheet Formats** | [specs/SPREADSHEET_SPEC.md](specs/SPREADSHEET_SPEC.md) | v1.0 — XLSX, ODS, CSV, TSV, data model, formula engine |
 
 ## Trackers
 
