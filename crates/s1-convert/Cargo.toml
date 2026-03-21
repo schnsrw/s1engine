@@ -16,6 +16,7 @@ s1-format-docx = { workspace = true }
 s1-format-odt = { workspace = true }
 thiserror = { workspace = true }
 cfb = "0.10"
+zip = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

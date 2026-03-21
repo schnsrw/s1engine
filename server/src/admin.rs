@@ -11,8 +11,11 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 use crate::routes::AppState;
 
@@ -28,7 +31,111 @@ fn uptime_secs() -> u64 {
     unsafe { START_TIME.map(|t| t.elapsed().as_secs()).unwrap_or(0) }
 }
 
+// ─── Error Log (Ring Buffer) ─────────────────────────
+
+/// A single error log entry.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ErrorEntry {
+    pub timestamp: String,
+    pub message: String,
+    pub source: String,
+}
+
+/// In-memory ring buffer for the last N errors.
+pub struct ErrorLog {
+    entries: Mutex<Vec<ErrorEntry>>,
+    capacity: usize,
+}
+
+impl ErrorLog {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            entries: Mutex::new(Vec::with_capacity(capacity)),
+            capacity,
+        }
+    }
+
+    pub async fn push(&self, message: String, source: String) {
+        let mut entries = self.entries.lock().await;
+        if entries.len() >= self.capacity {
+            entries.remove(0);
+        }
+        entries.push(ErrorEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            message,
+            source,
+        });
+    }
+
+    pub async fn recent(&self, limit: usize, offset: usize) -> (Vec<ErrorEntry>, usize) {
+        let entries = self.entries.lock().await;
+        let total = entries.len();
+        let page: Vec<ErrorEntry> = entries
+            .iter()
+            .rev()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect();
+        (page, total)
+    }
+}
+
+// ─── Rate Limiter ────────────────────────────────────
+
+/// Simple in-memory rate limiter: max N attempts per IP per window.
+pub struct RateLimiter {
+    attempts: Mutex<HashMap<IpAddr, (u32, Instant)>>,
+    max_attempts: u32,
+    window: std::time::Duration,
+}
+
+impl RateLimiter {
+    pub fn new(max_attempts: u32, window_secs: u64) -> Self {
+        Self {
+            attempts: Mutex::new(HashMap::new()),
+            max_attempts,
+            window: std::time::Duration::from_secs(window_secs),
+        }
+    }
+
+    /// Check if the IP is allowed. Returns Ok(()) if allowed, Err(remaining_secs) if blocked.
+    pub async fn check_and_increment(&self, ip: IpAddr) -> Result<(), u64> {
+        let mut attempts = self.attempts.lock().await;
+        let now = Instant::now();
+
+        if let Some((count, window_start)) = attempts.get_mut(&ip) {
+            if now.duration_since(*window_start) > self.window {
+                // Window expired, reset
+                *count = 1;
+                *window_start = now;
+                Ok(())
+            } else if *count >= self.max_attempts {
+                let remaining = self.window.as_secs() - now.duration_since(*window_start).as_secs();
+                Err(remaining)
+            } else {
+                *count += 1;
+                Ok(())
+            }
+        } else {
+            attempts.insert(ip, (1, now));
+            Ok(())
+        }
+    }
+
+    /// Reset the counter for an IP (on successful login).
+    pub async fn reset(&self, ip: IpAddr) {
+        self.attempts.lock().await.remove(&ip);
+    }
+}
+
+/// Session timeout duration: 1 hour (3600 seconds).
+const SESSION_MAX_AGE_SECS: u64 = 3600;
+
 /// Admin auth middleware — checks for `s1_admin` cookie.
+///
+/// Validates credentials and enforces session timeout via the `s1_admin_ts`
+/// cookie which records when the session was created.
 pub async fn admin_auth(request: Request, next: Next) -> Result<Response, StatusCode> {
     let admin_user = std::env::var("S1_ADMIN_USER").unwrap_or_default();
     let admin_pass = std::env::var("S1_ADMIN_PASS").unwrap_or_default();
@@ -47,6 +154,9 @@ pub async fn admin_auth(request: Request, next: Next) -> Result<Response, Status
 
     if let Some(cookie_header) = request.headers().get(header::COOKIE) {
         if let Ok(cookies) = cookie_header.to_str() {
+            let mut auth_valid = false;
+            let mut session_ts: Option<i64> = None;
+
             for cookie in cookies.split(';') {
                 let cookie = cookie.trim();
                 if let Some(token) = cookie.strip_prefix("s1_admin=") {
@@ -55,11 +165,37 @@ pub async fn admin_auth(request: Request, next: Next) -> Result<Response, Status
                         if let Ok(creds) = String::from_utf8(decoded) {
                             let expected = format!("{}:{}", admin_user, admin_pass);
                             if creds == expected {
-                                return Ok(next.run(request).await);
+                                auth_valid = true;
                             }
                         }
                     }
                 }
+                if let Some(ts_str) = cookie.strip_prefix("s1_admin_ts=") {
+                    session_ts = ts_str.trim().parse::<i64>().ok();
+                }
+            }
+
+            if auth_valid {
+                // Enforce session timeout
+                if let Some(ts) = session_ts {
+                    let now = chrono::Utc::now().timestamp();
+                    if (now - ts) > SESSION_MAX_AGE_SECS as i64 {
+                        // Session expired — clear cookies and redirect to login
+                        return Ok((
+                            StatusCode::SEE_OTHER,
+                            [
+                                (header::LOCATION, "/admin/login".to_string()),
+                                (
+                                    header::SET_COOKIE,
+                                    "s1_admin=; Path=/admin; Max-Age=0; HttpOnly".to_string(),
+                                ),
+                            ],
+                            "",
+                        )
+                            .into_response());
+                    }
+                }
+                return Ok(next.run(request).await);
             }
         }
     }
@@ -73,29 +209,79 @@ pub async fn admin_login_page() -> Html<&'static str> {
     Html(LOGIN_HTML)
 }
 
-/// Handle login POST.
+/// Extract client IP from request headers (X-Forwarded-For, X-Real-IP) or fallback.
+fn extract_client_ip(headers: &axum::http::HeaderMap) -> IpAddr {
+    // Try X-Forwarded-For first (first IP in chain)
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = xff.split(',').next() {
+            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+    // Try X-Real-IP
+    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        if let Ok(ip) = xri.trim().parse::<IpAddr>() {
+            return ip;
+        }
+    }
+    // Fallback to unspecified
+    IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+}
+
+/// Handle login POST with rate limiting.
 pub async fn admin_login_submit(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     axum::extract::Form(form): axum::extract::Form<LoginForm>,
 ) -> Response {
+    let ip = extract_client_ip(&headers);
+
+    // Rate limiting: max 5 attempts per IP per minute
+    if let Err(remaining) = state.login_limiter.check_and_increment(ip).await {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Html(format!(
+                r#"<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:60px">
+                <h2>Too many login attempts</h2><p>Try again in {} seconds.</p>
+                <a href="/admin/login">Back to login</a></body></html>"#,
+                remaining
+            )),
+        )
+            .into_response();
+    }
+
     let admin_user = std::env::var("S1_ADMIN_USER").unwrap_or_default();
     let admin_pass = std::env::var("S1_ADMIN_PASS").unwrap_or_default();
 
     if form.username == admin_user && form.password == admin_pass {
+        // Successful login — reset rate limiter for this IP
+        state.login_limiter.reset(ip).await;
+
         use base64::Engine as _;
         let token = base64::engine::general_purpose::STANDARD
             .encode(format!("{}:{}", form.username, form.password));
-        (
-            StatusCode::SEE_OTHER,
-            [
-                (header::LOCATION, "/admin/dashboard"),
-                (
-                    header::SET_COOKIE,
-                    &format!("s1_admin={}; Path=/admin; HttpOnly; SameSite=Strict", token),
-                ),
-            ],
-            "",
-        )
-            .into_response()
+        let now_ts = chrono::Utc::now().timestamp();
+
+        // Set both auth cookie and timestamp cookie (for session timeout)
+        let auth_cookie = format!(
+            "s1_admin={}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={}",
+            token, SESSION_MAX_AGE_SECS
+        );
+        let ts_cookie = format!(
+            "s1_admin_ts={}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={}",
+            now_ts, SESSION_MAX_AGE_SECS
+        );
+
+        // We need to return two Set-Cookie headers. Build a response manually.
+        let mut resp = (StatusCode::SEE_OTHER, "").into_response();
+        resp.headers_mut()
+            .insert(header::LOCATION, "/admin/dashboard".parse().unwrap());
+        resp.headers_mut()
+            .append(header::SET_COOKIE, auth_cookie.parse().unwrap());
+        resp.headers_mut()
+            .append(header::SET_COOKIE, ts_cookie.parse().unwrap());
+        resp
     } else {
         Html(LOGIN_ERROR_HTML).into_response()
     }
@@ -156,6 +342,175 @@ pub async fn admin_close_session(
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .ok_or((StatusCode::NOT_FOUND, format!("Session not found: {id}")))
+}
+
+// ─── New Admin API Endpoints ─────────────────────────
+
+/// GET /admin/api/errors — Return the last errors from the in-memory ring buffer.
+///
+/// Query parameters:
+/// - `limit` (default 50, max 100): number of entries to return
+/// - `offset` (default 0): pagination offset
+///
+/// Returns JSON:
+/// ```json
+/// { "errors": [...], "total": N, "limit": 50, "offset": 0 }
+/// ```
+pub async fn admin_errors(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<ErrorQueryParams>,
+) -> Json<serde_json::Value> {
+    let limit = params.limit.unwrap_or(50).min(100);
+    let offset = params.offset.unwrap_or(0);
+    let (entries, total) = state.error_log.recent(limit, offset).await;
+    Json(json!({
+        "errors": entries,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ErrorQueryParams {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+/// GET /admin/api/sessions/{id}/editors — Return detailed editor info for a session.
+///
+/// Returns JSON:
+/// ```json
+/// {
+///   "file_id": "...",
+///   "editors": [
+///     { "user_id": "...", "user_name": "...", "connected_at": "...", "mode": "edit", "last_activity": "..." }
+///   ],
+///   "editor_count": N
+/// }
+/// ```
+pub async fn admin_session_editors(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let info = state
+        .sessions
+        .get_info(&id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, format!("Session not found: {id}")))?;
+
+    Ok(Json(json!({
+        "file_id": id,
+        "editors": info.editors,
+        "editor_count": info.editor_count,
+    })))
+}
+
+/// POST /admin/api/sessions/{id}/sync — Force a fullSync broadcast to all peers in a room.
+///
+/// Sends a `requestFullSync` message to all connected peers so they re-send
+/// the complete document state. Returns 204 on success, 404 if room not found.
+pub async fn admin_force_sync(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if state.rooms.broadcast_sync(&id).await {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err((StatusCode::NOT_FOUND, format!("Room not found: {id}")))
+    }
+}
+
+/// POST /admin/api/sessions/{id}/kick/{uid} — Kick an editor from a session.
+///
+/// Removes the editor from the file session manager and broadcasts a
+/// `peer-leave` message to all remaining peers in the room.
+/// Returns 204 on success, 404 if session or editor not found.
+pub async fn admin_kick_editor(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((id, uid)): axum::extract::Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    // Verify the session exists
+    let info = state
+        .sessions
+        .get_info(&id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, format!("Session not found: {id}")))?;
+
+    // Verify the editor exists in the session
+    if !info.editors.iter().any(|e| e.user_id == uid) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            format!("Editor {} not found in session {}", uid, id),
+        ));
+    }
+
+    // Remove from file session
+    state.sessions.editor_leave(&id, &uid).await;
+
+    // Broadcast peer-leave to the room
+    state.rooms.broadcast_peer_leave(&id, &uid).await;
+
+    tracing::info!("Admin kicked editor {} from session {}", uid, id);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /admin/api/health — Return system health metrics.
+///
+/// Returns JSON:
+/// ```json
+/// {
+///   "status": "ok",
+///   "uptime_secs": N,
+///   "memory_mb": F,
+///   "cpu_usage_percent": null,
+///   "active_sessions": N,
+///   "active_rooms": N,
+///   "total_editors": N,
+///   "pid": N
+/// }
+/// ```
+///
+/// Note: `cpu_usage_percent` requires the `sysinfo` crate and is reported as null
+/// in this implementation. Memory is derived from /proc/self/status on Linux.
+pub async fn admin_health(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let sessions = state.sessions.list_sessions().await;
+    let rooms = state.rooms.room_count().await;
+    let total_editors: usize = sessions.iter().map(|s| s.editor_count).sum();
+
+    Json(json!({
+        "status": "ok",
+        "uptime_secs": uptime_secs(),
+        "memory_mb": get_memory_mb(),
+        "cpu_usage_percent": serde_json::Value::Null,
+        "active_sessions": sessions.len(),
+        "active_rooms": rooms,
+        "total_editors": total_editors,
+        "pid": std::process::id(),
+    }))
+}
+
+/// GET /admin/api/rooms/{id}/version — Return room version and op count.
+///
+/// Returns JSON:
+/// ```json
+/// { "room_id": "...", "version": N, "ops_count": N }
+/// ```
+pub async fn admin_room_version(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let (version, ops_count) = state
+        .rooms
+        .get_room_version_info(&id)
+        .await
+        .ok_or((StatusCode::NOT_FOUND, format!("Room not found: {id}")))?;
+
+    Ok(Json(json!({
+        "room_id": id,
+        "version": version,
+        "ops_count": ops_count,
+    })))
 }
 
 /// Logout — clear cookie.

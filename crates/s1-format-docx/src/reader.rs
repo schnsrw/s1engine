@@ -219,6 +219,16 @@ pub fn read(input: &[u8]) -> Result<DocumentModel, DocxError> {
         doc.metadata_mut()
             .custom_properties
             .insert("hasMacros".to_string(), "true".to_string());
+
+        // P4 Step 4: Try to extract macro module names from vbaProject.bin
+        if let Some(vba_data) = doc.preserved_parts().get("word/vbaProject.bin") {
+            let macro_names = extract_vba_module_names(vba_data);
+            if !macro_names.is_empty() {
+                doc.metadata_mut()
+                    .custom_properties
+                    .insert("macroNames".to_string(), macro_names.join(", "));
+            }
+        }
     }
 
     Ok(doc)
@@ -325,6 +335,48 @@ fn extract_media_files(archive: &mut ZipArchive<Cursor<&[u8]>>) -> HashMap<Strin
     }
 
     media
+}
+
+/// Extract VBA module names from a `vbaProject.bin` binary blob.
+///
+/// The VBA project binary contains `Module=<name>` entries in its project stream.
+/// This function performs a best-effort scan for those entries. Since the VBA binary
+/// format uses a mix of UTF-16 and ASCII, we look for the ASCII pattern "Module="
+/// followed by printable characters up to a CR/LF or null byte.
+fn extract_vba_module_names(data: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    let needle = b"Module=";
+    let needle_len = needle.len();
+
+    // Scan for all occurrences of "Module=" in the binary
+    let mut i = 0;
+    while i + needle_len < data.len() {
+        if &data[i..i + needle_len] == needle {
+            // Extract the module name following "Module="
+            let start = i + needle_len;
+            let mut end = start;
+            while end < data.len() {
+                let b = data[end];
+                // Stop at CR, LF, null, or non-printable ASCII
+                if b == 0 || b == b'\r' || b == b'\n' || !(0x20..=0x7E).contains(&b) {
+                    break;
+                }
+                end += 1;
+            }
+            if end > start {
+                if let Ok(name) = std::str::from_utf8(&data[start..end]) {
+                    let trimmed = name.trim();
+                    if !trimmed.is_empty() && !names.contains(&trimmed.to_string()) {
+                        names.push(trimmed.to_string());
+                    }
+                }
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    names
 }
 
 /// Extract all `_xmlsignatures/*` entries from the ZIP archive as UTF-8 strings.

@@ -67,6 +67,8 @@ async fn main() {
     let webhook_registry = Arc::new(WebhookRegistry::new());
     let room_manager = Arc::new(RoomManager::new());
     let session_manager = Arc::new(FileSessionManager::new(None));
+    let error_log = Arc::new(admin::ErrorLog::new(100));
+    let login_limiter = Arc::new(admin::RateLimiter::new(5, 60));
 
     // Clones for background tasks
     let save_rooms = room_manager.clone();
@@ -78,6 +80,8 @@ async fn main() {
         webhooks: webhook_registry,
         rooms: room_manager,
         sessions: session_manager,
+        error_log,
+        login_limiter,
     });
 
     // Static editor files directory
@@ -150,13 +154,30 @@ async fn main() {
                 // C-05: POST final document to callback URL if configured
                 if let Some(url) = callback_url {
                     if !url.is_empty() {
+                        // SSRF mitigation: block private/internal IP addresses
+                        if integration::is_private_ip(&url) {
+                            tracing::warn!(
+                                "Callback for {} blocked: URL {} resolves to private address",
+                                file_id,
+                                url
+                            );
+                            continue;
+                        }
+
                         tracing::info!("Posting callback for {} to {}", file_id, url);
-                        let req = client
+                        let mut req = client
                             .post(&url)
                             .header("Content-Type", "application/octet-stream")
                             .header("X-S1-File-Id", &file_id)
                             .header("X-S1-Event", "session.closed")
-                            .body(data);
+                            .header("X-S1-Timestamp", chrono::Utc::now().timestamp().to_string());
+
+                        // Add HMAC signature if configured
+                        if let Some(sig) = integration::compute_callback_signature(&data) {
+                            req = req.header("X-S1-Signature", format!("sha256={}", sig));
+                        }
+
+                        let req = req.body(data);
                         match req.send().await {
                             Ok(resp) => tracing::info!("Callback {}: HTTP {}", url, resp.status()),
                             Err(e) => tracing::warn!("Callback {} failed: {}", url, e),
@@ -223,5 +244,18 @@ fn admin_routes() -> Router<Arc<AppState>> {
         .route("/api/sessions", get(admin::admin_sessions))
         .route("/api/sessions/{id}", delete(admin::admin_close_session))
         .route("/api/config", get(admin::admin_config))
+        // New admin endpoints
+        .route("/api/errors", get(admin::admin_errors))
+        .route(
+            "/api/sessions/{id}/editors",
+            get(admin::admin_session_editors),
+        )
+        .route("/api/sessions/{id}/sync", post(admin::admin_force_sync))
+        .route(
+            "/api/sessions/{id}/kick/{uid}",
+            post(admin::admin_kick_editor),
+        )
+        .route("/api/health", get(admin::admin_health))
+        .route("/api/rooms/{id}/version", get(admin::admin_room_version))
         .layer(middleware::from_fn(admin::admin_auth))
 }

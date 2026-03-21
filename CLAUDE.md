@@ -13,6 +13,9 @@ This is a **library**, not an application. Consumers build editors/tools on top 
 3. `docs/SPECIFICATION.md` — Detailed technical spec for every module
 4. `docs/ROADMAP.md` — Phased development plan with milestones
 5. `docs/API_DESIGN.md` — Public API surface, feature flags, examples
+6. `docs/SPECIFICATIONS_INDEX.md` — **Specification-first development framework**
+7. `docs/COLLABORATION_PROTOCOL.md` — **Real-time collaboration protocol v3.0**
+8. `docs/specs/EDITOR_UX_SPEC.md` — **Editor UX specification (cursor, selection, clipboard)**
 6. `docs/DEPENDENCIES.md` — All external dependencies with rationale
 
 ## Architecture Rules (MUST Follow)
@@ -130,6 +133,22 @@ trait FormatWriter {
 - **unicode-linebreak** — line breaking (UAX #14)
 
 This eliminates all C/C++ dependencies while providing full Unicode support.
+
+## Development Process — Specification First
+
+**CRITICAL**: Every feature MUST follow this process:
+
+1. **Research** — Study the standard (OOXML, ODF, PDF) + analyze competitors
+2. **Specify** — Write spec with happy path + numbered edge cases + error handling
+3. **Break** — Think adversarially: what breaks this? Race conditions? Resource limits?
+4. **Fix spec** — Update spec to handle discovered breaks
+5. **Implement** — Code to spec (spec items = test cases)
+6. **Test** — Unit + integration + E2E tests for every spec item
+7. **Verify** — Test against real documents from Word, LibreOffice, Google Docs
+
+Specs live in `docs/specs/`. Index at `docs/SPECIFICATIONS_INDEX.md`.
+
+**DO NOT** implement features without a specification. If the spec doesn't exist, write it first.
 
 ## What NOT To Do
 

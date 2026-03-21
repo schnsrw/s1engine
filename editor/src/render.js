@@ -122,15 +122,35 @@ export function renderSingleParagraphIfPossible(nodeId, options = {}) {
     return false; // Node was deleted or merged — full render needed
   }
 
+  // Save cursor position BEFORE re-rendering (so we can restore it after)
+  let savedCursorOffset = options.cursorOffset;
+  if (typeof savedCursorOffset !== 'number') {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const anchor = sel.anchorNode;
+      if (anchor && existingEl.contains(anchor)) {
+        // Calculate offset from start of paragraph
+        let off = 0;
+        const walker = document.createTreeWalker(existingEl, NodeFilter.SHOW_TEXT, null);
+        let tn;
+        while ((tn = walker.nextNode())) {
+          if (tn === anchor) { off += sel.anchorOffset; break; }
+          off += tn.textContent.length;
+        }
+        savedCursorOffset = off;
+      }
+    }
+  }
+
   // Perform the incremental render
   const updatedEl = renderNodeById(nodeId);
   if (!updatedEl) return false;
 
-  // Restore cursor if requested
-  if (typeof options.cursorOffset === 'number') {
+  // Restore cursor at the saved position
+  if (typeof savedCursorOffset === 'number') {
     const content = updatedEl.closest('.page-content');
     if (content) content.focus();
-    setCursorAtOffset(updatedEl, options.cursorOffset);
+    setCursorAtOffset(updatedEl, savedCursorOffset);
   }
 
   // Mark layout as potentially dirty for pagination check
@@ -730,17 +750,9 @@ export function debouncedSync(el) {
     if (state._composing) return;
     syncParagraphText(el);
 
-    // Try incremental render for single-paragraph text edits (avoids full repagination).
-    // Falls back to full repaginate if incremental render isn't possible.
-    const nodeId = el?.dataset?.nodeId;
-    if (nodeId && renderSingleParagraphIfPossible(nodeId)) {
-      // Incremental render succeeded — skip full repagination
-      state.pagesRendered = false;
-    } else {
-      state.pagesRendered = false;
-      // E8.3: Full repagination only when incremental render wasn't enough
-      debouncedRepaginate();
-    }
+    // DON'T re-render while user is typing — the DOM already shows their changes.
+    // Just mark layout as dirty for the next explicit render or pagination check.
+    state.pagesRendered = false;
     // Record typing in undo history so the panel isn't empty
     if (state._typingBatch && !state._typingUndoRecorded) {
       state._typingUndoRecorded = true;

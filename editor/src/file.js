@@ -520,6 +520,19 @@ export async function openFile(bytes, name) {
     renderRuler(); // Update ruler with actual document page dimensions
     if (name) $('docName').value = name.replace(/\.[^.]+$/, '');
     updateTrackChanges();
+
+    // P4: Show macro warning if document has VBA macros or digital signatures
+    try {
+      const meta = state.doc.metadata_json ? JSON.parse(state.doc.metadata_json()) : {};
+      if (meta.custom_properties?.hasMacros === 'true') {
+        showToast('This document contains macros (VBA). Macro execution is not supported.', 'warning', 8000);
+      }
+      if (meta.custom_properties?.hasDigitalSignature === 'true') {
+        const subject = meta.custom_properties?.signatureSubject || 'Unknown signer';
+        showToast(`Signed document: ${subject}`, 'info', 6000);
+      }
+    } catch (_) {}
+
     state.dirty = false;
     updateDirtyIndicator();
     startAutosave();
@@ -680,6 +693,33 @@ export function initFileHandlers() {
   $('welcomeNew').addEventListener('click', newDocument);
   $('btnOpen').addEventListener('click', () => $('fileInput').click());
   $('welcomeOpen').addEventListener('click', () => $('fileInput').click());
+
+  // Suite launcher buttons (Phase 6)
+  const suiteSpreadsheet = $('suiteSpreadsheet');
+  if (suiteSpreadsheet) {
+    suiteSpreadsheet.addEventListener('click', () => {
+      showToast('Spreadsheet editor is planned for a future release.', 'info', 5000);
+    });
+  }
+  const suitePresentation = $('suitePresentation');
+  if (suitePresentation) {
+    suitePresentation.addEventListener('click', () => {
+      showToast('Presentation editor is planned for a future release.', 'info', 5000);
+    });
+  }
+  const suiteCSV = $('suiteCSV');
+  if (suiteCSV) {
+    suiteCSV.addEventListener('click', () => $('csvInput').click());
+  }
+  const csvInput = $('csvInput');
+  if (csvInput) {
+    csvInput.addEventListener('change', e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => openFile(new Uint8Array(r.result), f.name);
+      r.readAsArrayBuffer(f); e.target.value = '';
+    });
+  }
 
   $('fileInput').addEventListener('change', e => {
     const f = e.target.files[0]; if (!f) return;

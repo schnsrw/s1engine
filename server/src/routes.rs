@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use crate::admin::{ErrorLog, RateLimiter};
 use crate::collab::RoomManager;
 use crate::file_sessions::FileSessionManager;
 use crate::storage::{DocumentMeta, StorageBackend};
@@ -21,6 +22,10 @@ pub struct AppState {
     pub webhooks: Arc<WebhookRegistry>,
     pub rooms: Arc<RoomManager>,
     pub sessions: Arc<FileSessionManager>,
+    /// In-memory ring buffer for error log (capacity: 100).
+    pub error_log: Arc<ErrorLog>,
+    /// Rate limiter for admin login (5 attempts per IP per 60 seconds).
+    pub login_limiter: Arc<RateLimiter>,
 }
 
 /// Health check endpoint.
@@ -72,6 +77,9 @@ pub async fn create_document(
             // Detect format from filename
             let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
 
+            // Detect file type from bytes (Phase 6: multi-app routing)
+            let detected_type = s1_convert::detect_file_type(&data);
+
             let meta = DocumentMeta {
                 id: doc_id.clone(),
                 filename: filename.clone(),
@@ -99,6 +107,11 @@ pub async fn create_document(
                     "size": data.len(),
                     "wordCount": word_count,
                     "title": doc.metadata().title,
+                    "detectedType": detected_type.extension(),
+                    "detectedTypeLabel": detected_type.label(),
+                    "isDocument": detected_type.is_document(),
+                    "isSpreadsheet": detected_type.is_spreadsheet(),
+                    "isPresentation": detected_type.is_presentation(),
                 })),
             ));
         }
@@ -428,6 +441,11 @@ pub async fn upload_file(
             let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
             let word_count = doc.to_plain_text().split_whitespace().count();
 
+            // Detect file type from bytes (Phase 6: multi-app routing)
+            let detected_type = s1_convert::detect_file_type(&data);
+            let detected_type_str = detected_type.extension().to_string();
+            let detected_label = detected_type.label().to_string();
+
             state
                 .sessions
                 .create(
@@ -447,6 +465,11 @@ pub async fn upload_file(
                     "filename": filename,
                     "size": data.len(),
                     "wordCount": word_count,
+                    "detectedType": detected_type_str,
+                    "detectedTypeLabel": detected_label,
+                    "isDocument": detected_type.is_document(),
+                    "isSpreadsheet": detected_type.is_spreadsheet(),
+                    "isPresentation": detected_type.is_presentation(),
                     "editorUrl": format!("/?file={}", file_id),
                     "wsUrl": format!("/ws/edit/{}", file_id),
                 })),
@@ -542,11 +565,20 @@ pub async fn close_file(
 /// Report a client-side error (POST /api/v1/errors).
 ///
 /// Accepts a JSON body with a `message` field. Logs at WARN level,
-/// truncated to 500 chars for safety.
-pub async fn report_error(Json(body): Json<Value>) -> StatusCode {
+/// truncated to 500 chars for safety. Also stores in the admin error log.
+pub async fn report_error(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> StatusCode {
     if let Some(msg) = body.get("message").and_then(|m| m.as_str()) {
         let truncated = &msg[..msg.len().min(500)];
         tracing::warn!("Client error: {}", truncated);
+        let source = body
+            .get("source")
+            .and_then(|s| s.as_str())
+            .unwrap_or("client")
+            .to_string();
+        state.error_log.push(truncated.to_string(), source).await;
     }
     StatusCode::NO_CONTENT
 }

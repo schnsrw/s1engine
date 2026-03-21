@@ -305,6 +305,15 @@ export function repaginate() {
     reorderChildren(contentEl, effectiveNodeIds);
   }
 
+  // Substitute page numbers in body content fields (not just headers/footers)
+  for (let i = 0; i < state.pageElements.length; i++) {
+    const pageEl = state.pageElements[i];
+    const contentEl = pageEl.querySelector('.page-content');
+    if (contentEl) {
+      substitutePageNumbers(contentEl, i + 1, numPages);
+    }
+  }
+
   // Second pass: remove any orphaned nodes (nodes in DOM not in any page)
   for (const pageEl of state.pageElements) {
     const contentEl = pageEl.querySelector('.page-content');

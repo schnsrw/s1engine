@@ -230,6 +230,26 @@ fn parse_paragraph_into(
                         let added = parse_note_into(reader, doc, ctx, e, para_id, child_index)?;
                         child_index += added;
                     }
+                    b"database-display" => {
+                        // Q13: Preserve displayed text from database field as a run
+                        if let Ok(text) = reader.read_text(e.to_end().name()) {
+                            let displayed = text.to_string();
+                            if !displayed.is_empty() {
+                                let run_id = doc.next_id();
+                                let mut run_node = Node::new(run_id, NodeType::Run);
+                                run_node.attributes.set(
+                                    AttributeKey::FieldType,
+                                    AttributeValue::FieldType(FieldType::Custom),
+                                );
+                                doc.insert_node(para_id, child_index, run_node)
+                                    .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                                let text_id = doc.next_id();
+                                doc.insert_node(run_id, 0, Node::text(text_id, displayed))
+                                    .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                                child_index += 1;
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -409,6 +429,30 @@ fn parse_span_into(
                         doc.insert_node(run_id, 0, Node::text(text_id, text))
                             .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
                         count += 1;
+                    }
+                }
+            }
+            Ok(Event::Start(ref e)) => {
+                let local = e.local_name();
+                if local.as_ref() == b"database-display" {
+                    // Q13: Preserve displayed text from database field as a run
+                    if let Ok(text) = reader.read_text(e.to_end().name()) {
+                        let displayed = text.to_string();
+                        if !displayed.is_empty() {
+                            let run_id = doc.next_id();
+                            let mut run_node = Node::new(run_id, NodeType::Run);
+                            run_node.attributes.merge(&run_attrs);
+                            run_node.attributes.set(
+                                AttributeKey::FieldType,
+                                AttributeValue::FieldType(FieldType::Custom),
+                            );
+                            doc.insert_node(parent_id, start_index + count, run_node)
+                                .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                            let text_id = doc.next_id();
+                            doc.insert_node(run_id, 0, Node::text(text_id, displayed))
+                                .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                            count += 1;
+                        }
                     }
                 }
             }
@@ -1387,10 +1431,28 @@ fn parse_table_into(
         }
     }
 
-    // Store column style names on the table node for round-trip fidelity.
-    // Column widths are resolved from these style names during layout.
+    // Q10: Resolve column widths from auto-style references.
+    // Each column_widths entry is a style name; look up the auto-style to extract the
+    // actual width in points from TableColumnWidths (set by style_parser).
+    // Store as comma-separated point values for layout, falling back to style names
+    // for any columns whose style lacks an explicit width.
     if !column_widths.is_empty() && column_widths.iter().any(|w| !w.is_empty()) {
-        let styles_str = column_widths.join(",");
+        let resolved: Vec<String> = column_widths
+            .iter()
+            .map(|style_name| {
+                if style_name.is_empty() {
+                    return String::new();
+                }
+                if let Some(auto_attrs) = ctx.auto_styles.get(style_name) {
+                    if let Some(w) = auto_attrs.get_f64(&AttributeKey::TableColumnWidths) {
+                        return format!("{w:.2}pt");
+                    }
+                }
+                // Fall back to the style name if no width resolved
+                style_name.clone()
+            })
+            .collect();
+        let styles_str = resolved.join(",");
         if let Some(table_node) = doc.node_mut(table_id) {
             table_node.attributes.set(
                 AttributeKey::TableColumnWidths,

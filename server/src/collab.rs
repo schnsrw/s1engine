@@ -40,7 +40,10 @@ struct PeerInfo {
 struct Room {
     tx: broadcast::Sender<String>,
     peers: Vec<PeerInfo>,
-    ops_log: Vec<String>,
+    /// Each entry is (server_version, op_json).
+    ops_log: Vec<(u64, String)>,
+    /// Monotonically increasing version counter.
+    version: u64,
     #[allow(dead_code)]
     doc_id: String,
     dirty: bool,
@@ -58,12 +61,12 @@ impl RoomManager {
         }
     }
 
-    /// Join a room. Returns (broadcast sender, catch-up ops, current peer list).
+    /// Join a room. Returns (broadcast sender, catch-up ops with versions, current peer list).
     async fn join(
         &self,
         room_id: &str,
         peer: PeerInfo,
-    ) -> (broadcast::Sender<String>, Vec<String>, Vec<PeerInfo>) {
+    ) -> (broadcast::Sender<String>, Vec<(u64, String)>, Vec<PeerInfo>) {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
             let existing_peers = room.peers.clone();
@@ -76,6 +79,7 @@ impl RoomManager {
                 tx: tx.clone(),
                 peers: vec![peer],
                 ops_log: Vec::new(),
+                version: 0,
                 doc_id: room_id.to_string(),
                 dirty: false,
             };
@@ -94,10 +98,13 @@ impl RoomManager {
         }
     }
 
-    async fn record_op(&self, room_id: &str, op: &str) {
+    /// Record an op with an incremented server version. Returns the new version.
+    async fn record_op(&self, room_id: &str, op: &str) -> u64 {
         let mut rooms = self.rooms.lock().await;
         if let Some(room) = rooms.get_mut(room_id) {
-            room.ops_log.push(op.to_string());
+            room.version += 1;
+            let version = room.version;
+            room.ops_log.push((version, op.to_string()));
             room.dirty = true;
             if room.ops_log.len() > 10000 {
                 tracing::warn!(
@@ -107,6 +114,9 @@ impl RoomManager {
                 );
                 room.ops_log.drain(..5_000);
             }
+            version
+        } else {
+            0
         }
     }
 
@@ -114,6 +124,26 @@ impl RoomManager {
         serde_json::from_str::<serde_json::Value>(msg)
             .map(|v| v.get("type").is_some() || v.get("action").is_some())
             .unwrap_or(false)
+    }
+
+    /// Get the current server version for a room.
+    async fn get_version(&self, room_id: &str) -> u64 {
+        let rooms = self.rooms.lock().await;
+        rooms.get(room_id).map_or(0, |room| room.version)
+    }
+
+    /// Get all ops recorded after `from_version`.
+    async fn get_ops_since(&self, room_id: &str, from_version: u64) -> Vec<(u64, String)> {
+        let rooms = self.rooms.lock().await;
+        if let Some(room) = rooms.get(room_id) {
+            room.ops_log
+                .iter()
+                .filter(|(v, _)| *v > from_version)
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     async fn leave(&self, room_id: &str, peer_id: &str) -> bool {
@@ -133,7 +163,9 @@ impl RoomManager {
         let mut rooms = self.rooms.lock().await;
         for (room_id, room) in rooms.iter_mut() {
             if room.dirty && !room.ops_log.is_empty() {
-                let ops_json = serde_json::to_string(&room.ops_log).unwrap_or_default();
+                // Serialize only the op strings (strip version tuples) for storage compatibility
+                let ops_only: Vec<&str> = room.ops_log.iter().map(|(_, op)| op.as_str()).collect();
+                let ops_json = serde_json::to_string(&ops_only).unwrap_or_default();
                 let meta = crate::storage::DocumentMeta {
                     id: format!("{}_ops", room_id),
                     filename: format!("{}_ops.json", room_id),
@@ -157,6 +189,69 @@ impl RoomManager {
     #[allow(dead_code)]
     pub async fn room_count(&self) -> usize {
         self.rooms.lock().await.len()
+    }
+
+    /// Get version and op count for a room.
+    pub async fn get_room_version_info(&self, room_id: &str) -> Option<(u64, usize)> {
+        let rooms = self.rooms.lock().await;
+        rooms
+            .get(room_id)
+            .map(|room| (room.version, room.ops_log.len()))
+    }
+
+    /// Get the peer list for a room.
+    #[allow(dead_code)]
+    pub async fn get_room_peers(&self, room_id: &str) -> Vec<(String, String, String)> {
+        let rooms = self.rooms.lock().await;
+        rooms
+            .get(room_id)
+            .map(|room| {
+                room.peers
+                    .iter()
+                    .map(|p| (p.peer_id.clone(), p.user_name.clone(), p.user_color.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Broadcast a fullSync request to all peers in a room.
+    /// Returns true if the room exists and the message was sent.
+    pub async fn broadcast_sync(&self, room_id: &str) -> bool {
+        let rooms = self.rooms.lock().await;
+        if let Some(room) = rooms.get(room_id) {
+            let msg = serde_json::json!({
+                "type": "requestFullSync",
+                "peerId": "admin",
+                "_sender": "admin",
+            });
+            let _ = room.tx.send(msg.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Broadcast a peer-leave message for a specific peer.
+    /// Returns true if the room exists.
+    pub async fn broadcast_peer_leave(&self, room_id: &str, peer_id: &str) -> bool {
+        let mut rooms = self.rooms.lock().await;
+        if let Some(room) = rooms.get_mut(room_id) {
+            // Remove the peer from the room
+            room.peers.retain(|p| p.peer_id != peer_id);
+            let msg = serde_json::json!({
+                "type": "peer-leave",
+                "peerId": peer_id,
+                "_sender": "admin",
+            });
+            let _ = room.tx.send(msg.to_string());
+            if room.peers.is_empty() {
+                rooms.remove(room_id);
+                tracing::info!("Room closed (admin kick): {}", room_id);
+            }
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -249,12 +344,16 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         })
         .collect();
 
+    // Get the current room version to include in the joined message
+    let current_room_version = state.rooms.get_version(&file_id).await;
+
     let joined_msg = serde_json::json!({
         "type": "joined",
         "peerId": peer_id,
         "room": file_id,
         "peers": peer_list,
         "access": params.access,
+        "serverVersion": current_room_version,
     });
     let _ = sender
         .send(Message::Text(joined_msg.to_string().into()))
@@ -286,12 +385,13 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         }
     }
 
-    // 4. Send catch-up ops
-    for op in &catch_up_ops {
+    // 4. Send catch-up ops (with server version)
+    for (version, op) in &catch_up_ops {
         let msg = serde_json::json!({
             "type": "op",
             "peerId": "server",
             "data": op,
+            "serverVersion": version,
         });
         if sender
             .send(Message::Text(msg.to_string().into()))
@@ -372,20 +472,32 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                             }
                             continue;
                         }
+                        "requestCatchup" => {
+                            // Client is behind — send all ops since their version
+                            if let Some(from_version) =
+                                parsed.get("fromVersion").and_then(|v| v.as_u64())
+                            {
+                                let ops = rooms.get_ops_since(&file_id_recv, from_version).await;
+                                for (version, op_data) in ops {
+                                    let catchup = serde_json::json!({
+                                        "type": "op",
+                                        "peerId": "server",
+                                        "data": op_data,
+                                        "serverVersion": version,
+                                    });
+                                    let _ = tx_clone.send(catchup.to_string());
+                                }
+                            }
+                            continue;
+                        }
                         "op" => {
                             // Forward op with sender's peerId attached
                             let data = parsed.get("data").cloned().unwrap_or_default();
-                            let forwarded = serde_json::json!({
-                                "type": "op",
-                                "peerId": sender_peer_id,
-                                "data": data,
-                                "_sender": sender_peer_id,
-                            });
-                            let forwarded_str = forwarded.to_string();
 
-                            // Record the raw op data in the ops log (not the envelope)
+                            // Record the raw op data in the ops log and get the new version
+                            let mut room_version: u64 = 0;
                             if let Some(data_str) = data.as_str() {
-                                rooms.record_op(&file_id_recv, data_str).await;
+                                room_version = rooms.record_op(&file_id_recv, data_str).await;
 
                                 // Check for fullSync to update session snapshot
                                 if let Ok(inner) =
@@ -415,7 +527,14 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                                 }
                             }
 
-                            let _ = tx_clone.send(forwarded_str);
+                            let forwarded = serde_json::json!({
+                                "type": "op",
+                                "peerId": sender_peer_id,
+                                "data": data,
+                                "serverVersion": room_version,
+                                "_sender": sender_peer_id,
+                            });
+                            let _ = tx_clone.send(forwarded.to_string());
                         }
                         "awareness" => {
                             // Forward awareness with sender's peerId

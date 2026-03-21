@@ -1333,17 +1333,18 @@ export function initInput() {
       // DOM fallback: search across all pages
       let firstEl = page.querySelector('p[data-node-id], h1[data-node-id], h2[data-node-id], h3[data-node-id], h4[data-node-id], h5[data-node-id], h6[data-node-id]');
       if (!firstEl) {
-        // Document is completely empty — create a paragraph
-        // NOTE: Don't renderDocument() here — the main paste handler will do it
+        // Document is completely empty — create a paragraph and render
         try {
           doc.append_paragraph('');
           broadcastOp({ action: 'insertParagraph', afterNodeId: null, text: '' });
+          renderDocument(); // Must render so the DOM has the new paragraph
         } catch (_) {}
-        // Re-check WASM model for the newly created paragraph
+        // Find the newly created paragraph
         try {
           const ids = JSON.parse(doc.paragraph_ids_json());
           if (ids.length > 0) {
-            return { startNodeId: ids[0], startOffset: 0, startEl: null };
+            const newEl = page.querySelector(`[data-node-id="${ids[0]}"]`);
+            return { startNodeId: ids[0], startOffset: 0, startEl: newEl || null };
           }
         } catch (_) {}
         firstEl = page.querySelector('[data-node-id]');

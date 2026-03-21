@@ -42,6 +42,9 @@ let connected = false;
 let applyingRemote = false; // flag to prevent echo
 let lastRelayUrl = null; // stored for reconnection
 let accessLevel = 'edit'; // 'edit', 'comment', or 'view'
+let localVersion = 0; // Increments on every local edit (for fullSync ordering)
+let lastSyncedVersion = 0; // Version of last applied fullSync
+let serverVersion = 0; // Tracks the latest version seen from the server/relay
 
 // ─── Public API ───────────────────────────────────────
 
@@ -55,6 +58,11 @@ export function startCollab(room, name, relayUrl) {
   userName = name || 'Anonymous';
   peerId = peerId || ('u-' + Math.random().toString(36).slice(2, 10));
   userColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
+
+  // Reset version state for new session
+  localVersion = 0;
+  lastSyncedVersion = 0;
+  serverVersion = 0;
 
   // Create CRDT collab document if not already set (sharer path)
   if (!state.collabDoc && state.engine && typeof state.engine.open_collab === 'function') {
@@ -92,6 +100,10 @@ export function stopCollab() {
   clearTimeout(reconnectTimer);
   clearTimeout(_fullSyncTimer);
   clearPeerCursors();
+  // Reset version state
+  localVersion = 0;
+  lastSyncedVersion = 0;
+  serverVersion = 0;
   // Free CRDT collab document
   if (state.collabDoc) {
     try { state.collabDoc.free_doc(); } catch (_) {}
@@ -127,6 +139,7 @@ export function broadcastTextSync(nodeId, text) {
  */
 export function broadcastOp(opData) {
   if (!roomId || applyingRemote) return;
+  localVersion++;
   sendOp(opData);
   scheduleDebouncedFullSync();
 }
@@ -208,6 +221,7 @@ function connect(url) {
       room: roomId,
       userName,
       userColor,
+      clientVersion: serverVersion,
     }));
 
     // Flush offline buffer
@@ -227,6 +241,16 @@ function connect(url) {
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      // Track server version from every message
+      if (msg.serverVersion && msg.serverVersion > serverVersion) {
+        // Gap detection: if we skipped versions, we missed messages
+        if (msg.serverVersion > serverVersion + 1) {
+          console.warn('[collab] Version gap detected:', serverVersion, '\u2192', msg.serverVersion);
+          // Request a fullSync from any peer that is up to date
+          sendOp({ action: 'requestFullSync', myVersion: serverVersion });
+        }
+        serverVersion = msg.serverVersion;
+      }
       handleMessage(msg);
     } catch (e) {
       console.error('[collab] Message handling error:', e, 'raw:', event.data?.substring?.(0, 200));
@@ -363,6 +387,11 @@ function handleMessage(msg) {
       peerId = msg.peerId;
       updatePeerList(msg.peers || []);
       updateCollabUI();
+      // Version check on reconnect
+      if (msg.serverVersion && msg.serverVersion > serverVersion) {
+        tracing('Behind server version:', serverVersion, '\u2192', msg.serverVersion);
+      }
+      serverVersion = msg.serverVersion || serverVersion;
       tracing('Joined room, peerId:', peerId, 'peers:', (msg.peers || []).length);
       // Enforce access level from server (view/comment/edit)
       if (msg.access === 'view' || msg.access === 'comment') {
@@ -463,11 +492,10 @@ function getParaOffset(paraEl, targetNode, nodeOffset) {
 function sendFullSync() {
   if (!state.doc) return;
   try {
-    // Send current document as full sync for new peers
     const bytes = state.doc.export('docx');
-    // Convert to base64 for transport
     const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
-    sendOp({ action: 'fullSync', docBase64: base64 });
+    localVersion++;
+    sendOp({ action: 'fullSync', docBase64: base64, version: localVersion, replicaId: peerId });
   } catch (_) {}
 }
 
@@ -538,7 +566,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
               // Don't move local cursor
             }
           }
-        } catch (e) { console.error('remote setText:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setText:', e); }
         break;
       }
 
@@ -546,7 +574,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           const newId = state.doc.split_paragraph(op.nodeId, op.offset);
           renderDocument();
-        } catch (e) { console.error('remote split:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):split:', e); }
         break;
       }
 
@@ -554,7 +582,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.merge_paragraphs(op.nodeId1, op.nodeId2);
           renderDocument();
-        } catch (e) { console.error('remote merge:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):merge:', e); }
         break;
       }
 
@@ -567,7 +595,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
           );
           renderNodeById(op.startNode);
           if (op.endNode !== op.startNode) renderNodeById(op.endNode);
-        } catch (e) { console.error('remote format:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):format:', e); }
         break;
       }
 
@@ -575,7 +603,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_selection(op.startNode, op.startOffset, op.endNode, op.endOffset);
           renderDocument();
-        } catch (e) { console.error('remote delete:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):delete:', e); }
         break;
       }
 
@@ -583,7 +611,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_heading_level(op.nodeId, op.level);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote heading:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):heading:', e); }
         break;
       }
 
@@ -591,7 +619,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_alignment(op.nodeId, op.alignment);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote align:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):align:', e); }
         break;
       }
 
@@ -599,7 +627,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_paragraph_after(op.afterNodeId, op.text || '');
           renderDocument();
-        } catch (e) { console.error('remote insertPara:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPara:', e); }
         break;
       }
 
@@ -607,7 +635,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_node(op.nodeId);
           renderDocument();
-        } catch (e) { console.error('remote deleteNode:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteNode:', e); }
         break;
       }
 
@@ -615,7 +643,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_list_format(op.nodeId, op.format, op.level || 0);
           renderDocument();
-        } catch (e) { console.error('remote list:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):list:', e); }
         break;
       }
 
@@ -623,7 +651,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_indent(op.nodeId, op.side, op.value);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote indent:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):indent:', e); }
         break;
       }
 
@@ -631,7 +659,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_line_spacing(op.nodeId, op.value);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote lineSpacing:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):lineSpacing:', e); }
         break;
       }
 
@@ -639,7 +667,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table(op.afterNodeId, op.rows, op.cols);
           renderDocument();
-        } catch (e) { console.error('remote insertTable:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertTable:', e); }
         break;
       }
 
@@ -647,7 +675,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table_row(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.error('remote insertRow:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertRow:', e); }
         break;
       }
 
@@ -655,7 +683,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_table_row(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.error('remote deleteRow:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteRow:', e); }
         break;
       }
 
@@ -663,7 +691,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table_column(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.error('remote insertCol:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertCol:', e); }
         break;
       }
 
@@ -671,7 +699,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_table_column(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.error('remote deleteCol:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteCol:', e); }
         break;
       }
 
@@ -679,7 +707,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_horizontal_rule(op.afterNodeId);
           renderDocument();
-        } catch (e) { console.error('remote insertHR:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertHR:', e); }
         break;
       }
 
@@ -687,7 +715,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_page_break(op.afterNodeId);
           renderDocument();
-        } catch (e) { console.error('remote insertPageBreak:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPageBreak:', e); }
         break;
       }
 
@@ -695,7 +723,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_section_break(op.afterNodeId, op.breakType || 'nextPage');
           renderDocument();
-        } catch (e) { console.error('remote insertSectionBreak:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertSectionBreak:', e); }
         break;
       }
 
@@ -710,7 +738,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.move_node_before(op.nodeId, op.beforeId);
           renderDocument();
-        } catch (e) { console.error('remote moveBefore:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveBefore:', e); }
         break;
       }
 
@@ -718,7 +746,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.move_node_after(op.nodeId, op.afterId);
           renderDocument();
-        } catch (e) { console.error('remote moveAfter:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveAfter:', e); }
         break;
       }
 
@@ -726,7 +754,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.resize_image(op.nodeId, op.width, op.height);
           renderDocument();
-        } catch (e) { console.error('remote resizeImage:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):resizeImage:', e); }
         break;
       }
 
@@ -734,7 +762,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_cell_background(op.cellId, op.color);
           renderDocument();
-        } catch (e) { console.error('remote setCellBg:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setCellBg:', e); }
         break;
       }
 
@@ -742,7 +770,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_image_alt_text(op.nodeId, op.alt);
           renderDocument();
-        } catch (e) { console.error('remote altText:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):altText:', e); }
         break;
       }
 
@@ -750,7 +778,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_line_break(op.nodeId, op.offset);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote insertLineBreak:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertLineBreak:', e); }
         break;
       }
 
@@ -758,7 +786,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.paste_plain_text(op.nodeId, op.offset, op.text);
           renderDocument();
-        } catch (e) { console.error('remote pasteText:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteText:', e); }
         break;
       }
 
@@ -766,7 +794,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.paste_formatted_runs_json(op.nodeId, op.offset, op.runsJson);
           renderDocument();
-        } catch (e) { console.error('remote pasteFormattedRuns:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteFormattedRuns:', e); }
         break;
       }
 
@@ -774,7 +802,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_text_in_paragraph(op.nodeId, op.offset, op.text);
           renderNodeById(op.nodeId);
-        } catch (e) { console.error('remote insertText:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertText:', e); }
         break;
       }
 
@@ -782,7 +810,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.replace_text(op.nodeId, op.offset, op.length, op.replacement);
           renderDocument();
-        } catch (e) { console.error('remote replaceText:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceText:', e); }
         break;
       }
 
@@ -790,7 +818,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.replace_all(op.query, op.replacement, op.caseInsensitive);
           renderDocument();
-        } catch (e) { console.error('remote replaceAll:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceAll:', e); }
         break;
       }
 
@@ -798,7 +826,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_comment(op.startNodeId, op.endNodeId, op.author, op.text);
           renderDocument();
-        } catch (e) { console.error('remote insertComment:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertComment:', e); }
         break;
       }
 
@@ -806,7 +834,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_comment(op.commentId);
           renderDocument();
-        } catch (e) { console.error('remote deleteComment:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteComment:', e); }
         break;
       }
 
@@ -814,7 +842,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.accept_change(op.nodeId);
           renderDocument();
-        } catch (e) { console.error('remote acceptChange:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptChange:', e); }
         break;
       }
 
@@ -822,7 +850,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.reject_change(op.nodeId);
           renderDocument();
-        } catch (e) { console.error('remote rejectChange:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectChange:', e); }
         break;
       }
 
@@ -830,7 +858,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.accept_all_changes();
           renderDocument();
-        } catch (e) { console.error('remote acceptAllChanges:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptAllChanges:', e); }
         break;
       }
 
@@ -838,7 +866,15 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.reject_all_changes();
           renderDocument();
-        } catch (e) { console.error('remote rejectAllChanges:', e); }
+        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectAllChanges:', e); }
+        break;
+      }
+
+      case 'requestFullSync': {
+        // Another peer is behind — send our full state if we're ahead
+        if (op.myVersion < serverVersion) {
+          sendFullSync();
+        }
         break;
       }
 
@@ -852,20 +888,26 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'fullSync': {
-        // Full document sync from an existing peer.
-        // This is sent when we join — the existing peer has the latest state.
+        // Full document sync with version tracking.
+        // Only apply if the incoming version is newer than what we last synced.
         try {
+          const incomingVersion = op.version || 0;
+          if (incomingVersion > 0 && incomingVersion <= lastSyncedVersion) {
+            tracing('Ignoring stale fullSync v' + incomingVersion + ' (have v' + lastSyncedVersion + ')');
+            break;
+          }
           if (op.docBase64 && state.engine) {
             const binary = atob(op.docBase64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             if (bytes.length > 0) {
               state.doc = state.engine.open(bytes);
+              if (incomingVersion > 0) lastSyncedVersion = incomingVersion;
               renderDocument();
-              tracing('Applied fullSync from peer:', bytes.length, 'bytes');
+              tracing('Applied fullSync v' + incomingVersion, bytes.length, 'bytes');
             }
           }
-        } catch (e) { console.error('remote fullSync:', e); }
+        } catch (e) { console.debug('[collab] fullSync error:', e); }
         break;
       }
 
@@ -911,7 +953,7 @@ function broadcastCursor() {
   if (!sel || sel.rangeCount === 0) {
     try {
       ws.send(JSON.stringify({ type: 'awareness', room: roomId,
-        data: JSON.stringify({ peerId, userName, userColor, heartbeat: true }) }));
+        data: JSON.stringify({ peerId, userName, userColor, heartbeat: true, clientVersion: serverVersion }) }));
     } catch (_) {}
     return;
   }
@@ -925,7 +967,7 @@ function broadcastCursor() {
     // No valid paragraph — still send heartbeat
     try {
       ws.send(JSON.stringify({ type: 'awareness', room: roomId,
-        data: JSON.stringify({ peerId, userName, userColor, heartbeat: true }) }));
+        data: JSON.stringify({ peerId, userName, userColor, heartbeat: true, clientVersion: serverVersion }) }));
     } catch (_) {}
     return;
   }
@@ -940,6 +982,7 @@ function broadcastCursor() {
     offset,
     userName,
     userColor,
+    clientVersion: serverVersion,
   };
 
   // Include selection range if non-collapsed

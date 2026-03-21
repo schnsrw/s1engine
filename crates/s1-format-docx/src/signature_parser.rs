@@ -232,6 +232,76 @@ pub fn validate_signature(info: &mut SignatureInfo) {
     info.validation_status = "unverified".to_string();
 }
 
+/// Create an XMLDSIG signature XML string from a document hash and certificate.
+///
+/// Builds a W3C XML Digital Signature containing:
+/// - `SignedInfo` referencing the document hash (SHA-256)
+/// - `X509Certificate` from the provided DER-encoded certificate (base64-encoded)
+/// - `SigningTime` from the provided ISO 8601 timestamp
+/// - `SignatureValue` placeholder (actual signing with a private key is outside scope)
+///
+/// # Arguments
+///
+/// * `doc_hash` - SHA-256 digest of the document content
+/// * `cert_der` - DER-encoded X.509 certificate bytes
+/// * `signing_time` - ISO 8601 timestamp string (e.g., "2025-06-15T10:30:00Z")
+///
+/// # Errors
+///
+/// Returns an error string if the inputs cannot be base64-encoded (should not
+/// happen in practice).
+#[cfg(feature = "crypto")]
+pub fn create_signature_xml(
+    doc_hash: &[u8],
+    cert_der: &[u8],
+    signing_time: &str,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    let cert_b64 = base64::engine::general_purpose::STANDARD.encode(cert_der);
+    let hash_b64 = base64::engine::general_purpose::STANDARD.encode(doc_hash);
+
+    Ok(format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+  <SignedInfo>
+    <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+    <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+    <Reference URI="">
+      <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+      <DigestValue>{hash_b64}</DigestValue>
+    </Reference>
+  </SignedInfo>
+  <SignatureValue/>
+  <KeyInfo>
+    <X509Data>
+      <X509Certificate>{cert_b64}</X509Certificate>
+    </X509Data>
+  </KeyInfo>
+  <Object>
+    <SignatureProperties>
+      <SignatureProperty>
+        <SignedSignatureProperties>
+          <SigningTime>{signing_time}</SigningTime>
+        </SignedSignatureProperties>
+      </SignatureProperty>
+    </SignatureProperties>
+  </Object>
+</Signature>"#
+    ))
+}
+
+/// Create an XMLDSIG signature relationships XML for the `_xmlsignatures` folder.
+///
+/// Produces a standard OOXML relationships file that references `sig1.xml`.
+#[cfg(feature = "crypto")]
+pub fn create_signature_rels_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature" Target="sig1.xml"/>
+</Relationships>"#
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +419,39 @@ mod tests {
 
         let info = parse_signature_xml(xml);
         assert_eq!(info.signing_time.as_deref(), Some("2025-06-15T10:30:00Z"));
+    }
+
+    #[test]
+    fn create_signature_xml_produces_valid_xmldsig() {
+        // create_signature_xml is behind #[cfg(feature = "crypto")], so we
+        // gate this test the same way.  It always runs in dev-dependencies
+        // because ring + x509-cert are dev-dependencies.
+        #[cfg(feature = "crypto")]
+        {
+            let hash = b"test-hash-bytes";
+            let cert = b"fake-cert-der-bytes";
+            let time = "2025-08-15T14:00:00Z";
+            let xml = create_signature_xml(hash, cert, time).unwrap();
+
+            // Parse it back and check round-trip
+            let info = parse_signature_xml(&xml);
+            assert_eq!(info.signing_time.as_deref(), Some(time));
+            assert!(info.has_certificate);
+            assert!(info.certificate_b64.is_some());
+            assert!(xml.contains("DigestValue"));
+            assert!(xml.contains("SignatureValue"));
+            assert!(xml.contains("X509Certificate"));
+        }
+    }
+
+    #[test]
+    fn create_signature_rels_xml_has_expected_structure() {
+        #[cfg(feature = "crypto")]
+        {
+            let rels = create_signature_rels_xml();
+            assert!(rels.contains("digital-signature/signature"));
+            assert!(rels.contains("sig1.xml"));
+            assert!(rels.contains("rId1"));
+        }
     }
 }

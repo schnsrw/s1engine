@@ -2038,6 +2038,7 @@ dependencies = [
  "s1-format-odt",
  "s1-model",
  "thiserror",
+ "zip",
 ]
 
 [[package]]
@@ -2110,6 +2111,16 @@ dependencies = [
  "pretty_assertions",
  "s1-model",
  "thiserror",
+]
+
+[[package]]
+name = "s1-format-xlsx"
+version = "1.0.1"
+dependencies = [
+ "pretty_assertions",
+ "quick-xml",
+ "thiserror",
+ "zip",
 ]
 
 [[package]]

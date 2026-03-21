@@ -165,6 +165,18 @@ pub fn parse_automatic_styles(
                                     parse_paragraph_properties_children(reader, &mut para_attrs);
                                     attrs.merge(&para_attrs);
                                 }
+                                b"table-column-properties" => {
+                                    // Q10: Extract column width from table-column auto-styles
+                                    if let Some(w) =
+                                        get_attr(pe, b"column-width").and_then(|s| parse_length(&s))
+                                    {
+                                        attrs.set(
+                                            s1_model::AttributeKey::TableColumnWidths,
+                                            s1_model::AttributeValue::Float(w),
+                                        );
+                                    }
+                                    skip_to_end(reader, b"table-column-properties")?;
+                                }
                                 _ => {}
                             }
                         }
@@ -176,6 +188,17 @@ pub fn parse_automatic_styles(
                                 }
                                 b"paragraph-properties" => {
                                     attrs.merge(&parse_paragraph_properties(pe));
+                                }
+                                b"table-column-properties" => {
+                                    // Q10: Extract column width from table-column auto-styles
+                                    if let Some(w) =
+                                        get_attr(pe, b"column-width").and_then(|s| parse_length(&s))
+                                    {
+                                        attrs.set(
+                                            s1_model::AttributeKey::TableColumnWidths,
+                                            s1_model::AttributeValue::Float(w),
+                                        );
+                                    }
                                 }
                                 _ => {}
                             }

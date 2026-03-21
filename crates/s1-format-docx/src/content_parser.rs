@@ -1973,6 +1973,9 @@ fn insert_shape_node(
 }
 
 /// Create a Drawing node from raw DrawingML XML (charts, shapes without image blip, etc.).
+///
+/// Inspects the raw XML to classify the drawing as a diagram (SmartArt), chart,
+/// OLE embedded object, or generic drawing, and stores a descriptive `ShapeType`.
 fn insert_drawing_xml_node(
     doc: &mut DocumentModel,
     para_id: NodeId,
@@ -1982,10 +1985,12 @@ fn insert_drawing_xml_node(
     let drawing_id = doc.next_id();
     let mut drawing_node = Node::new(drawing_id, NodeType::Drawing);
 
-    drawing_node.attributes.set(
-        AttributeKey::ShapeType,
-        AttributeValue::String("drawing".to_string()),
-    );
+    // Q6 Step 2 / Q7 Step 2: Classify the drawing type from its raw XML content.
+    let shape_type = classify_drawing_type(raw_xml);
+
+    drawing_node
+        .attributes
+        .set(AttributeKey::ShapeType, AttributeValue::String(shape_type));
     drawing_node.attributes.set(
         AttributeKey::ShapeRawXml,
         AttributeValue::String(raw_xml.to_string()),
@@ -2001,6 +2006,105 @@ fn insert_drawing_xml_node(
     *child_index += 1;
 
     Ok(())
+}
+
+/// Classify a drawing's type by inspecting its raw XML content.
+///
+/// Returns a descriptive shape type string:
+/// - `"diagram:{type}"` for SmartArt (e.g., `"diagram:hierarchy"`)
+/// - `"chart:{type}"` for charts (e.g., `"chart:bar"`)
+/// - `"drawing"` for generic DrawingML shapes
+fn classify_drawing_type(raw_xml: &str) -> String {
+    // Q6 Step 2: Detect SmartArt diagrams via dgm: namespace or /diagrams/ references
+    let is_diagram = raw_xml.contains("dgm:")
+        || raw_xml.contains("/diagrams/")
+        || raw_xml.contains("diagramLayout");
+    if is_diagram {
+        // Try to extract diagram type from dgm:relIds or layout references
+        let diagram_type = extract_diagram_type(raw_xml);
+        return format!("diagram:{diagram_type}");
+    }
+
+    // Q7 Step 2: Detect charts via c:chart element or /chart namespace
+    let is_chart = raw_xml.contains("c:chart") || raw_xml.contains("/chart");
+    if is_chart {
+        let chart_type = extract_chart_type(raw_xml);
+        return format!("chart:{chart_type}");
+    }
+
+    "drawing".to_string()
+}
+
+/// Extract the diagram type from SmartArt raw XML.
+///
+/// Looks for layout hints in the `dgm:` namespace elements. Common diagram types
+/// include hierarchy, cycle, process, relationship, matrix, pyramid.
+fn extract_diagram_type(raw_xml: &str) -> &str {
+    // dgm:relIds often references layout definitions; look for known layout URIs
+    // or descriptive attributes
+    if raw_xml.contains("hierarchy") || raw_xml.contains("Hierarchy") {
+        return "hierarchy";
+    }
+    if raw_xml.contains("cycle") || raw_xml.contains("Cycle") {
+        return "cycle";
+    }
+    if raw_xml.contains("process") || raw_xml.contains("Process") {
+        return "process";
+    }
+    if raw_xml.contains("radial") || raw_xml.contains("Radial") {
+        return "radial";
+    }
+    if raw_xml.contains("matrix") || raw_xml.contains("Matrix") {
+        return "matrix";
+    }
+    if raw_xml.contains("pyramid") || raw_xml.contains("Pyramid") {
+        return "pyramid";
+    }
+    if raw_xml.contains("venn") || raw_xml.contains("Venn") {
+        return "venn";
+    }
+    "generic"
+}
+
+/// Extract the chart type from a chart reference in raw XML.
+///
+/// Looks for `c:barChart`, `c:pieChart`, `c:lineChart`, etc. within the raw XML.
+/// Since the actual chart XML is in a separate part, we can only detect the type
+/// if it's referenced inline; otherwise returns "generic".
+fn extract_chart_type(raw_xml: &str) -> &str {
+    // Check for specific chart type elements (these appear in the chart part XML,
+    // but some documents include type hints in the drawing reference)
+    if raw_xml.contains("barChart") || raw_xml.contains("bar3DChart") {
+        return "bar";
+    }
+    if raw_xml.contains("pieChart") || raw_xml.contains("pie3DChart") {
+        return "pie";
+    }
+    if raw_xml.contains("lineChart") || raw_xml.contains("line3DChart") {
+        return "line";
+    }
+    if raw_xml.contains("areaChart") || raw_xml.contains("area3DChart") {
+        return "area";
+    }
+    if raw_xml.contains("scatterChart") {
+        return "scatter";
+    }
+    if raw_xml.contains("doughnutChart") {
+        return "doughnut";
+    }
+    if raw_xml.contains("radarChart") {
+        return "radar";
+    }
+    if raw_xml.contains("surfaceChart") || raw_xml.contains("surface3DChart") {
+        return "surface";
+    }
+    if raw_xml.contains("stockChart") {
+        return "stock";
+    }
+    if raw_xml.contains("bubbleChart") {
+        return "bubble";
+    }
+    "generic"
 }
 
 /// Create a Run node with accumulated text content.
@@ -4676,10 +4780,10 @@ mod tests {
         let drawing = doc.node(para.children[0]).unwrap();
         assert_eq!(drawing.node_type, NodeType::Drawing);
 
-        // Should have shape type "drawing"
+        // Should have shape type "chart:generic" (Q7: chart type detection)
         assert_eq!(
             drawing.attributes.get_string(&AttributeKey::ShapeType),
-            Some("drawing")
+            Some("chart:generic")
         );
 
         // Should have raw XML containing the chart reference

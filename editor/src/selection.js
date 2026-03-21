@@ -203,11 +203,18 @@ export function getCursorOffset(el) {
 }
 
 export function setCursorAtOffset(el, charOffset) {
+  if (!el) return;
+
+  // Make sure the page content is focused so cursor is visible
+  const content = el.closest('.page-content');
+  if (content && document.activeElement !== content) content.focus();
+
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
   let counted = 0, node;
   while ((node = walker.nextNode())) {
-    // Skip text inside non-editable elements (list markers, etc.)
+    // Skip text inside non-editable elements (list markers, peer cursors, etc.)
     if (isInsideNonEditable(node, el)) continue;
+    if (node.parentElement?.closest?.('.peer-cursor')) continue;
     const chars = Array.from(node.textContent);
     if (counted + chars.length >= charOffset) {
       const range = document.createRange();
@@ -221,8 +228,14 @@ export function setCursorAtOffset(el, charOffset) {
     }
     counted += chars.length;
   }
+
+  // Empty paragraph — ensure there's a BR for the cursor to sit on
+  if (!el.firstChild) {
+    el.appendChild(document.createElement('br'));
+  }
   const range = document.createRange();
-  range.selectNodeContents(el); range.collapse(false);
+  range.selectNodeContents(el);
+  range.collapse(charOffset === 0);
   const sel = window.getSelection();
   sel.removeAllRanges(); sel.addRange(range);
 }

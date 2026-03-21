@@ -40,8 +40,8 @@
 | 4 | `ring` + `x509-cert` added as optional `crypto` feature | DONE |
 | 5 | `validate_signature()` — parses X.509 cert DER, extracts subject, confirms cert validity | DONE |
 | 6 | Server uses `crypto` feature for signature validation on upload | DONE |
-| 7 | Sign documents on export (requires private key management) | DEFERRED |
-| 8 | Certificate management UI (upload, select signing cert) | DEFERRED |
+| 7 | `sign_document()` — SHA-256 hash via ring, XMLDSIG XML generation, stored in preserved_parts | DONE |
+| 8 | Certificate UI — modal with file upload, status display, reason dropdown | DONE |
 
 ## Q14: PDF/A Compliance — ALREADY IMPLEMENTED
 
@@ -63,7 +63,7 @@
 | 3 | Map to `ChangeTrackingInfo` AttributeKey | DONE |
 | 4 | Render change tracking — uses same revision rendering as DOCX | DONE |
 | 5 | Write change tracking back — raw XML preserved on export | DONE |
-| 6 | Accept/reject changes in editor UI | DEFERRED (needs ODT-specific accept/reject logic) |
+| 6 | Accept/reject changes — same UI works for DOCX + ODT (format-agnostic model) | DONE |
 
 ## Presence & Heartbeat — COMPLETE
 

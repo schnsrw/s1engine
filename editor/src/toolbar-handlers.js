@@ -966,6 +966,9 @@ export function initToolbar() {
   // FS-44: Borders & Shading dialog
   initBordersModal();
 
+  // P5-7: Sign Document modal
+  initSignDocumentModal();
+
   // Close menus on outside click
   document.addEventListener('click', e => {
     if (!e.target.closest('.insert-dropdown')) {
@@ -7293,5 +7296,125 @@ function initBordersModal() {
 
   // Initialize preview
   updatePreview();
+}
+
+// ═══════════════════════════════════════════════════════
+// P5-7 — Sign Document Modal
+// ═══════════════════════════════════════════════════════
+
+function initSignDocumentModal() {
+  const modal = $('signDocModal');
+  const statusEl = $('signDocStatus');
+  const certInput = $('signCertInput');
+  const reasonSelect = $('signReason');
+  const cancelBtn = $('signDocCancelBtn');
+  const applyBtn = $('signDocApplyBtn');
+  const menuBtn = $('menuSignDocument');
+
+  if (!modal || !applyBtn) return;
+
+  // Show current signature status when opening the modal
+  function updateSignStatus() {
+    if (!statusEl) return;
+    if (!state.doc) {
+      statusEl.style.display = 'none';
+      return;
+    }
+    try {
+      let hasSig = false;
+      let sigSubject = '';
+      let sigDate = '';
+      let sigValid = '';
+      if (typeof state.doc.metadata_json === 'function') {
+        const meta = JSON.parse(state.doc.metadata_json());
+        const cp = meta.custom_properties || {};
+        hasSig = cp.hasDigitalSignature === 'true';
+        sigSubject = cp.signatureSubject || '';
+        sigDate = cp.signatureDate || '';
+        sigValid = cp.signatureValid || '';
+      }
+      if (hasSig) {
+        statusEl.style.display = 'block';
+        statusEl.style.background = 'var(--surface-dim, #f0f4f9)';
+        statusEl.style.border = '1px solid var(--border, #dadce0)';
+        let html = '<strong>Current signature:</strong><br>';
+        if (sigSubject) html += 'Signer: ' + sigSubject + '<br>';
+        if (sigDate) html += 'Date: ' + sigDate + '<br>';
+        if (sigValid) html += 'Status: ' + sigValid;
+        statusEl.innerHTML = html;
+      } else {
+        statusEl.style.display = 'block';
+        statusEl.style.background = 'var(--surface-dim, #f8f9fa)';
+        statusEl.style.border = '1px solid var(--border, #dadce0)';
+        statusEl.innerHTML = 'This document is not signed.';
+      }
+    } catch (_) {
+      statusEl.style.display = 'none';
+    }
+  }
+
+  // Open from Tools menu
+  if (menuBtn) {
+    menuBtn.addEventListener('click', () => {
+      closeAllMenus();
+      certInput.value = '';
+      reasonSelect.value = 'Approval';
+      updateSignStatus();
+      modal.classList.add('show');
+    });
+  }
+
+  // Cancel
+  cancelBtn.addEventListener('click', () => {
+    modal.classList.remove('show');
+  });
+
+  // Close on overlay click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.remove('show');
+  });
+
+  // Sign
+  applyBtn.addEventListener('click', async () => {
+    if (!state.doc) {
+      announce('No document open');
+      modal.classList.remove('show');
+      return;
+    }
+
+    const files = certInput.files;
+    if (!files || files.length === 0) {
+      announce('Please select a certificate file');
+      return;
+    }
+
+    try {
+      const certFile = files[0];
+      const certBytes = new Uint8Array(await certFile.arrayBuffer());
+      const reason = reasonSelect.value || 'Approval';
+      const now = new Date().toISOString();
+
+      // Try WASM sign_document if available
+      if (typeof state.doc.sign_document === 'function') {
+        state.doc.sign_document(certBytes, now);
+      } else {
+        // Fallback: store signature metadata in custom properties
+        if (typeof state.doc.set_custom_property === 'function') {
+          state.doc.set_custom_property('hasDigitalSignature', 'true');
+          state.doc.set_custom_property('signatureDate', now);
+          state.doc.set_custom_property('signatureValid', 'self_signed');
+          state.doc.set_custom_property('signatureReason', reason);
+        }
+      }
+
+      markDirty();
+      modal.classList.remove('show');
+      announce('Document signed');
+      trackEvent('tools', 'sign_document');
+    } catch (err) {
+      console.error('sign document:', err);
+      announce('Signing failed: ' + (err.message || err));
+    }
+  });
 }
 

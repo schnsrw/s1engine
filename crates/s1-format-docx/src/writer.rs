@@ -232,6 +232,85 @@ pub fn write(doc: &DocumentModel) -> Result<Vec<u8>, DocxError> {
     Ok(cursor.into_inner())
 }
 
+/// Sign a document by computing its SHA-256 hash and embedding a digital
+/// signature entry (`_xmlsignatures/sig1.xml`) into the document model.
+///
+/// This creates a self-signed signature: it embeds the certificate and content
+/// hash but does not perform cryptographic signing with a private key (the
+/// `<SignatureValue/>` element is left empty). Full XMLDSIG signing with a
+/// private key requires canonicalization of the `SignedInfo` element, which
+/// is outside the scope of this library.
+///
+/// After calling this function, call [`write()`] to produce the final DOCX bytes
+/// with the signature embedded.
+///
+/// # Arguments
+///
+/// * `doc` - The document model to sign (will be mutated to add signature parts)
+/// * `cert_der` - DER-encoded X.509 certificate bytes
+/// * `signing_time` - ISO 8601 timestamp string (e.g., "2025-06-15T10:30:00Z")
+///
+/// # Errors
+///
+/// Returns a [`DocxError`] if the signature XML cannot be generated.
+#[cfg(feature = "crypto")]
+pub fn sign_document(
+    doc: &mut DocumentModel,
+    cert_der: &[u8],
+    signing_time: &str,
+) -> Result<(), DocxError> {
+    use ring::digest;
+
+    // Compute SHA-256 hash of the document content (serialised without signatures)
+    let doc_bytes = write(doc)?;
+    let hash = digest::digest(&digest::SHA256, &doc_bytes);
+
+    // Generate the XMLDSIG signature XML
+    let sig_xml =
+        crate::signature_parser::create_signature_xml(hash.as_ref(), cert_der, signing_time)
+            .map_err(|e| {
+                DocxError::InvalidStructure(format!("signature generation failed: {e}"))
+            })?;
+
+    // Generate the relationships XML for the signature
+    let rels_xml = crate::signature_parser::create_signature_rels_xml();
+
+    // Store signature entries in preserved_parts so the normal writer picks them up
+    doc.add_preserved_part("_xmlsignatures/sig1.xml", sig_xml.into_bytes());
+    doc.add_preserved_part(
+        "_xmlsignatures/_rels/origin.sigs.rels",
+        rels_xml.into_bytes(),
+    );
+
+    // Parse the signature to extract subject info for metadata
+    let info = crate::signature_parser::parse_signature_xml(
+        std::str::from_utf8(
+            doc.preserved_parts()
+                .get("_xmlsignatures/sig1.xml")
+                .unwrap_or(&Vec::new()),
+        )
+        .unwrap_or(""),
+    );
+
+    // Update document metadata with signature info
+    doc.metadata_mut()
+        .custom_properties
+        .insert("hasDigitalSignature".to_string(), "true".to_string());
+    doc.metadata_mut()
+        .custom_properties
+        .insert("signatureDate".to_string(), signing_time.to_string());
+    if let Some(subject) = info.subject {
+        doc.metadata_mut()
+            .custom_properties
+            .insert("signatureSubject".to_string(), subject);
+    }
+    doc.metadata_mut()
+        .custom_properties
+        .insert("signatureValid".to_string(), "self_signed".to_string());
+
+    Ok(())
+}
+
 /// Entry for a header/footer part to be written into the ZIP.
 struct HfPartEntry {
     node_id: s1_model::NodeId,
@@ -3105,6 +3184,110 @@ mod tests {
         assert!(
             sig_entries.is_empty(),
             "unsigned document should have no signature entries, found: {sig_entries:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "crypto")]
+    fn sign_document_embeds_signature() {
+        let mut doc = make_simple_doc("Sign me");
+        let fake_cert = b"fake-certificate-der-bytes";
+        let time = "2025-09-01T10:00:00Z";
+
+        sign_document(&mut doc, fake_cert, time).unwrap();
+
+        // Verify metadata was updated
+        let props = &doc.metadata().custom_properties;
+        assert_eq!(
+            props.get("hasDigitalSignature").map(|s| s.as_str()),
+            Some("true")
+        );
+        assert_eq!(props.get("signatureDate").map(|s| s.as_str()), Some(time));
+        assert_eq!(
+            props.get("signatureValid").map(|s| s.as_str()),
+            Some("self_signed")
+        );
+
+        // Verify preserved_parts has signature entries
+        assert!(doc
+            .preserved_parts()
+            .contains_key("_xmlsignatures/sig1.xml"));
+        assert!(doc
+            .preserved_parts()
+            .contains_key("_xmlsignatures/_rels/origin.sigs.rels"));
+
+        // Write and verify the ZIP contains the signature entries
+        let bytes = write(&doc).unwrap();
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let sig_entries: Vec<String> = (0..archive.len())
+            .filter_map(|i| {
+                let f = archive.by_index_raw(i).ok()?;
+                let name = f.name().to_string();
+                if name.starts_with("_xmlsignatures/") {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            sig_entries.len() >= 2,
+            "signed document should have signature entries, found: {sig_entries:?}"
+        );
+    }
+
+    #[test]
+    fn roundtrip_custom_xml_parts() {
+        let mut doc = make_simple_doc("Custom XML test");
+        let item_data = b"<root><data>test</data></root>".to_vec();
+        let props_data = b"<p:properties xmlns:p=\"http://example.com\"/>".to_vec();
+        doc.add_preserved_part("customXml/item1.xml", item_data.clone());
+        doc.add_preserved_part("customXml/itemProps1.xml", props_data.clone());
+
+        let bytes = write(&doc).unwrap();
+
+        // Verify the custom XML parts exist in the ZIP
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let custom_entries: Vec<_> = (0..archive.len())
+            .filter_map(|i| {
+                let f = archive.by_index_raw(i).ok()?;
+                let name = f.name().to_string();
+                if name.starts_with("customXml/") {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            custom_entries.len(),
+            2,
+            "should have 2 custom XML entries, found: {custom_entries:?}"
+        );
+
+        // Read back via the reader and verify preserved parts survive round-trip
+        let doc2 = crate::read(&bytes).unwrap();
+        assert!(
+            doc2.has_preserved_part("customXml/item1.xml"),
+            "item1.xml should be preserved in round-trip"
+        );
+        assert!(
+            doc2.has_preserved_part("customXml/itemProps1.xml"),
+            "itemProps1.xml should be preserved in round-trip"
+        );
+        assert_eq!(
+            doc2.preserved_parts().get("customXml/item1.xml").unwrap(),
+            &item_data,
+            "item1.xml content should match original"
+        );
+        assert_eq!(
+            doc2.preserved_parts()
+                .get("customXml/itemProps1.xml")
+                .unwrap(),
+            &props_data,
+            "itemProps1.xml content should match original"
         );
     }
 }

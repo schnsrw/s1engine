@@ -198,6 +198,14 @@ fn validate_jwt(token: &str, config: &AuthConfig) -> Result<AuthUser, String> {
         if now > exp {
             return Err("Token expired".to_string());
         }
+    } else {
+        // No `exp` claim — reject if S1_REQUIRE_JWT_EXP=true
+        let require_exp = std::env::var("S1_REQUIRE_JWT_EXP")
+            .unwrap_or_default()
+            .eq_ignore_ascii_case("true");
+        if require_exp {
+            return Err("Token missing required 'exp' claim".to_string());
+        }
     }
 
     // Extract claims

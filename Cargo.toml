@@ -15,6 +15,7 @@ members = [
     "crates/s1-text",
     "crates/s1-crdt",
     "crates/s1-format-md",
+    "crates/s1-format-xlsx",
     "crates/s1engine",
     "ffi/wasm",
     "ffi/c",
