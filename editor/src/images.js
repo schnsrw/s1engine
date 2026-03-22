@@ -281,7 +281,7 @@ function doResize(e) {
   if (r.handle === 'br' || r.handle === 'tl' || r.handle === 'tr' || r.handle === 'bl') {
     newH = newW * r.ratio;
   }
-  newW = Math.max(20, newW); newH = Math.max(20, newH);
+  newW = Math.max(20, Math.min(2000, newW)); newH = Math.max(20, Math.min(2000, newH));
   r.img.style.width = newW + 'px';
   r.img.style.height = newH + 'px';
   // E-08: Throttled persist during drag so resize is not lost on unexpected close
@@ -294,11 +294,28 @@ function doResize(e) {
 }
 
 function stopResize() {
+  if (!state.resizing) return;
   document.removeEventListener('mousemove', doResize);
   document.removeEventListener('mouseup', stopResize);
-  // E-08: Clear throttle timer on mouseup (deselectImage will do the final persist)
+  // E-08: Clear throttle timer on mouseup
   clearTimeout(_resizePersistTimer);
   _resizePersistTimer = null;
+  // Bug R5: Immediately persist final dimensions so they survive rapid resize + page close
+  const img = state.resizing.img;
+  if (img) {
+    const nodeEl = img.closest('[data-node-id]');
+    if (nodeEl && state.doc) {
+      const imgNodeId = nodeEl.dataset.nodeId;
+      if (imgNodeId) {
+        const wPt = img.offsetWidth * 0.75; // px to pt
+        const hPt = img.offsetHeight * 0.75;
+        try {
+          state.doc.resize_image(imgNodeId, wPt, hPt);
+          state.dirty = true;
+        } catch (_) {}
+      }
+    }
+  }
   state.resizing = null;
 }
 

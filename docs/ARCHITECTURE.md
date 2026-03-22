@@ -28,9 +28,9 @@
 |        |                                                     |
 |  +-----v---------------------------------------------------+ |
 |  |   s1-crdt           |         Format I/O Layer          | |
-|  |  Fugue text CRDT    | docx | odt | pdf  | txt           | |
-|  |  Tree/Attr/Meta     | R/W  | R/W | Exp  | R/W           | |
-|  +----------------------+------+-----+------+------+-------+ |
+|  |  Fugue text CRDT    | docx | odt | pdf  | txt | xlsx   | |
+|  |  Tree/Attr/Meta     | R/W  | R/W | Exp  | R/W | R/W    | |
+|  +----------------------+------+-----+------+-----+-------+ |
 |                                                              |
 |  +----------------------------------------------------------+|
 |  |              s1-text (Text Processing -- Pure Rust)       ||
@@ -120,6 +120,17 @@ s1engine/
 |   |       |-- lib.rs
 |   |       |-- reader.rs
 |   |       |-- writer.rs
+|   |       +-- error.rs
+|   |
+|   |-- s1-format-xlsx/           # XLSX/ODS/CSV spreadsheet reader/writer
+|   |   +-- src/
+|   |       |-- lib.rs
+|   |       |-- reader.rs         # XLSX ZIP/XML reader
+|   |       |-- writer.rs         # XLSX ZIP packaging
+|   |       |-- shared_strings.rs # Shared string table
+|   |       |-- styles.rs         # Number formats, fonts, fills, borders
+|   |       |-- formula.rs        # Formula tokenizer, parser, evaluator (60+ functions)
+|   |       |-- ods.rs            # ODS (ODF spreadsheet) reader/writer
 |   |       +-- error.rs
 |   |
 |   |-- s1-convert/               # Format conversion pipelines
@@ -311,13 +322,13 @@ When opening a document from bytes, s1engine auto-detects the format:
 
 | Magic Bytes | Format |
 |---|---|
-| `PK\x03\x04` (ZIP header) | DOCX or ODT (disambiguate by ZIP contents) |
-| `%PDF` | PDF (not supported for reading) |
+| `PK\x03\x04` (ZIP header) | DOCX, ODT, XLSX, or ODS (disambiguate by ZIP contents) |
+| `%PDF` | PDF (viewing via PDF.js in Rudra Office) |
 | `\xD0\xCF\x11\xE0` (OLE2) | Legacy DOC -- route to converter |
-| UTF-8 BOM or printable ASCII | TXT |
+| UTF-8 BOM or printable ASCII | TXT or CSV (auto-detect delimiter) |
 | UTF-16 BOM | TXT (with encoding conversion) |
 
-For ZIP files, check for `word/document.xml` (DOCX) or `content.xml` + `META-INF/manifest.xml` (ODT).
+For ZIP files, check for `word/document.xml` (DOCX), `content.xml` + `META-INF/manifest.xml` (ODT or ODS), or `xl/workbook.xml` (XLSX).
 
 ## Dependency Graph
 
@@ -331,6 +342,7 @@ s1engine (facade)
 |-- s1-format-odt     (depends on: s1-model, quick-xml, zip)
 |-- s1-format-pdf     (depends on: s1-model, s1-layout, s1-text, pdf-writer, subsetter, image)
 |-- s1-format-txt     (depends on: s1-model, encoding_rs)
+|-- s1-format-xlsx    (depends on: s1-model, quick-xml, zip)
 |-- s1-convert        (depends on: s1-format-docx, s1-format-odt, cfb)
 +-- s1-text           (depends on: s1-model, rustybuzz, ttf-parser, fontdb, unicode-bidi, unicode-linebreak)
 ```

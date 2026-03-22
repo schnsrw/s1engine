@@ -9,7 +9,10 @@ let _errorCount = 0;
 let _serverErrorCount = 0;
 setInterval(() => { _serverErrorCount = 0; }, 60000);
 function sendErrorToServer(msg) {
-    if (_serverErrorCount >= 10) return;
+    if (_serverErrorCount >= 10) {
+        console.warn('[error-tracking] Rate limit reached, dropping:', msg);
+        return;
+    }
     _serverErrorCount++;
     fetch('/api/v1/errors', {
         method: 'POST',

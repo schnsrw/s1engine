@@ -8,6 +8,7 @@ import { showToast } from './toolbar-handlers.js';
 import { trackEvent } from './analytics.js';
 import { ensureDocumentFonts, getFontDb } from './fonts.js';
 import { closeFindBar } from './find.js';
+import { addFileTab, detectFileTypeFromName } from './tabs.js';
 
 let detect_format_fn = null;
 
@@ -18,25 +19,28 @@ const AUTOSAVE_INTERVAL = 30000; // 30 seconds
 const DB_NAME = 's1Autosave';
 const DB_VERSION = 2;
 
-// ─── CRC32 Checksum ──────────────────────────────
-// Lightweight CRC32 for data integrity verification on save/load.
-const _crc32Table = (() => {
-  const t = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    t[i] = c;
+// ─── Document Hash ───────────────────────────────
+// SHA-256 hash via Web Crypto API for data integrity verification on save/load.
+// SHA-256 provides strong collision resistance, far superior to CRC32.
+// Falls back to synchronous FNV-1a if crypto.subtle is unavailable.
+async function computeHash(data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (_) {
+    // Fallback: FNV-1a 32-bit (synchronous, for environments without crypto.subtle)
+    return _fnv1aFallback(bytes);
   }
-  return t;
-})();
+}
 
-function crc32(bytes) {
-  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  let crc = 0xFFFFFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc = _crc32Table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+function _fnv1aFallback(bytes) {
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= bytes[i];
+    hash = Math.imul(hash, 0x01000193); // FNV prime
   }
-  return (crc ^ 0xFFFFFFFF) >>> 0;
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 // ─── BroadcastChannel Multi-Tab Coordination ─────
@@ -91,13 +95,13 @@ function startAutosave() {
   }, AUTOSAVE_INTERVAL);
 }
 
-function doAutosave() {
+async function doAutosave() {
   if (!state.doc) return;
   try {
     syncAllText();
     const bytes = state.doc.export('docx');
     const name = $('docName').value || 'Untitled Document';
-    const checksum = crc32(bytes);
+    const checksum = await computeHash(bytes);
     openAutosaveDB().then(db => {
       // Atomic write: write to temp key first, then swap to 'current'
       const tx = db.transaction('documents', 'readwrite');
@@ -119,11 +123,11 @@ function doAutosave() {
         // Write to temp key first (atomic write pattern)
         const tempId = '_temp_' + now;
         store.put({
-          id: tempId, name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum
+          id: tempId, name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum, byteLength: bytes.length
         });
         // Now write to 'current' (same transaction = atomic)
         store.put({
-          id: 'current', name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum
+          id: 'current', name, bytes, timestamp: now, tabId: state.tabId, commentReplies, checksum, byteLength: bytes.length
         });
         // Clean up temp key
         store.delete(tempId);
@@ -151,18 +155,25 @@ function doAutosave() {
       }
     });
   } catch (e) {
-    console.warn('Autosave error:', e);
+    if (e.name === 'QuotaExceededError' || (e.message && e.message.includes('quota'))) {
+      showToast('Storage full — autosave disabled. Please export your work.', 'error', 10000);
+      clearInterval(state.autosaveTimer);
+      state.autosaveTimer = null;
+    } else {
+      console.warn('[autosave] Error:', e);
+    }
   }
 }
 
 /**
- * Verify a saved document entry's integrity using its CRC32 checksum.
+ * Verify a saved document entry's integrity using its SHA-256 hash.
  * Returns true if valid or if no checksum exists (backwards compatibility).
+ * Supports both legacy CRC32 (number) and new SHA-256 (string) checksums.
  */
-export function verifyChecksum(entry) {
+export async function verifyChecksum(entry) {
   if (!entry || !entry.bytes) return false;
   if (entry.checksum === undefined || entry.checksum === null) return true; // no checksum = legacy entry
-  const computed = crc32(entry.bytes);
+  const computed = await computeHash(entry.bytes);
   return computed === entry.checksum;
 }
 
@@ -320,11 +331,11 @@ export function checkAutoRecover() {
     return new Promise(resolve => {
       const tx = db.transaction('documents', 'readonly');
       const req = tx.objectStore('documents').get('current');
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const entry = req.result || null;
         if (entry) {
-          // Verify checksum integrity
-          entry._checksumValid = verifyChecksum(entry);
+          // Verify checksum integrity (async SHA-256)
+          entry._checksumValid = await verifyChecksum(entry);
         }
         resolve(entry);
       };
@@ -366,6 +377,9 @@ function resetEditorState() {
   state._typingBatch = null;
   state.undoHistory = [];
   state.undoHistoryPos = 0;
+  // Clear comments state
+  state.commentReplies = [];
+  if (state.resolvedComments) state.resolvedComments.clear();
   // Clear collaboration
   state.internalClipboard = null;
   state.selectedImg = null;
@@ -397,7 +411,7 @@ function resetEditorState() {
     state.spreadsheetView.destroy();
     state.spreadsheetView = null;
   }
-  // Clean up PDF viewer (but preserve annotations until new PDF is opened)
+  // Clean up PDF viewer and annotations
   if (state.pdfViewer) {
     state.pdfViewer.destroy();
     state.pdfViewer = null;
@@ -406,6 +420,10 @@ function resetEditorState() {
   state.pdfCurrentPage = 1;
   state.pdfZoom = 1.0;
   state.pdfTool = 'select';
+  state.pdfAnnotations = [];
+  state.pdfTextEdits = [];
+  state.pdfModified = false;
+  state.pdfFormFields = [];
 }
 
 export function newDocument() {
@@ -427,6 +445,9 @@ export function newDocument() {
   updateStatusBar();
   startAutosave();
   startVersionTimer();
+
+  // Phase 6: Add tab for the new document
+  addFileTab('Untitled Document', 'document', null);
 }
 
 /**
@@ -458,6 +479,18 @@ export async function openFile(bytes, name) {
 }
 
 async function _openFileImpl(bytes, name) {
+
+  // Reject files larger than 100MB
+  if (bytes && bytes.length > 100 * 1024 * 1024) {
+    showToast('File too large (max 100MB)', 'error');
+    return;
+  }
+
+  // Reject empty / zero-byte files
+  if (!bytes || bytes.length === 0) {
+    showToast('File is empty or corrupted', 'error');
+    return;
+  }
 
   const ext = name?.split('.').pop()?.toLowerCase();
 
@@ -507,6 +540,9 @@ async function _openFileImpl(bytes, name) {
           pages.updateActiveThumbnail(pageNum);
         });
       } catch (err) { console.warn('PDF tools init:', err); }
+      // Phase 6: Add tab for the opened PDF
+      const displayName = name ? name.replace(/\.[^.]+$/, '') : 'PDF Document';
+      addFileTab(displayName, 'pdf', bytes);
     } catch (e) {
       console.error('PDF open error:', e);
       // If PDF.js fails, show a clear error and reset UI
@@ -548,6 +584,9 @@ async function _openFileImpl(bytes, name) {
         info.textContent = `${cellCount.toLocaleString()} cells`;
       }
       $('statusFormat').textContent = state.currentFormat;
+      // Phase 6: Add tab for the opened spreadsheet
+      const displayName = name ? name.replace(/\.[^.]+$/, '') : 'Untitled Spreadsheet';
+      addFileTab(displayName, 'spreadsheet', bytes);
     } catch (e) {
       console.error('Spreadsheet open error:', e);
       showToast('Failed to open spreadsheet: ' + e.message, 'error');
@@ -565,13 +604,13 @@ async function _openFileImpl(bytes, name) {
     state.currentFormat = fmt.toUpperCase();
     activateEditor();
 
-    // Load fonts used in the document, then re-render with proper fonts
-    ensureDocumentFonts(state.doc).then(loaded => {
-      if (loaded > 0) {
-        state._layoutDirty = true;
-        renderDocument();
-      }
-    }).catch(() => {});
+    // Load fonts used in the document before rendering so glyphs are correct
+    try {
+      const loaded = await ensureDocumentFonts(state.doc);
+      if (loaded > 0) state._layoutDirty = true;
+    } catch (_) {
+      // Font loading failed — render with fallback fonts
+    }
 
     renderDocument();
     renderRuler(); // Update ruler with actual document page dimensions
@@ -594,6 +633,11 @@ async function _openFileImpl(bytes, name) {
     updateDirtyIndicator();
     startAutosave();
     startVersionTimer();
+
+    // Phase 6: Add tab for the opened document
+    const displayName = name ? name.replace(/\.[^.]+$/, '') : 'Document';
+    const fileType = detectFileTypeFromName(name || 'document.txt');
+    addFileTab(displayName, fileType, bytes);
   } catch (e) {
     showToast('Failed to open: ' + e.message, 'error');
     console.error(e);
@@ -617,12 +661,17 @@ export function exportDoc(format) {
     syncAllText();
     trackEvent('export', format);
     if (format === 'pdf') {
-      const fontDb = getFontDb();
-      const url = (fontDb && fontDb.font_count() > 0)
-        ? doc.to_pdf_data_url_with_fonts(fontDb)
-        : doc.to_pdf_data_url();
-      const a = document.createElement('a');
-      a.href = url; a.download = ($('docName').value || 'document') + '.pdf'; a.click();
+      try {
+        const fontDb = getFontDb();
+        const url = (fontDb && fontDb.font_count() > 0)
+          ? doc.to_pdf_data_url_with_fonts(fontDb)
+          : doc.to_pdf_data_url();
+        const a = document.createElement('a');
+        a.href = url; a.download = ($('docName').value || 'document') + '.pdf'; a.click();
+      } catch (e) {
+        showToast('PDF export failed: ' + e.message, 'error');
+        console.error('PDF export error:', e);
+      }
       return;
     }
     const bytes = doc.export(format);
@@ -630,7 +679,7 @@ export function exportDoc(format) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = ($('docName').value || 'document') + '.' + format; a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => { URL.revokeObjectURL(url); }, 200);
   } catch (e) { showToast('Export failed: ' + e.message, 'error'); } finally { removeLoadingOverlay(overlay); }
 }
 
@@ -660,18 +709,40 @@ export function switchView(view) {
   }
 
   // ED2-20: Destroy PDF viewer (and its scroll handler) when switching away from PDF view
-  if (state.currentView === 'pdf' && view !== 'pdf' && state.pdfViewer) {
-    state.pdfViewer.destroy();
-    state.pdfViewer = null;
+  if (state.currentView === 'pdf' && view !== 'pdf') {
+    if (state.pdfViewer) {
+      state.pdfViewer.destroy();
+      state.pdfViewer = null;
+    }
+    // I3: Clear PDF annotations/edits/form state when leaving PDF view
+    state.pdfAnnotations = [];
+    state.pdfTextEdits = [];
+    state.pdfFormFields = [];
   }
 
   // Destroy spreadsheet view when switching away
-  if (state.currentView === 'spreadsheet' && view !== 'spreadsheet' && state.spreadsheetView) {
-    state.spreadsheetView.destroy();
-    state.spreadsheetView = null;
+  if (state.currentView === 'spreadsheet' && view !== 'spreadsheet') {
+    if (state.spreadsheetView) {
+      state.spreadsheetView.destroy();
+      state.spreadsheetView = null;
+    }
+    // I5: Reset format state and clear active toolbar buttons when leaving spreadsheet view
+    // This prevents bold/italic/underline active states from bleeding into the doc toolbar.
+    state.currentFormat = '';
+    document.querySelectorAll('.ss-toolbar .tb-btn.active').forEach(b => b.classList.remove('active'));
   }
 
   state.currentView = view;
+
+  // I1: Update AI context indicator when view changes
+  if (state.aiPanelOpen) {
+    const chip = document.getElementById('aiContextLabel');
+    if (chip) {
+      if (view === 'spreadsheet') chip.textContent = 'Spreadsheet';
+      else if (view === 'pdf') chip.textContent = 'PDF Viewer';
+      else chip.textContent = state.currentFormat || 'Document';
+    }
+  }
   // Show the editor wrapper (which contains pages panel + canvas + comments panel)
   const wrapper = $('editorWrapper');
   if (wrapper) wrapper.classList.toggle('show', view === 'editor');
@@ -797,6 +868,8 @@ export function initFileHandlers() {
         const info = $('statusInfo');
         if (info) info.textContent = '0 cells';
         $('statusFormat').textContent = 'CSV';
+        // Phase 6: Add tab for blank spreadsheet
+        addFileTab('Untitled Spreadsheet', 'spreadsheet', null);
       } catch (e) {
         console.error('Spreadsheet open error:', e);
         showToast('Failed to open spreadsheet: ' + e.message, 'error');

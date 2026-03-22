@@ -95,6 +95,8 @@ export class PdfViewer {
     } else {
       newScale = parseFloat(scaleOrMode);
       if (isNaN(newScale) || newScale <= 0) return;
+      // Clamp manual zoom input to 25%–500% (0.25–5.0)
+      newScale = Math.max(0.25, Math.min(5.0, newScale));
     }
     this._scale = newScale;
     state.pdfZoom = newScale;

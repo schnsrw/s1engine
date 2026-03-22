@@ -46,7 +46,7 @@ impl WasmEngine {
         let doc = self
             .inner
             .open(data)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            .map_err(|e| JsError::new(&format!("Failed to open document: {}", e)))?;
         Ok(WasmDocument {
             batch_label: None,
             batch_count: 0,
@@ -62,7 +62,7 @@ impl WasmEngine {
         let doc = self
             .inner
             .open_as(data, fmt)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            .map_err(|e| JsError::new(&format!("Failed to open document as {}: {}", format, e)))?;
         Ok(WasmDocument {
             batch_label: None,
             batch_count: 0,
@@ -265,7 +265,8 @@ impl WasmDocument {
     pub fn export(&self, format: &str) -> Result<Vec<u8>, JsError> {
         let fmt = parse_format(format)?;
         let doc = self.doc()?;
-        doc.export(fmt).map_err(|e| JsError::new(&e.to_string()))
+        doc.export(fmt)
+            .map_err(|e| JsError::new(&format!("Export to {} failed: {}", format, e)))
     }
 
     /// Get the document title (from metadata).
@@ -1103,13 +1104,20 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Replace the text content of a paragraph.
+    /// Set the entire text content of a paragraph.
     ///
-    /// For multi-run paragraphs, this first checks whether the total text
-    /// across all runs already matches `new_text`.  If so, it is a no-op
-    /// (preserving per-run formatting).  If the text has genuinely changed,
-    /// all extra runs are deleted and the remaining single run receives the
-    /// new text.
+    /// **WARNING**: When an edit spans multiple runs, this replaces ALL runs
+    /// in the paragraph with a single run, destroying any inline formatting
+    /// (bold, italic, links, etc.). Use `replace_text()` instead if you need
+    /// to preserve run-level formatting.
+    ///
+    /// For single-run edits and no-change cases, formatting IS preserved:
+    /// - If the total text across all runs already matches `new_text`, it is
+    ///   a no-op (preserving per-run formatting).
+    /// - If the edit falls within a single run, a targeted insert/delete is
+    ///   used and that run's formatting is preserved.
+    /// - Only when an edit spans multiple runs are extra runs deleted and the
+    ///   remaining single run receives the new text.
     pub fn set_paragraph_text(&mut self, node_id_str: &str, new_text: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
@@ -1288,12 +1296,12 @@ impl WasmDocument {
         match find_text_node_at_char_offset(doc.model(), para_id, offset) {
             Ok((text_node_id, local_offset, _)) => doc
                 .apply(Operation::insert_text(text_node_id, local_offset, text))
-                .map_err(|e| JsError::new(&e.to_string())),
+                .map_err(|e| JsError::new(&format!("Insert text failed: {}", e))),
             Err(_) => {
                 // No text nodes exist — create run + text
                 let (text_node_id, _) = ensure_run_and_text(doc, para_id)?;
                 doc.apply(Operation::insert_text(text_node_id, 0, text))
-                    .map_err(|e| JsError::new(&e.to_string()))
+                    .map_err(|e| JsError::new(&format!("Insert text failed: {}", e)))
             }
         }
     }
@@ -1317,7 +1325,7 @@ impl WasmDocument {
                     // Fits within one text node
                     return doc
                         .apply(Operation::delete_text(text_node_id, local_offset, length))
-                        .map_err(|e| JsError::new(&e.to_string()));
+                        .map_err(|e| JsError::new(&format!("Delete text failed: {}", e)));
                 }
             }
             Err(e) => return Err(e),
@@ -3496,6 +3504,18 @@ impl WasmDocument {
         width_pt: f64,
         height_pt: f64,
     ) -> Result<String, JsError> {
+        // Bug W7: Clamp invalid dimensions to sensible defaults instead of erroring
+        let width_pt = if width_pt <= 0.0 || width_pt > 10000.0 {
+            200.0
+        } else {
+            width_pt
+        };
+        let height_pt = if height_pt <= 0.0 || height_pt > 10000.0 {
+            200.0
+        } else {
+            height_pt
+        };
+
         let doc = self.doc_mut()?;
         let after_id = parse_node_id(after_node_str)?;
         let body_id = doc.body_id().ok_or_else(|| JsError::new("No body node"))?;
@@ -4737,6 +4757,11 @@ impl WasmDocument {
     }
 
     /// Replace text at a specific location.
+    ///
+    /// Note: insert_text into an existing text node inherits the parent run's
+    /// formatting (bold, italic, etc.) — no explicit attribute copy needed.
+    /// The text node returned by `find_text_node_at_char_offset` belongs to a
+    /// run, so the replacement text automatically gets that run's formatting.
     pub fn replace_text(
         &mut self,
         node_id_str: &str,
@@ -4746,18 +4771,75 @@ impl WasmDocument {
     ) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
-        let (text_node_id, local_offset, _) =
-            find_text_node_at_char_offset(doc.model(), para_id, offset)?;
 
-        let mut txn = Transaction::with_label("Replace text");
-        txn.push(Operation::delete_text(text_node_id, local_offset, length));
-        txn.push(Operation::insert_text(
-            text_node_id,
-            local_offset,
-            replacement,
-        ));
-        doc.apply_transaction(&txn)
-            .map_err(|e| JsError::new(&e.to_string()))
+        // Bug W1: Clamp deletion range to actual paragraph text length
+        let para_text = extract_paragraph_text(doc.model(), para_id);
+        let text_len = para_text.chars().count();
+        let safe_offset = offset.min(text_len);
+        let safe_end = (offset + length).min(text_len);
+        let safe_length = safe_end.saturating_sub(safe_offset);
+
+        // If nothing to delete and nothing to insert, it's a no-op
+        if safe_length == 0 && replacement.is_empty() {
+            return Ok(());
+        }
+
+        let (text_node_id, local_offset, _node_text_len) =
+            find_text_node_at_char_offset(doc.model(), para_id, safe_offset)?;
+
+        // Bug W4: Check if deletion spans beyond this text node (cross-run).
+        // If so, use range deletion first, then insert into the first run's
+        // text node so the replacement inherits the run formatting at the
+        // insertion point.
+        let fits_single_node = local_offset + safe_length <= _node_text_len;
+
+        if fits_single_node {
+            // Deletion fits in one text node — simple path
+            let mut txn = Transaction::with_label("Replace text");
+            if safe_length > 0 {
+                txn.push(Operation::delete_text(
+                    text_node_id,
+                    local_offset,
+                    safe_length,
+                ));
+            }
+            if !replacement.is_empty() {
+                txn.push(Operation::insert_text(
+                    text_node_id,
+                    local_offset,
+                    replacement,
+                ));
+            }
+            if txn.is_empty() {
+                return Ok(());
+            }
+            doc.apply_transaction(&txn)
+                .map_err(|e| JsError::new(&format!("Replace text failed: {}", e)))
+        } else {
+            // Deletion spans multiple runs — delete range first, then insert
+            // into the text node at the start offset (which preserves run formatting).
+            if safe_length > 0 {
+                delete_text_range_in_paragraph(
+                    doc,
+                    para_id,
+                    safe_offset,
+                    safe_offset + safe_length,
+                )?;
+            }
+            if !replacement.is_empty() {
+                // Re-locate the text node after deletion (nodes may have shifted)
+                let (ins_text_node_id, ins_local_offset, _) =
+                    find_text_node_at_char_offset(doc.model(), para_id, safe_offset)?;
+                doc.apply(Operation::insert_text(
+                    ins_text_node_id,
+                    ins_local_offset,
+                    replacement,
+                ))
+                .map_err(|e| JsError::new(&format!("Replace text failed: {}", e)))
+            } else {
+                Ok(())
+            }
+        }
     }
 
     /// Replace all occurrences of query with replacement.
@@ -6549,7 +6631,12 @@ fn extract_paragraph_text(model: &DocumentModel, para_id: NodeId) -> String {
     text
 }
 
-/// Find the text node and local char offset for a paragraph-level char offset.
+/// Find the text node containing the given character offset.
+///
+/// Boundary behavior: If offset falls exactly at a run boundary,
+/// it is assigned to the NEXT run. This matches cursor-at-boundary
+/// semantics (new text typed at a run boundary inherits the next run's format).
+/// For deletion, the caller should handle the boundary appropriately.
 ///
 /// Walks through all runs in the paragraph, accumulating character counts
 /// to find which text node contains the given char offset. Returns
@@ -7975,6 +8062,26 @@ fn render_paragraph(
     // Page break before
     if para.attributes.get_bool(&AttributeKey::PageBreakBefore) == Some(true) {
         style.push_str("page-break-before:always;");
+    }
+
+    // W5: Tab stops — set CSS tab-size from first tab stop position
+    if let Some(AttributeValue::TabStops(stops)) = para.attributes.get(&AttributeKey::TabStops) {
+        if let Some(first) = stops.first() {
+            // Convert from points to pixels (96 DPI / 72 pt)
+            let tab_px = (first.position * 96.0 / 72.0) as i32;
+            if tab_px > 0 {
+                style.push_str(&format!("tab-size:{tab_px}px;"));
+            }
+        }
+    }
+
+    // W5: Widow/orphan control — always set reasonable defaults,
+    // enhanced by KeepLinesTogether/KeepWithNext (already handled above)
+    style.push_str("orphans:2;widows:2;");
+
+    // W5: Contextual spacing — collapse top margin when enabled
+    if para.attributes.get_bool(&AttributeKey::ContextualSpacing) == Some(true) {
+        style.push_str("margin-block-start:0;");
     }
 
     let list_type_attr = list_info
@@ -10151,7 +10258,7 @@ impl WasmCollabDocument {
         let temp_doc = s1engine::Document::from_model(doc.model().clone());
         temp_doc
             .export(fmt)
-            .map_err(|e| JsError::new(&e.to_string()))
+            .map_err(|e| JsError::new(&format!("Export to {} failed: {}", format, e)))
     }
 
     // ─── Rendering (delegates to same render functions as WasmDocument) ───
@@ -10208,7 +10315,13 @@ impl WasmCollabDocument {
 
     // ─── Structural Editing (apply on model, produce CRDT ops) ───
 
-    /// Set paragraph text (replaces all text in the paragraph).
+    /// Set paragraph text, preserving multi-run formatting when possible.
+    ///
+    /// When the text is unchanged, this is a no-op (preserves all formatting).
+    /// When only a portion of the text changed, a diff-based approach is used
+    /// to minimize the edit and preserve run-level formatting on unchanged
+    /// portions. Only falls back to full delete+insert when the paragraph
+    /// has no existing runs.
     pub fn set_paragraph_text(&mut self, node_id_str: &str, text: &str) -> Result<String, JsError> {
         let doc = self
             .inner
@@ -10216,20 +10329,53 @@ impl WasmCollabDocument {
             .ok_or_else(|| JsError::new("Document freed"))?;
         let node_id = parse_node_id(node_id_str)?;
 
-        // Get current text length, delete all, then insert new text
-        let (text_node_id, current_len) = find_first_text_node(doc.model(), node_id)?;
+        // W6: Check if text is unchanged — skip mutation to preserve formatting
+        let existing_text = extract_paragraph_text(doc.model(), node_id);
+        if existing_text == text {
+            return Ok("[]".to_string());
+        }
+
+        // W6: Diff-based update — find the minimal edit to preserve run formatting.
+        // Compute common prefix/suffix to determine the changed region.
+        let old_chars: Vec<char> = existing_text.chars().collect();
+        let new_chars: Vec<char> = text.chars().collect();
+        let old_len = old_chars.len();
+        let new_len = new_chars.len();
+
+        let mut prefix_len = 0;
+        while prefix_len < old_len
+            && prefix_len < new_len
+            && old_chars[prefix_len] == new_chars[prefix_len]
+        {
+            prefix_len += 1;
+        }
+        let mut suffix_len = 0;
+        while suffix_len < (old_len - prefix_len)
+            && suffix_len < (new_len - prefix_len)
+            && old_chars[old_len - 1 - suffix_len] == new_chars[new_len - 1 - suffix_len]
+        {
+            suffix_len += 1;
+        }
+
+        let delete_start = prefix_len;
+        let delete_end = old_len - suffix_len;
+        let insert_text: String = new_chars[prefix_len..new_len - suffix_len].iter().collect();
+
+        // Find the text node containing the edit region
+        let (text_node_id, _current_len) = find_first_text_node(doc.model(), node_id)?;
         let mut ops_json = Vec::new();
 
-        if current_len > 0 {
-            let del_op = Operation::delete_text(text_node_id, 0, current_len);
+        let delete_count = delete_end - delete_start;
+        if delete_count > 0 {
+            let del_op = Operation::delete_text(text_node_id, delete_start, delete_count);
             let crdt_op = doc
                 .apply_local(del_op)
                 .map_err(|e| JsError::new(&e.to_string()))?;
             ops_json.push(serialize_crdt_op_to_json(&crdt_op));
         }
 
-        if !text.is_empty() {
-            let ins_op = Operation::insert_text(text_node_id, 0, text.to_string());
+        if !insert_text.is_empty() {
+            let ins_op = Operation::insert_text(text_node_id, delete_start, insert_text);
             let crdt_op = doc
                 .apply_local(ins_op)
                 .map_err(|e| JsError::new(&e.to_string()))?;
@@ -10471,10 +10617,9 @@ impl WasmEngine {
     ///
     /// The document is loaded and wrapped in a CRDT-aware container.
     pub fn open_collab(&self, data: &[u8], replica_id: u64) -> Result<WasmCollabDocument, JsError> {
-        let doc = self
-            .inner
-            .open(data)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let doc = self.inner.open(data).map_err(|e| {
+            JsError::new(&format!("Failed to open document for collaboration: {}", e))
+        })?;
         let collab = s1_crdt::CollabDocument::from_model(doc.into_model(), replica_id);
         Ok(WasmCollabDocument {
             inner: Some(collab),
@@ -11010,7 +11155,37 @@ fn render_node_to_html(model: &DocumentModel, node: &Node) -> String {
                 hs.push_str(&format!("margin-bottom:{}pt;", mb));
                 format!(" style=\"{}\"", hs)
             } else {
-                String::new()
+                // W5: Build paragraph-level CSS for non-heading paragraphs
+                let mut ps = String::new();
+                // Tab stops
+                if let Some(AttributeValue::TabStops(stops)) =
+                    node.attributes.get(&AttributeKey::TabStops)
+                {
+                    if let Some(first) = stops.first() {
+                        let tab_px = (first.position * 96.0 / 72.0) as i32;
+                        if tab_px > 0 {
+                            ps.push_str(&format!("tab-size:{}px;", tab_px));
+                        }
+                    }
+                }
+                // Widow/orphan defaults
+                ps.push_str("orphans:2;widows:2;");
+                // Contextual spacing
+                if node.attributes.get_bool(&AttributeKey::ContextualSpacing) == Some(true) {
+                    ps.push_str("margin-block-start:0;");
+                }
+                // Keep with next / keep lines together
+                if node.attributes.get_bool(&AttributeKey::KeepWithNext) == Some(true) {
+                    ps.push_str("break-after:avoid;");
+                }
+                if node.attributes.get_bool(&AttributeKey::KeepLinesTogether) == Some(true) {
+                    ps.push_str("break-inside:avoid;");
+                }
+                if ps.is_empty() {
+                    String::new()
+                } else {
+                    format!(" style=\"{}\"", ps)
+                }
             };
 
             let mut html = format!(

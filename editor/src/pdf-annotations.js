@@ -46,6 +46,18 @@ export function undoAnnotation() {
   showToast('Annotation undone');
 }
 
+const MAX_ANNOTATIONS = 5000;
+
+/** Push annotation with safety limit check (I23). Returns false if limit reached. */
+function _pushAnnotation(annotation) {
+  if (state.pdfAnnotations.length >= MAX_ANNOTATIONS) {
+    showToast('Maximum annotations reached (5000)', 'error');
+    return false;
+  }
+  state.pdfAnnotations.push(annotation);
+  return true;
+}
+
 // ─── Initialization ─────────────────────────────────
 
 export function initAnnotationTools() {
@@ -192,7 +204,7 @@ function createHighlightFromSelection() {
     pageWidth: pageRect.width,
     pageHeight: pageRect.height,
   });
-  state.pdfAnnotations.push(annotation);
+  if (!_pushAnnotation(annotation)) return;
   state.pdfModified = true;
   sel.removeAllRanges();
 
@@ -263,7 +275,7 @@ function addComment(page) {
     });
     annotation.color = '#1a73e8';
     _saveUndoState();
-    state.pdfAnnotations.push(annotation);
+    if (!_pushAnnotation(annotation)) { cleanup(); return; }
     state.pdfModified = true;
     cleanup();
     renderAnnotationsForPage(page.pageNum);
@@ -333,7 +345,7 @@ function endDrawing(e) {
     strokeWidth: _drawWidth,
     strokeColor: _drawColor,
   });
-  state.pdfAnnotations.push(annotation);
+  if (!_pushAnnotation(annotation)) { _drawingPath = []; return; }
   state.pdfModified = true;
 
   _drawingPath = [];
@@ -368,7 +380,7 @@ function addTextBox(page) {
       width: div.offsetWidth, height: div.offsetHeight,
       content: text, fontSize: 12, fontFamily: 'sans-serif',
     });
-    state.pdfAnnotations.push(annotation);
+    if (!_pushAnnotation(annotation)) return;
     state.pdfModified = true;
     refreshAnnotationsPanel();
   });
@@ -430,7 +442,7 @@ function endRedact(e) {
       pageWidth: _redactStart.pageEl.getBoundingClientRect().width,
       pageHeight: _redactStart.pageEl.getBoundingClientRect().height,
     });
-    state.pdfAnnotations.push(annotation);
+    if (!_pushAnnotation(annotation)) return;
     state.pdfModified = true;
     renderAnnotationsForPage(_redactStart.pageNum);
     refreshAnnotationsPanel();

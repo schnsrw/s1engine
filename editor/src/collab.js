@@ -22,10 +22,35 @@ const DEFAULT_RELAY_URL = window.S1_CONFIG?.relayUrl
 const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000];
 const MAX_RECONNECT_ATTEMPTS = 5;
 const CURSOR_BROADCAST_INTERVAL = 500;
+
+// Fixed palette of distinct, accessible peer colors (C21).
+// Cycles through 25 colors — avoids the golden-angle HSL approach
+// which repeated after ~360 peers and produced near-duplicate hues.
 const PEER_COLORS = [
-  '#4285f4', '#ea4335', '#34a853', '#fbbc04', '#9c27b0',
-  '#00bcd4', '#ff5722', '#607d8b', '#e91e63', '#3f51b5',
+  '#1a73e8', '#e8710a', '#0d652d', '#9334e6', '#c5221f',
+  '#137333', '#185abc', '#e37400', '#7627bb', '#a50e0e',
+  '#0277bd', '#558b2f', '#6a1b9a', '#d84315', '#00838f',
+  '#4e342e', '#283593', '#bf360c', '#00695c', '#ad1457',
+  '#1565c0', '#2e7d32', '#4a148c', '#e65100', '#006064',
 ];
+
+function getPeerColor(index) {
+  return PEER_COLORS[index % PEER_COLORS.length];
+}
+
+/**
+ * Generate a cryptographically secure room ID using Web Crypto API.
+ * Falls back to Math.random if crypto is unavailable.
+ */
+function _generateSecureRoomId() {
+  try {
+    return 'room-' + crypto.getRandomValues(new Uint8Array(12))
+      .reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
+  } catch (_) {
+    // Fallback for environments without crypto
+    return 'room-' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  }
+}
 
 // ─── State ────────────────────────────────────────────
 
@@ -45,6 +70,10 @@ let accessLevel = 'edit'; // 'edit', 'comment', or 'view'
 let localVersion = 0; // Increments on every local edit (for fullSync ordering)
 let lastSyncedVersion = 0; // Version of last applied fullSync
 let serverVersion = 0; // Tracks the latest version seen from the server/relay
+let _pendingImmediateSync = false; // Bug C8: throttle immediate fullSync on node ID mismatch
+let _fullSyncTimeout = null; // Timeout for fullSync response (Bug C3)
+let missedPongs = 0; // Bug C6: count missed heartbeat responses
+let _roomFullRetries = 0; // C11: exponential backoff retry when room is full
 
 // ─── Public API ───────────────────────────────────────
 
@@ -57,7 +86,7 @@ export function startCollab(room, name, relayUrl) {
   roomId = room;
   userName = name || 'Anonymous';
   peerId = peerId || ('u-' + Math.random().toString(36).slice(2, 10));
-  userColor = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
+  userColor = getPeerColor(Math.floor(Math.random() * 360));
 
   // Reset version state for new session
   localVersion = 0;
@@ -99,6 +128,8 @@ export function stopCollab() {
   clearInterval(cursorTimer);
   clearTimeout(reconnectTimer);
   clearTimeout(_fullSyncTimer);
+  clearTimeout(_fullSyncTimeout); // Bug C3
+  _fullSyncTimeout = null;
   clearPeerCursors();
   // Reset version state
   localVersion = 0;
@@ -139,8 +170,15 @@ export function broadcastTextSync(nodeId, text) {
  */
 export function broadcastOp(opData) {
   if (!roomId || applyingRemote) return;
-  localVersion++;
-  sendOp(opData);
+  // D17: Only increment version after successful send to keep version monotonic
+  const pendingVersion = localVersion + 1;
+  try {
+    sendOp(opData);
+    localVersion = pendingVersion;
+  } catch (e) {
+    // Don't increment — operation wasn't sent
+    console.warn('broadcastOp send failed:', e);
+  }
   scheduleDebouncedFullSync();
 }
 
@@ -159,7 +197,7 @@ export function broadcastCrdtOp(crdtOpJson) {
 // even if individual ops fail due to node ID mismatch.
 // In CRDT mode, fullSync is less frequent (5s) as CRDT handles convergence.
 let _fullSyncTimer = null;
-const FULL_SYNC_DEBOUNCE_MS = state.collabDoc ? 5000 : 1500;
+const FULL_SYNC_DEBOUNCE_MS = 1500; // Bug C8: unified to 1.5s for faster convergence
 
 function scheduleDebouncedFullSync() {
   if (_fullSyncTimer) clearTimeout(_fullSyncTimer);
@@ -169,11 +207,31 @@ function scheduleDebouncedFullSync() {
   }, FULL_SYNC_DEBOUNCE_MS);
 }
 
+// Bug C8: Request immediate fullSync on node ID mismatch instead of waiting for debounce
+function requestImmediateFullSync() {
+  if (_pendingImmediateSync) return;
+  _pendingImmediateSync = true;
+  setTimeout(() => {
+    _pendingImmediateSync = false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      sendOp({ action: 'requestFullSync', myVersion: serverVersion });
+    }
+  }, 100); // Small delay to batch multiple failures
+}
+
 /**
  * Check if collaboration is active.
  */
 export function isCollabActive() {
   return roomId !== null && connected;
+}
+
+/**
+ * Check if remote operations are currently being applied.
+ * Used to guard against local undo/redo during remote op application.
+ */
+export function isApplyingRemote() {
+  return applyingRemote;
 }
 
 /**
@@ -188,6 +246,18 @@ export function getCollabRoom() {
 function connect(url) {
   if (ws) { try { ws.close(); } catch (_) {} }
   lastRelayUrl = url;
+
+  // Validate WebSocket URL scheme
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      console.error('[collab] Invalid WebSocket protocol:', parsed.protocol);
+      return;
+    }
+  } catch (e) {
+    console.error('[collab] Invalid relay URL:', url);
+    return;
+  }
 
   // Append room ID to URL path for s1-server WebSocket endpoints.
   // Server expects: /ws/collab/{file_id}?user=Name&uid=id&mode=edit
@@ -211,10 +281,26 @@ function connect(url) {
     return;
   }
 
+  // Connection timeout: if the socket hasn't opened within 8 seconds, close and retry
+  const connectTimeout = setTimeout(() => {
+    if (ws && ws.readyState !== WebSocket.OPEN) {
+      console.warn('[collab] Connection timeout after 8s');
+      try { ws.close(); } catch (_) {}
+      ws = null;
+      scheduleReconnect(url);
+    }
+  }, 8000);
+
   ws.onopen = () => {
+    clearTimeout(connectTimeout);
     connected = true;
     reconnectAttempt = 0;
+    missedPongs = 0; // Bug C6: Reset on connect
     updateConnectionStatus('connected');
+
+    // I7: Clear stale peer entries from previous connection to prevent unbounded growth
+    clearPeerCursors();
+    state.collabPeers = peers; // C22: use same reference — clearPeerCursors() already clears peers
 
     ws.send(JSON.stringify({
       type: 'join',
@@ -224,21 +310,68 @@ function connect(url) {
       clientVersion: serverVersion,
     }));
 
-    // Flush offline buffer
+    // Restore any crashed offline buffer from sessionStorage (Bug C1)
+    try {
+      const saved = sessionStorage.getItem('rudra_collab_offline_buffer');
+      if (saved) {
+        const restored = JSON.parse(saved);
+        if (Array.isArray(restored) && restored.length > 0) {
+          offlineBuffer.push(...restored);
+          console.log(`[collab] Restored ${restored.length} offline operations from session`);
+        }
+        sessionStorage.removeItem('rudra_collab_offline_buffer');
+      }
+    } catch (_) {}
+
+    // Bug C7: Request server catchup before flushing local buffer
+    // This ensures we apply any ops we missed while disconnected before replaying ours
+    try {
+      ws.send(JSON.stringify({ type: 'sync-req', room: roomId, stateVector: null }));
+      tracing('Requested server catchup on reconnect (fromVersion:', serverVersion, ')');
+    } catch (_) {}
+
+    // Flush offline buffer with send verification (Bug C7)
     if (offlineBuffer.length > 0) {
       updateSyncStatus('syncing');
-      for (const op of offlineBuffer) {
-        ws.send(JSON.stringify({ type: 'op', room: roomId, data: JSON.stringify(op) }));
+      let flushFailed = false;
+      while (offlineBuffer.length > 0) {
+        const op = offlineBuffer[0];
+        try {
+          if (ws.readyState !== WebSocket.OPEN) {
+            flushFailed = true;
+            break;
+          }
+          ws.send(JSON.stringify({ type: 'op', room: roomId, data: JSON.stringify(op) }));
+          offlineBuffer.shift(); // Only remove after successful send
+        } catch (e) {
+          console.warn('[collab] Buffer flush failed:', e);
+          flushFailed = true;
+          break;
+        }
       }
-      offlineBuffer = [];
+      if (flushFailed && offlineBuffer.length > 0) {
+        console.warn(`[collab] ${offlineBuffer.length} ops remain in buffer after flush`);
+      }
+      // Clear persisted buffer after successful flush (Bug C1)
+      if (offlineBuffer.length === 0) {
+        try { sessionStorage.removeItem('rudra_collab_offline_buffer'); } catch (_) {}
+      }
     }
     // Reset buffer warning flags after successful reconnect
     _bufferWarningShown = false;
+    _removeBufferWarningBanner();
+    // D5 fix: Re-enable editing if it was disabled due to buffer overflow
+    if (_bufferFullWarningShown) {
+      state.readOnlyMode = false;
+      _removeBufferFullBanner();
+    }
     _bufferFullWarningShown = false;
     updateSyncStatus('synced');
   };
 
   ws.onmessage = (event) => {
+    // Bug C6: Any message from server resets the missed pong counter
+    missedPongs = 0;
     try {
       const msg = JSON.parse(event.data);
       // Track server version from every message
@@ -248,6 +381,23 @@ function connect(url) {
           console.warn('[collab] Version gap detected:', serverVersion, '\u2192', msg.serverVersion);
           // Request a fullSync from any peer that is up to date
           sendOp({ action: 'requestFullSync', myVersion: serverVersion });
+          // Timeout for fullSync response (Bug C3)
+          clearTimeout(_fullSyncTimeout);
+          _fullSyncTimeout = setTimeout(() => {
+            console.warn('[collab] fullSync timeout — retrying...');
+            _fullSyncTimeout = null;
+            // Retry once before forcing reconnect
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'requestFullSync', room: roomId }));
+              _fullSyncTimeout = setTimeout(() => {
+                console.warn('[collab] fullSync retry timeout — forcing reconnect');
+                _fullSyncTimeout = null;
+                if (ws) ws.close();
+              }, 5000);
+            } else if (ws) {
+              ws.close();
+            }
+          }, 5000);
         }
         serverVersion = msg.serverVersion;
       }
@@ -258,13 +408,18 @@ function connect(url) {
   };
 
   ws.onclose = () => {
+    clearTimeout(connectTimeout);
+    clearTimeout(_fullSyncTimeout); // Clear fullSync timeout on disconnect (Bug C3)
+    _fullSyncTimeout = null;
     connected = false;
     updateConnectionStatus('disconnected');
     updateSyncStatus('offline');
     if (roomId) scheduleReconnect(url);
   };
 
-  ws.onerror = () => {};
+  ws.onerror = () => {
+    clearTimeout(connectTimeout);
+  };
 }
 
 function scheduleReconnect(url) {
@@ -284,30 +439,86 @@ const OFFLINE_BUFFER_WARNING_THRESHOLD = 8000;
 let _bufferWarningShown = false;
 let _bufferFullWarningShown = false;
 
+// Bug C17: Client-side rate limiting — max 60 ops/second (~16ms between sends)
+let _sendCount = 0;
+let _sendResetTimer = null;
+let _rateLimitBuffer = []; // Ops deferred due to rate limiting (flushed on window reset)
+
+function _flushRateLimitBuffer() {
+  // Flush rate-limited ops on the next window
+  while (_rateLimitBuffer.length > 0 && _sendCount < 60) {
+    const deferred = _rateLimitBuffer.shift();
+    _sendCount++;
+    const payload = JSON.stringify(deferred);
+    if (connected && ws && ws.readyState === 1) {
+      try { ws.send(JSON.stringify({ type: 'op', room: roomId, data: payload })); } catch (_) {}
+    }
+  }
+}
+
 function sendOp(opData) {
+  // Bug C14: Attach idempotency token for future server-side deduplication
+  opData._opId = opData._opId || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+
+  // Bug C17: Rate limit outgoing ops (max 60/second)
+  _sendCount++;
+  if (!_sendResetTimer) {
+    _sendResetTimer = setTimeout(() => {
+      _sendCount = 0;
+      _sendResetTimer = null;
+      _flushRateLimitBuffer();
+    }, 1000);
+  }
+  if (_sendCount > 60) {
+    // Queue rate-limited ops for next window instead of dropping to offline buffer
+    if (_rateLimitBuffer.length < 200) {
+      _rateLimitBuffer.push(opData);
+    } else if (offlineBuffer.length < MAX_OFFLINE_BUFFER) {
+      opData._localVersion = localVersion;
+      offlineBuffer.push(opData);
+    }
+    return;
+  }
+
   const payload = JSON.stringify(opData);
   if (connected && ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: 'op', room: roomId, data: payload }));
   } else {
     if (offlineBuffer.length < MAX_OFFLINE_BUFFER) {
+      // Tag with local version for fullSync replay ordering (Bug C4)
+      opData._localVersion = localVersion;
       offlineBuffer.push(opData);
-      // Warn when buffer is near capacity
+      // Persist to sessionStorage for crash recovery (Bug C1)
+      try {
+        const serialized = JSON.stringify(offlineBuffer);
+        sessionStorage.setItem('rudra_collab_offline_buffer', serialized);
+        // C13: Warn if buffer is getting large (risk of sessionStorage overflow at ~5MB)
+        if (serialized.length > 2 * 1024 * 1024) {
+          console.warn('[collab] Offline buffer exceeds 2MB — risk of sessionStorage overflow');
+        }
+      } catch (e) {
+        console.warn('[collab] Cannot persist offline buffer:', e.message);
+      }
+      // Warn when buffer is near capacity — show persistent warning banner
       if (offlineBuffer.length >= OFFLINE_BUFFER_WARNING_THRESHOLD && !_bufferWarningShown) {
         _bufferWarningShown = true;
-        showCollabToast('Offline buffer nearly full \u2014 reconnect soon to avoid data loss');
+        _showBufferWarningBanner();
       }
     } else {
       if (!_bufferFullWarningShown) {
         _bufferFullWarningShown = true;
-        console.warn('Offline buffer limit reached. Some changes may not sync when reconnected.');
-        showCollabToast('Connection lost \u2014 changes may not sync');
+        console.warn('Offline buffer limit reached. Blocking further edits to prevent silent data loss.');
+        // D5 fix: Show persistent warning and block editing to prevent silent data loss
+        _showBufferFullBanner();
+        state.readOnlyMode = true;
         // Update sync status to show critical state
         const syncEl = $('collabSyncStatus');
         if (syncEl) {
-          syncEl.textContent = 'Offline (changes may be lost)';
+          syncEl.textContent = 'Offline (editing disabled)';
           syncEl.className = 'collab-sync-status offline';
         }
       }
+      return; // Don't silently drop operations
     }
     // Update offline pending count in sync status
     updateSyncStatus('offline');
@@ -385,6 +596,7 @@ function handleMessage(msg) {
 
     case 'joined':
       peerId = msg.peerId;
+      _roomFullRetries = 0; // C11: Reset retry counter on successful join
       updatePeerList(msg.peers || []);
       updateCollabUI();
       // Version check on reconnect
@@ -409,6 +621,13 @@ function handleMessage(msg) {
           const sv = state.collabDoc.get_state_vector();
           sendOp({ action: 'stateVector', sv });
         } catch (_) {}
+        // C15: Fallback — if delta sync doesn't deliver within 5s, request fullSync.
+        // This handles the case where 3+ peers join quickly and delta exchange is incomplete.
+        setTimeout(() => {
+          if (roomId && connected) {
+            requestImmediateFullSync();
+          }
+        }, 5000);
       }
       break;
 
@@ -423,6 +642,9 @@ function handleMessage(msg) {
           sendOp({ action: 'stateVector', sv });
         } catch (_) {}
       }
+      // C15: Always send fullSync as fallback — delta sync can be unreliable
+      // with 3+ peers joining in quick succession. The fullSync ensures
+      // convergence even if CRDT delta exchange fails or is incomplete.
       sendFullSync();
       break;
 
@@ -462,6 +684,27 @@ function handleMessage(msg) {
 
     case 'error':
       console.error('Relay error:', msg.message);
+      // C11: Room full — exponential backoff retry via full reconnect
+      // (Server closes the WebSocket after room_full, so we must reconnect)
+      if (msg.message && msg.message.includes('full')) {
+        const retryDelay = Math.min(30000, 2000 * Math.pow(2, _roomFullRetries));
+        _roomFullRetries++;
+        if (_roomFullRetries <= 5) {
+          showCollabToast(`Room is full. Retrying in ${Math.round(retryDelay / 1000)}s...`);
+          // Suppress normal reconnect — we'll handle it with our own timer
+          reconnectAttempt = MAX_RECONNECT_ATTEMPTS;
+          setTimeout(() => {
+            if (roomId) {
+              reconnectAttempt = 0; // Allow reconnect to proceed
+              connect(lastRelayUrl || DEFAULT_RELAY_URL);
+            }
+          }, retryDelay);
+        } else {
+          showCollabToast('Room is full. Please try again later.');
+          _roomFullRetries = 0;
+        }
+        return;
+      }
       break;
   }
 }
@@ -489,20 +732,98 @@ function getParaOffset(paraEl, targetNode, nodeOffset) {
   return offset + nodeOffset;
 }
 
+// Bug C19: Helpers to save/restore cursor across fullSync document replacement
+function _getSelectionNodeId() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    let el = sel.anchorNode;
+    while (el && el !== document && !el.dataset?.nodeId) el = el.parentElement;
+    return el?.dataset?.nodeId || null;
+  } catch (_) { return null; }
+}
+
+function _getSelectionOffset() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return 0;
+    let paraEl = sel.anchorNode;
+    while (paraEl && paraEl !== document && !paraEl.dataset?.nodeId) paraEl = paraEl.parentElement;
+    if (!paraEl) return sel.anchorOffset;
+    return getParaOffset(paraEl, sel.anchorNode, sel.anchorOffset);
+  } catch (_) { return 0; }
+}
+
+function _restoreSelectionToNode(nodeId, offset) {
+  try {
+    const page = $('pageContainer');
+    if (!page) return;
+    const paraEl = page.querySelector(`[data-node-id="${nodeId}"]`);
+    if (!paraEl) return;
+    // Walk text nodes to find the right position
+    let remaining = offset || 0;
+    const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      if (textNode.parentElement?.closest('.peer-cursor')) continue;
+      const len = textNode.textContent.length;
+      if (remaining <= len) {
+        const range = document.createRange();
+        range.setStart(textNode, Math.min(remaining, len));
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      remaining -= len;
+    }
+  } catch (_) {}
+}
+
 function sendFullSync() {
   if (!state.doc) return;
   try {
     const bytes = state.doc.export('docx');
     const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
-    localVersion++;
-    sendOp({ action: 'fullSync', docBase64: base64, version: localVersion, replicaId: peerId });
+    // D17: Only increment version after successful send
+    const pendingVersion = localVersion + 1;
+    sendOp({ action: 'fullSync', docBase64: base64, version: pendingVersion, replicaId: peerId });
+    localVersion = pendingVersion;
   } catch (_) {}
+}
+
+// Bug C14: Track recently seen op IDs to prevent duplicate application on retry
+const _seenOpIds = new Set();
+const MAX_SEEN_OP_IDS = 2000;
+let _seenOpIdCount = 0;
+
+function _trackOpId(opId) {
+  if (!opId) return false; // no ID — can't dedup
+  if (_seenOpIds.has(opId)) return true; // duplicate
+  _seenOpIds.add(opId);
+  _seenOpIdCount++;
+  // Evict oldest entries when set grows too large
+  if (_seenOpIdCount > MAX_SEEN_OP_IDS) {
+    const iter = _seenOpIds.values();
+    for (let i = 0; i < MAX_SEEN_OP_IDS / 2; i++) {
+      _seenOpIds.delete(iter.next().value);
+    }
+    _seenOpIdCount = _seenOpIds.size;
+  }
+  return false;
 }
 
 function applyRemoteOp(dataStr, fromPeerId) {
   if (!state.doc || !dataStr) return;
   try {
     const op = JSON.parse(dataStr);
+
+    // Bug C14: Deduplicate ops using _opId to prevent double application on retry
+    if (op._opId && _trackOpId(op._opId)) {
+      return; // Already applied this op
+    }
+
     applyingRemote = true;
 
     // Track peer typing activity for presence indicator
@@ -571,7 +892,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
               // Don't move local cursor
             }
           }
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setText:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setText:', e); }
         break;
       }
 
@@ -579,7 +900,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           const newId = state.doc.split_paragraph(op.nodeId, op.offset);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):split:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):split:', e); }
         break;
       }
 
@@ -587,7 +908,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.merge_paragraphs(op.nodeId1, op.nodeId2);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):merge:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):merge:', e); }
         break;
       }
 
@@ -600,7 +921,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
           );
           renderNodeById(op.startNode);
           if (op.endNode !== op.startNode) renderNodeById(op.endNode);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):format:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):format:', e); }
         break;
       }
 
@@ -608,7 +929,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_selection(op.startNode, op.startOffset, op.endNode, op.endOffset);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):delete:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):delete:', e); }
         break;
       }
 
@@ -616,7 +937,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_heading_level(op.nodeId, op.level);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):heading:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):heading:', e); }
         break;
       }
 
@@ -624,7 +945,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_alignment(op.nodeId, op.alignment);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):align:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):align:', e); }
         break;
       }
 
@@ -632,7 +953,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_paragraph_after(op.afterNodeId, op.text || '');
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPara:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPara:', e); }
         break;
       }
 
@@ -640,7 +961,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_node(op.nodeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteNode:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteNode:', e); }
         break;
       }
 
@@ -648,7 +969,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_list_format(op.nodeId, op.format, op.level || 0);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):list:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):list:', e); }
         break;
       }
 
@@ -656,7 +977,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_indent(op.nodeId, op.side, op.value);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):indent:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):indent:', e); }
         break;
       }
 
@@ -664,7 +985,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_line_spacing(op.nodeId, op.value);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):lineSpacing:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):lineSpacing:', e); }
         break;
       }
 
@@ -672,7 +993,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table(op.afterNodeId, op.rows, op.cols);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertTable:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertTable:', e); }
         break;
       }
 
@@ -680,7 +1001,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table_row(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertRow:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertRow:', e); }
         break;
       }
 
@@ -688,7 +1009,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_table_row(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteRow:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteRow:', e); }
         break;
       }
 
@@ -696,7 +1017,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_table_column(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertCol:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertCol:', e); }
         break;
       }
 
@@ -704,7 +1025,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_table_column(op.tableId, op.index);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteCol:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteCol:', e); }
         break;
       }
 
@@ -712,7 +1033,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_horizontal_rule(op.afterNodeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertHR:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertHR:', e); }
         break;
       }
 
@@ -720,7 +1041,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_page_break(op.afterNodeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPageBreak:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertPageBreak:', e); }
         break;
       }
 
@@ -728,7 +1049,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_section_break(op.afterNodeId, op.breakType || 'nextPage');
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertSectionBreak:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertSectionBreak:', e); }
         break;
       }
 
@@ -743,7 +1064,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.move_node_before(op.nodeId, op.beforeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveBefore:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveBefore:', e); }
         break;
       }
 
@@ -751,7 +1072,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.move_node_after(op.nodeId, op.afterId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveAfter:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):moveAfter:', e); }
         break;
       }
 
@@ -759,7 +1080,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.resize_image(op.nodeId, op.width, op.height);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):resizeImage:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):resizeImage:', e); }
         break;
       }
 
@@ -767,7 +1088,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_cell_background(op.cellId, op.color);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setCellBg:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setCellBg:', e); }
         break;
       }
 
@@ -775,7 +1096,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.set_image_alt_text(op.nodeId, op.alt);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):altText:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):altText:', e); }
         break;
       }
 
@@ -783,7 +1104,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_line_break(op.nodeId, op.offset);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertLineBreak:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertLineBreak:', e); }
         break;
       }
 
@@ -791,7 +1112,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.paste_plain_text(op.nodeId, op.offset, op.text);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteText:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteText:', e); }
         break;
       }
 
@@ -799,7 +1120,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.paste_formatted_runs_json(op.nodeId, op.offset, op.runsJson);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteFormattedRuns:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):pasteFormattedRuns:', e); }
         break;
       }
 
@@ -807,7 +1128,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_text_in_paragraph(op.nodeId, op.offset, op.text);
           renderNodeById(op.nodeId);
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertText:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertText:', e); }
         break;
       }
 
@@ -815,7 +1136,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.replace_text(op.nodeId, op.offset, op.length, op.replacement);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceText:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceText:', e); }
         break;
       }
 
@@ -823,7 +1144,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.replace_all(op.query, op.replacement, op.caseInsensitive);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceAll:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):replaceAll:', e); }
         break;
       }
 
@@ -831,7 +1152,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.insert_comment(op.startNodeId, op.endNodeId, op.author, op.text);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertComment:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertComment:', e); }
         break;
       }
 
@@ -839,7 +1160,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.delete_comment(op.commentId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteComment:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):deleteComment:', e); }
         break;
       }
 
@@ -847,7 +1168,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.accept_change(op.nodeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptChange:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptChange:', e); }
         break;
       }
 
@@ -855,7 +1176,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.reject_change(op.nodeId);
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectChange:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectChange:', e); }
         break;
       }
 
@@ -863,7 +1184,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.accept_all_changes();
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptAllChanges:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):acceptAllChanges:', e); }
         break;
       }
 
@@ -871,7 +1192,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
         try {
           state.doc.reject_all_changes();
           renderDocument();
-        } catch (e) { console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectAllChanges:', e); }
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):rejectAllChanges:', e); }
         break;
       }
 
@@ -884,24 +1205,35 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'fullDocSync': {
-        // Peer performed undo/redo — request full sync
-        // For now, trigger a full document re-render from current state
-        // (The actual undo happened on the sender's side, and the text changes
-        // are broadcast separately via setText operations)
-        renderDocument();
+        // C16: Peer performed undo/redo — request fullSync from them to converge.
+        // The undo/redo happened on the sender's side; we need their updated state.
+        requestImmediateFullSync();
         break;
       }
 
       case 'fullSync': {
+        // Clear fullSync timeout since we received a response (Bug C3)
+        clearTimeout(_fullSyncTimeout);
+        _fullSyncTimeout = null;
         // Full document sync with version tracking.
         // Only apply if the incoming version is newer than what we last synced.
         try {
           const incomingVersion = op.version || 0;
+          // Reject stale fullSync (Bug C4) — check both lastSyncedVersion and serverVersion
+          if (incomingVersion > 0 && incomingVersion <= serverVersion) {
+            console.warn(`[collab] Ignoring stale fullSync (v${incomingVersion} <= current server v${serverVersion})`);
+            break;
+          }
           if (incomingVersion > 0 && incomingVersion <= lastSyncedVersion) {
             tracing('Ignoring stale fullSync v' + incomingVersion + ' (have v' + lastSyncedVersion + ')');
             break;
           }
           if (op.docBase64 && state.engine) {
+            // Snapshot any pending local ops before overwriting (Bug C4)
+            const pendingLocalOps = offlineBuffer.filter(o => o._localVersion > incomingVersion);
+            // Bug C19: Save cursor position before fullSync overwrites the document
+            const savedNodeId = _getSelectionNodeId();
+            const savedOffset = _getSelectionOffset();
             const binary = atob(op.docBase64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -909,7 +1241,20 @@ function applyRemoteOp(dataStr, fromPeerId) {
               state.doc = state.engine.open(bytes);
               if (incomingVersion > 0) lastSyncedVersion = incomingVersion;
               renderDocument();
+              // Bug C19: Restore cursor position after fullSync re-render
+              if (savedNodeId) {
+                _restoreSelectionToNode(savedNodeId, savedOffset);
+              }
               tracing('Applied fullSync v' + incomingVersion, bytes.length, 'bytes');
+              // Re-apply any locally-sent ops that were sent after the sync version (Bug C4)
+              if (pendingLocalOps.length > 0) {
+                tracing('Replaying', pendingLocalOps.length, 'local ops after fullSync');
+                for (const pendingOp of pendingLocalOps) {
+                  try {
+                    applyRemoteOp(JSON.stringify(pendingOp), peerId);
+                  } catch (_) {}
+                }
+              }
             }
           }
         } catch (e) { console.debug('[collab] fullSync error:', e); }
@@ -936,7 +1281,11 @@ function applyRemoteOp(dataStr, fromPeerId) {
     applyingRemote = false;
   } catch (e) {
     applyingRemote = false;
-    console.error('apply remote op:', e);
+    console.warn('[collab] Remote op failed, requesting full sync:', e.message);
+    // Request full document sync to converge instead of silently diverging
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'requestFullSync', room: state.collabRoom }));
+    }
   }
 }
 
@@ -963,6 +1312,15 @@ function broadcastCursor() {
     scheduleReconnect(lastRelayUrl || DEFAULT_RELAY_URL);
     return;
   }
+
+  // Bug C6: If no message received in 3 heartbeat intervals, force reconnect
+  if (missedPongs >= 3) {
+    console.warn('[collab] No server response for 3 heartbeats, reconnecting...');
+    missedPongs = 0;
+    try { ws.close(); } catch (_) {}
+    return;
+  }
+  missedPongs++;
 
   const sel = window.getSelection();
 
@@ -1032,6 +1390,22 @@ function broadcastCursor() {
       data: JSON.stringify(payload),
     }));
   } catch (_) {}
+
+  // Bug C12: Remove ghost cursors from crashed peers (no update in 30 seconds)
+  const now = Date.now();
+  for (const [pid, peer] of peers) {
+    if (peer.lastSeen && now - peer.lastSeen > 30000) {
+      removePeerCursor(pid);
+      peers.delete(pid);
+      peerOpTimestamps.delete(pid);
+      if (peerTypingTimers.has(pid)) {
+        clearTimeout(peerTypingTimers.get(pid));
+        peerTypingTimers.delete(pid);
+      }
+      updatePeerCount();
+      tracing('Removed ghost cursor for peer', pid, '(no activity for 30s)');
+    }
+  }
 }
 
 function applyRemoteAwareness(dataStr, fromPeerId) {
@@ -1040,6 +1414,9 @@ function applyRemoteAwareness(dataStr, fromPeerId) {
     const cursor = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
     // Never render our own cursor as a peer cursor
     if (cursor.peerId === peerId) return;
+    // Bug C12: Track last seen time for ghost cursor cleanup
+    const peer = peers.get(cursor.peerId);
+    if (peer) peer.lastSeen = Date.now();
     renderPeerCursor(cursor);
   } catch (_) {}
 }
@@ -1053,7 +1430,7 @@ function updatePeerList(peerList) {
   for (const p of peerList) {
     // Never add self to the peer list
     if (p.peerId === peerId) continue;
-    peers.set(p.peerId, { userName: p.userName, userColor: p.userColor });
+    peers.set(p.peerId, { userName: p.userName, userColor: p.userColor, lastSeen: Date.now() });
   }
   updatePeerCount();
 }
@@ -1061,7 +1438,7 @@ function updatePeerList(peerList) {
 function addPeer(pid, name, color) {
   // Never add self to the peer list
   if (pid === peerId) return;
-  peers.set(pid, { userName: name, userColor: color });
+  peers.set(pid, { userName: name, userColor: color, lastSeen: Date.now() });
   updatePeerCount();
 }
 
@@ -1368,8 +1745,8 @@ function updatePeerCount() {
     el.textContent = count > 0 ? `${count + 1} users` : '1 user';
   }
 
-  // Sync to state
-  state.collabPeers = new Map(peers);
+  // Bug C22: Sync to state — use same reference to prevent divergence between peers and state.collabPeers
+  state.collabPeers = peers;
 
   // Update status bar peer dots
   renderStatusBarPeers();
@@ -1513,7 +1890,7 @@ export async function showShareDialog() {
       state._pendingShareFileId = fileId;
     } else {
       // Fallback to client-side room (no server)
-      const generatedRoom = `room-${Math.random().toString(36).substring(2, 10)}`;
+      const generatedRoom = _generateSecureRoomId();
       const shareUrl = `${window.location.origin}/?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
       if (urlInput) urlInput.value = shareUrl;
       if (modal) modal.dataset.room = generatedRoom;
@@ -1521,7 +1898,7 @@ export async function showShareDialog() {
   } catch (e) {
     // Server unavailable — fallback to client-side room
     console.warn('File upload for sharing failed:', e);
-    const generatedRoom = `room-${Math.random().toString(36).substring(2, 10)}`;
+    const generatedRoom = _generateSecureRoomId();
     const shareUrl = `${window.location.origin}/?room=${generatedRoom}&relay=${encodeURIComponent(DEFAULT_RELAY_URL)}&access=${access}`;
     if (urlInput) urlInput.value = shareUrl;
     if (modal) modal.dataset.room = generatedRoom;
@@ -1618,6 +1995,55 @@ function updateSharePeerList() {
   if (list.children.length === 0) {
     list.innerHTML = '<div class="share-no-peers">No peers connected</div>';
   }
+}
+
+// ─── Buffer Full Banner ──────────────────────────────
+
+/**
+ * D5 fix: Show a persistent (non-dismissing) banner when offline buffer is full.
+ * Removed automatically when connection is re-established.
+ */
+function _showBufferFullBanner() {
+  // Remove any existing banner first
+  _removeBufferFullBanner();
+  const container = $('toastContainer');
+  if (!container) return;
+  const banner = document.createElement('div');
+  banner.id = 'bufferFullBanner';
+  banner.className = 'collab-toast show';
+  banner.style.background = '#d32f2f';
+  banner.style.color = '#fff';
+  banner.style.fontWeight = '600';
+  banner.textContent = 'Connection lost and change buffer is full. New changes will not be saved until reconnected.';
+  container.appendChild(banner);
+}
+
+function _removeBufferFullBanner() {
+  const banner = document.getElementById('bufferFullBanner');
+  if (banner) banner.remove();
+}
+
+/**
+ * Show a persistent amber warning banner when the offline buffer reaches 80% capacity.
+ * Removed automatically when connection is re-established.
+ */
+function _showBufferWarningBanner() {
+  _removeBufferWarningBanner();
+  const container = $('toastContainer');
+  if (!container) return;
+  const banner = document.createElement('div');
+  banner.id = 'bufferWarningBanner';
+  banner.className = 'collab-toast show';
+  banner.style.background = '#f9a825';
+  banner.style.color = '#333';
+  banner.style.fontWeight = '600';
+  banner.textContent = 'Connection lost. Changes are being buffered locally \u2014 reconnect soon to avoid data loss.';
+  container.appendChild(banner);
+}
+
+function _removeBufferWarningBanner() {
+  const banner = document.getElementById('bufferWarningBanner');
+  if (banner) banner.remove();
 }
 
 // ─── Toast Notifications ─────────────────────────────

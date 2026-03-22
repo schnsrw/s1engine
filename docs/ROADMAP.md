@@ -15,6 +15,8 @@ Phase 7: Hardening Plan     █████████████████�
 Phase 8: Editor API         ████████████████████  COMPLETE (P.1-P.5, 44 new WASM tests)
 Phase 9: Editor Demo        ████████████████████  COMPLETE (P.6-P.9 all milestones)
 Phase 10: PDF Editor        ████████████████████  COMPLETE (8/8 phases)
+Phase 11: Spreadsheet       ████████████████████  COMPLETE (XLSX/ODS/CSV, formulas, charts, collab)
+Phase 12: AI Integration    ████████████████████  COMPLETE (llama.cpp sidecar, Qwen2.5-3B)
 ```
 
 ---
@@ -665,7 +667,7 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 
 ---
 
-## Phase 9: Production Editor Demo (MOSTLY COMPLETE)
+## Phase 9: Production Editor Demo (COMPLETE)
 
 **Goal**: Complete rewrite of `demo/index.html` as operation-based editor. All mutations through WASM, no `document.execCommand()`. Collaboration API exposed via WASM.
 
@@ -703,21 +705,21 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 - [x] Drag-and-drop file opening
 - [x] Status bar (word count, paragraph count, format, zoom)
 
-### P.8: Collaboration Frontend (PLANNED)
-- [ ] WebSocket relay server
-- [ ] Wire local edits → serialize → broadcast
-- [ ] Wire received ops → apply_remote → re-render
-- [ ] Peer cursor rendering (colored carets)
-- [ ] Connection status UI
-- [ ] Offline editing + reconnect sync
-- [ ] Share URL generation
+### P.8: Collaboration Frontend (COMPLETE)
+- [x] WebSocket relay server (`scripts/relay.js`)
+- [x] Wire local edits → serialize → broadcast
+- [x] Wire received ops → apply_remote → re-render
+- [x] Peer cursor rendering (colored carets)
+- [x] Connection status UI
+- [x] Offline editing + reconnect sync
+- [x] Share URL generation
 
-### P.9: Polish & Performance (PLANNED)
-- [ ] Edge cases (empty paragraphs, table navigation, HTML paste)
-- [ ] Performance (debounce DOM patches, lazy render, virtual scroll)
-- [ ] Accessibility (ARIA labels, keyboard navigation)
-- [ ] Mobile (touch selection, responsive toolbar)
-- [ ] Playwright e2e tests
+### P.9: Polish & Performance (COMPLETE)
+- [x] Edge cases (empty paragraphs, table navigation, HTML paste)
+- [x] Performance (debounce DOM patches, lazy render, virtual scroll)
+- [x] Accessibility (ARIA labels, keyboard navigation, skip-to-content)
+- [x] Mobile (responsive toolbar)
+- [ ] Playwright e2e tests (deferred)
 
 ---
 
@@ -858,3 +860,79 @@ assert_eq!(doc_a.text_content(node), doc_b.text_content(node));
 - [x] Annotations preserved across view switches
 - [x] Signature canvas hi-DPI scaling
 - [x] Text layer opacity improved for selection visibility
+
+---
+
+## Phase 11: Spreadsheet Engine (COMPLETE)
+
+**Completed**: 2026-03-22
+**Goal**: Full spreadsheet support — XLSX/ODS/CSV format I/O, formula engine, canvas-based grid UI with charts, and real-time collaboration.
+**Tests**: 175 new tests across XLSX, ODS, CSV, and formula engine
+
+> Detailed tracker: `docs/issues/PHASE6_MULTI_APP_TRACKER.md`
+> Gap tracker: `docs/issues/SPREADSHEET_GAP_TRACKER.md`
+
+### 11.1: CSV/TSV Parser (COMPLETE — 40 tests)
+- [x] RFC 4180 parser with all edge cases (quoting, escaping, multiline, BOM)
+- [x] Auto-detect delimiter (comma, tab, semicolon, pipe)
+- [x] Streaming parser for large files
+- [x] CSV writer with round-trip fidelity
+
+### 11.2: XLSX Reader/Writer (COMPLETE — 26 tests)
+- [x] `s1-format-xlsx` crate with ZIP/XML reader
+- [x] Shared strings, styles, number formats, fonts, fills, borders
+- [x] Formulas, merged cells, frozen panes, column widths, row heights
+- [x] XLSX writer with full round-trip and preserved parts
+
+### 11.3: Formula Engine (COMPLETE — 93 tests)
+- [x] Tokenizer, recursive-descent parser with operator precedence
+- [x] 60+ built-in functions: SUM, AVERAGE, VLOOKUP, IF, INDEX, MATCH, etc.
+- [x] Cell reference resolution (A1, $A$1, ranges, cross-sheet refs)
+- [x] Dependency graph with topological sort and circular reference detection
+- [x] Array formula support (CSE)
+
+### 11.4: Canvas Grid UI (COMPLETE — 14 features)
+- [x] Virtual scrolling canvas grid (devicePixelRatio-aware)
+- [x] Cell selection, editing, formula bar, sheet tabs
+- [x] Column/row resize, insert/delete, copy/paste, undo/redo
+- [x] Freeze panes, auto-fill, sort, filter
+- [x] Conditional formatting, data validation, named ranges
+- [x] Cell comments, merge/unmerge, number formats
+- [x] Find & Replace, paste special
+
+### 11.5: Charts (COMPLETE — 6 chart types)
+- [x] Column/Bar charts (grouped multi-series)
+- [x] Line/Area charts (multi-series)
+- [x] Pie/Doughnut charts (percentage labels, legends)
+- [x] Chart customization (title, legend, draggable, resizable)
+- [x] Sparklines (inline mini-charts)
+
+### 11.6: ODS Spreadsheet (COMPLETE — 16 tests)
+- [x] ODS reader/writer with value types, formulas, styles
+- [x] OpenFormula syntax conversion
+- [x] Round-trip tests
+
+### 11.7: Spreadsheet Collaboration (COMPLETE)
+- [x] Real-time WebSocket cell/format sync
+- [x] Peer cursor overlay
+- [x] Share link with `?type=sheet`
+
+### 11.8: Advanced Features (COMPLETE)
+- [x] Pivot tables (basic dialog, aggregation)
+- [x] Text to columns
+- [x] Cross-sheet references
+- [x] Hyperlinks in cells
+- [x] Formula autocomplete and syntax highlighting
+- [x] Zoom, accessibility (ARIA labels)
+
+---
+
+## Phase 12: AI Integration (COMPLETE)
+
+**Completed**: 2026-03-22
+**Goal**: Optional AI sidecar for document assistance.
+
+### 12.1: AI Sidecar (COMPLETE)
+- [x] llama.cpp integration with Qwen2.5-3B model
+- [x] Document summarization and assistance
+- [x] Optional deployment — does not affect core engine

@@ -121,6 +121,10 @@ export const state = {
   aiFloatingBarVisible: false,
   aiHintsShown: {},          // { selectionHint: bool, spreadsheetHint: bool }
   aiLastSelectedText: '',
+  // Open files tab bar (Phase 6: multi-file editing)
+  openFiles: [],        // [{ id, name, type, data, scrollTop, selectionInfo, format, doc, spreadsheetView, pdfBytes, pdfAnnotations, pdfTextEdits }]
+  activeFileId: null,   // Currently active file tab ID
+  _fileIdCounter: 0,    // Auto-increment counter for generating tab IDs
   // Spreadsheet view state
   spreadsheetView: null,
   // PDF viewer state
@@ -136,3 +140,29 @@ export const state = {
 };
 
 export const $ = (id) => document.getElementById(id);
+
+/**
+ * Clean up stale state caches to prevent memory bloat in long sessions.
+ * Called periodically and on document switch.
+ */
+export function cleanupStaleState() {
+  // Clear cached text that may reference detached nodes
+  if (state.syncedTextCache && state.syncedTextCache.size > 5000) {
+    state.syncedTextCache.clear();
+  }
+  // Trim nodeIdToElement if too large
+  if (state.nodeIdToElement && state.nodeIdToElement.size > 10000) {
+    state.nodeIdToElement.clear();
+  }
+  // Trim nodeToPage if too large
+  if (state.nodeToPage && state.nodeToPage.size > 10000) {
+    state.nodeToPage.clear();
+  }
+  // Trim offscreen image cache
+  if (state._offscreenImageSrcs && state._offscreenImageSrcs.size > 5000) {
+    state._offscreenImageSrcs.clear();
+  }
+}
+
+// Periodic cleanup every 5 minutes
+setInterval(cleanupStaleState, 5 * 60 * 1000);

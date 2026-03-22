@@ -22,6 +22,7 @@ docx = ["dep:s1-format-docx"]
 odt = ["dep:s1-format-odt"]
 pdf = ["dep:s1-format-pdf", "dep:s1-layout", "dep:s1-text"]
 txt = ["dep:s1-format-txt"]
+xlsx = ["dep:s1-format-xlsx"]
 
 # Conversion
 convert = ["dep:s1-convert"]
@@ -251,6 +252,57 @@ fn main() -> Result<(), s1engine::Error> {
     // Incremental sync via state vectors
     let my_state = doc.state_vector();
     let changes = doc.changes_since(&remote_state_vector);
+
+    Ok(())
+}
+```
+
+### Use Case 8: Spreadsheet Operations (with `xlsx` feature)
+
+```rust
+use s1_format_xlsx::{Workbook, CellValue, read_xlsx, write_xlsx};
+
+fn main() -> Result<(), s1engine::Error> {
+    // Read an XLSX file
+    let data = std::fs::read("budget.xlsx")?;
+    let workbook = read_xlsx(&data)?;
+
+    // Access cells
+    let sheet = &workbook.sheets[0];
+    if let Some(cell) = sheet.cell(0, 0) {
+        println!("A1: {:?}", cell.value);
+    }
+
+    // Evaluate formulas
+    use s1_format_xlsx::formula::{FormulaEngine, EvalContext};
+    let engine = FormulaEngine::new();
+    let result = engine.evaluate("=SUM(A1:A10)", &context)?;
+
+    // Write back
+    let output = write_xlsx(&workbook)?;
+    std::fs::write("budget_updated.xlsx", output)?;
+
+    Ok(())
+}
+```
+
+### Use Case 9: CSV Processing
+
+```rust
+use s1_convert::{parse_csv, write_csv, detect_delimiter};
+
+fn main() -> Result<(), s1engine::Error> {
+    let data = std::fs::read("data.csv")?;
+
+    // Auto-detect delimiter
+    let delimiter = detect_delimiter(&data);
+
+    // Parse CSV
+    let rows = parse_csv(&data)?;
+
+    // Process and write back
+    let output = write_csv(&rows)?;
+    std::fs::write("output.csv", output)?;
 
     Ok(())
 }

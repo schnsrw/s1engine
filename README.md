@@ -3,307 +3,220 @@
 [![CI](https://github.com/Rudra-Office/Rudra-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/Rudra-Office/Rudra-Editor/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-A modular document engine SDK built in pure Rust. Read, write, edit, and convert documents across DOCX, ODT, PDF, TXT, and Markdown formats — with CRDT-based collaboration, a page layout engine, and a browser-based editor (**Rudra Office**).
+A modular document and spreadsheet engine SDK built in pure Rust. Supports DOCX, ODT, PDF, TXT, Markdown, XLSX, ODS, and CSV with real-time CRDT collaboration, a page layout engine, and a production-ready web editor.
 
-**1,390+ tests** · **Zero C/C++ dependencies** · **AGPL-3.0**
+**1,390+ tests** · **Zero C/C++ dependencies** · **Pure Rust + WASM**
 
-> **[Format Compatibility & Known Limitations](docs/COMPATIBILITY.md)** — what works, what's partial, what's not supported.
-
-## What is Rudra Code?
-
-Rudra Code is a modular Rust SDK that powers document workflows across desktop, server, and web. It combines format conversion (DOCX, ODT, PDF, TXT, Markdown), a Fugue CRDT core for collaboration, and native/WASM/FFI bindings so the same engine can be embedded in editors, clients, and services.
-
-## Highlights
-
-- **Multi-format** — DOCX, ODT, PDF, TXT, Markdown, and legacy DOC (read)
-- **Pure Rust** — Zero C/C++ dependencies. Compiles to native, WASM, and C FFI
-- **Collaborative** — Fugue CRDT for multi-user editing with conflict resolution
-- **Layout engine** — Pagination, text shaping (rustybuzz), font subsetting, PDF export
-- **Web editor** — Rudra Office: browser-based document editor with toolbar, comments, track changes, and PDF viewer
-- **Embeddable** — Use as a Rust library, WASM module, or C shared library
-
-## Why Rudra Code?
-
-| Feature | Rudra Code |
-|---|---|
-| **Embeddable SDK** | Yes — Rust, WASM, C FFI |
-| **Pure Rust** | Yes — zero C/C++ deps |
-| **WASM support** | Native |
-| **CRDT collaboration** | Built-in (Fugue) |
-| **Self-hostable** | Single Docker image |
-| **Document model** | CRDT-ready tree with unique IDs |
-| **License** | AGPL-3.0 |
-
-**Use Rudra Code if you need:**
-- A Rust library for reading/writing DOCX, ODT, PDF, or Markdown
-- A self-hosted document editor you can embed in your product
-- WASM-powered document editing in the browser without server-side rendering
-- CRDT-based real-time collaboration without external dependencies
-- A format conversion pipeline (DOCX to PDF, ODT to DOCX, DOC to DOCX, etc.)
+---
 
 ## Quick Start
 
-### As a Rust Library
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-s1engine = "1.0.1"
-
-# Optional features
-# s1engine = { version = "1.0.1", features = ["pdf", "crdt", "convert"] }
+**Docker** (fastest):
+```bash
+docker compose up
+# Editor at http://localhost:8787
 ```
 
-Open and read a document:
+**Rust library**:
+```bash
+cargo add s1engine
+```
 
 ```rust
 use s1engine::Engine;
 
 let engine = Engine::new();
-let data = std::fs::read("report.docx")?;
-let doc = engine.open(&data)?;
-
+let doc = engine.open(&std::fs::read("report.docx")?)?;
 println!("{}", doc.to_plain_text());
-println!("Title: {:?}", doc.metadata().title);
+
+// Convert to PDF
+std::fs::write("output.pdf", doc.export(s1engine::Format::Pdf)?)?;
 ```
 
-Create a document programmatically:
-
-```rust
-use s1engine::{DocumentBuilder, Format};
-
-let doc = DocumentBuilder::new()
-    .title("Quarterly Report")
-    .author("Engineering")
-    .heading(1, "Introduction")
-    .paragraph(|p| {
-        p.text("Built with ")
-         .bold("Rudra Code")
-         .text(" — a document SDK in Rust.")
-    })
-    .table(|t| {
-        t.row(|r| r.cell("Metric").cell("Value"))
-         .row(|r| r.cell("Users").cell("15,000"))
-    })
-    .build();
-
-let docx = doc.export(Format::Docx)?;
-let pdf = doc.export(Format::Pdf)?;  // requires "pdf" feature
+**npm (browser)**:
+```bash
+npm install @rudra/sdk @rudra/wasm
 ```
 
-Convert between formats:
+---
 
-```rust
-let engine = Engine::new();
-let doc = engine.open_file("input.docx")?;
-std::fs::write("output.odt", doc.export(Format::Odt)?)?;
-```
+## What It Does
 
-### Feature Flags
+| Capability | Details |
+|---|---|
+| **Document formats** | Read/write DOCX, ODT, PDF (export), TXT, Markdown, legacy DOC (read) |
+| **Spreadsheet formats** | Read/write XLSX, ODS, CSV with 60+ formula engine |
+| **Collaboration** | Fugue CRDT for real-time multi-user editing (documents and spreadsheets) |
+| **Layout engine** | Pagination, text shaping (rustybuzz), font subsetting, PDF export |
+| **Web editor** | Browser-based document editor, spreadsheet editor, PDF viewer with annotations |
+| **Charts** | Column, bar, line, area, pie, doughnut — rendered on canvas |
+| **AI assistant** | Optional sidecar (llama.cpp + Qwen2.5-3B) for writing, grammar, formulas |
+| **Self-hosting** | Single Docker image with white-labeling, admin panel, JWT auth |
+| **Embeddable** | Rust library, WASM module, C FFI, npm packages, React/Vue components |
 
-| Feature | Description | Default |
-|---|---|---|
-| `docx` | DOCX (OOXML) read/write | Yes |
-| `odt` | ODT (ODF) read/write | Yes |
-| `txt` | Plain text read/write | Yes |
-| `md` | Markdown read/write (GFM tables) | Yes |
-| `pdf` | PDF export with font embedding | No |
-| `convert` | Format conversion pipelines | No |
-| `doc-legacy` | Legacy DOC binary parsing | No |
-| `crdt` | CRDT collaboration primitives | No |
+---
 
 ## Rudra Office
 
-Rudra Office is the WASM-powered web interface that lets teams collaborate on DOCX, ODT, PDF, TXT, and Markdown content through the same engine used in the Rust SDK. Multi-page layout, annotations, track-changes, and export tools appear inside the browser canvas while Fugue CRDT keeps collaborators in sync.
+The web editor built on the engine. Documents, spreadsheets, and PDFs in one interface.
 
-### Experience highlights
+- **Document editor** — Paginated canvas with formatting toolbar, templates, tables, images, comments, track changes
+- **Spreadsheet editor** — Canvas grid with formulas, charts, pivot tables, conditional formatting, data validation, cell comments
+- **PDF viewer** — View, annotate (highlight, draw, comment, redact), and export
+- **Collaboration** — Real-time co-editing with peer cursors, presence indicators, and "typing..." status
+- **Multi-file tabs** — Open multiple documents/spreadsheets simultaneously, switch between them
+- **Dark mode** — Full dark theme across all views
 
-- **Layout and rendering** — Multi-page, paginated canvas with measured text shaping and consistent spacing (see the layout screenshot).
-- **Toolbar & styling** — Unified formatting toolbar, templates, and table/insert controls keep rich editing easily accessible.
-- **Collaboration & comments** — Inline mentions, comments, and presence indicators sync through the network-backed CRDT relay.
-- **Track changes** — Accept/reject controls, history detail, and blame context surface editorial intent.
-- **PDF + export** — Built-in PDF viewer/annotator (highlight, draw, markup) plus DOCX/ODT/PDF/TXT/Markdown export pipelines.
-- **Developer-ready** — Keyboard shortcuts, drag-and-drop importing, dark mode, WASM bindings, and Docker deployments keep integration painless.
-
-### Running the Editor
+### Run locally
 
 ```bash
 # Prerequisites: Rust, wasm-pack, Node.js 18+
-
-# Build WASM bindings
-make wasm
-
-# Start development server
-cd editor && npm install && npm run dev
+make wasm && cd editor && npm install && npm run dev
 ```
-
-Open `http://localhost:3000` in your browser.
 
 ### Docker
 
 ```bash
-# Build and run with Docker
-make docker-build
-make docker-run
-
-# Or use Docker Compose
-docker compose up
+docker compose up        # Full stack: editor + server + collab
+# Or standalone:
+docker run -p 8787:8787 rudra/server
 ```
 
-The editor is served at `http://localhost:8787`.
-
-### Experience gallery
-
-| Upload & landing | Toolbar & controls |
-|-------------------|---------------------|
-| ![Landing page with file upload call to action](images/s1-editor-file-upload.png)<br>_Landing canvas for drag-and-drop files, templates, and import workflows._ | ![Toolbar with rich formatting controls](images/s1-editor-toolbar.png)<br>_Formatting toolbar featuring paragraph styles, tables, lists, and insert tools._ |
-| Document view | Track changes panel |
-| ![Document view with paragraph properties panel](images/s1-editor-document-view.png)<br>_Light-mode document canvas with paragraph properties and layout controls exposed._ | ![Track changes panel in dark theme](images/s1-editor-track-changes-panel.png)<br>_Dark track changes inspector with accept/reject, comment context, and comparison indicators._ |
+---
 
 ## Architecture
 
 ```
-Consumer Applications
-        |  Rust API / C FFI / WASM
-+-------v--------------------------------------------+
++----------------------------------------------------+
 |                s1engine (facade)                    |
 |----------------------------------------------------|
-|  s1-ops       s1-layout       s1-convert           |
-|  Operations   Page Layout     Format Conversion    |
-|  Undo/Redo    Pagination      DOC -> DOCX          |
+|  s1-ops        s1-layout        s1-convert         |
+|  Operations    Page Layout      Format Conversion   |
+|  Undo/Redo     Pagination       DOC -> DOCX         |
 |----------------------------------------------------|
-|  s1-crdt                s1-model                   |
-|  Collaborative          Core Document Model        |
-|  Editing (Fugue)        (zero external deps)       |
+|  s1-crdt                 s1-model                   |
+|  Collaborative           Core Document Model        |
+|  Editing (Fugue)         (zero external deps)       |
 |----------------------------------------------------|
-|  format-docx  format-odt  format-pdf  format-txt   |
-|  format-md                                         |
+|  format-docx   format-odt   format-pdf   format-txt|
+|  format-md     format-xlsx  (XLSX/ODS/CSV)         |
 |----------------------------------------------------|
 |                s1-text (Pure Rust)                  |
-|        rustybuzz  ttf-parser  fontdb               |
+|        rustybuzz · ttf-parser · fontdb             |
 +----------------------------------------------------+
+        |           |            |
+    Rust API     C FFI       WASM/JS
 ```
 
-## Crate Structure
+### Crates
 
-| Crate | Description |
+| Crate | Purpose |
 |---|---|
-| `s1engine` | Facade — high-level public API |
-| `s1-model` | Core document model (zero external deps) |
+| `s1engine` | Facade crate — high-level API |
+| `s1-model` | Document tree model (zero deps) |
 | `s1-ops` | Operations, transactions, undo/redo |
-| `s1-format-docx` | DOCX (OOXML) reader/writer |
-| `s1-format-odt` | ODT (ODF) reader/writer |
-| `s1-format-md` | Markdown reader/writer |
-| `s1-format-pdf` | PDF export + editing (via lopdf) |
+| `s1-crdt` | Fugue CRDT for collaboration |
+| `s1-format-docx` | DOCX reader/writer |
+| `s1-format-odt` | ODT reader/writer |
+| `s1-format-pdf` | PDF export |
 | `s1-format-txt` | Plain text reader/writer |
-| `s1-convert` | Format conversion (DOC binary + cross-format) |
-| `s1-layout` | Page layout, pagination, text shaping |
-| `s1-text` | Font loading, shaping, Unicode (pure Rust) |
-| `s1-crdt` | CRDT algorithms for collaboration |
-| `ffi/wasm` | WASM bindings (wasm-bindgen) |
-| `ffi/c` | C FFI bindings (cbindgen) |
+| `s1-format-md` | Markdown reader/writer |
+| `s1-format-xlsx` | XLSX/ODS/CSV with formula engine |
+| `s1-convert` | Cross-format conversion pipelines |
+| `s1-layout` | Page layout, pagination, line breaking |
+| `s1-text` | Text shaping, font loading (pure Rust) |
 
-## Building from Source
+### Feature Flags
 
-### Prerequisites
-
-- Rust 1.88+ (`rustup install stable`)
-- For WASM: `wasm-pack` (`cargo install wasm-pack`)
-- For editor: Node.js 18+ and npm
-- For Docker: Docker 20+
-
-### Build & Test
-
-```bash
-# Build all crates
-cargo build --workspace
-
-# Run all tests (1,380+ tests)
-cargo test --workspace
-
-# Lint
-cargo clippy --workspace -- -D warnings
-
-# Format check
-cargo fmt --check
+```toml
+s1engine = "1.0"                                    # DOCX + ODT + TXT (default)
+s1engine = { version = "1.0", features = ["full"] } # Everything
 ```
 
-### Makefile Targets
+| Flag | What it adds | Default |
+|---|---|---|
+| `docx` | DOCX read/write | Yes |
+| `odt` | ODT read/write | Yes |
+| `txt` | Plain text | Yes |
+| `md` | Markdown (GFM) | Yes |
+| `xlsx` | XLSX/ODS/CSV + formulas | No |
+| `pdf` | PDF export | No |
+| `crdt` | Collaboration primitives | No |
+| `convert` | Format conversion | No |
+| `doc-legacy` | Legacy DOC parsing | No |
+| `full` | All of the above | No |
 
-```bash
-make build          # Build all crates (debug)
-make build-release  # Build all crates (release)
-make test           # Run all tests
-make clippy         # Lint with clippy
-make fmt            # Format code
-make check          # fmt + clippy + tests
-make wasm           # Build WASM bindings (debug)
-make wasm-release   # Build WASM bindings (release)
-make demo           # Build WASM + start editor
-make docker-build   # Build Docker image
-make docker-run     # Run Docker container
-make clean          # Clean build artifacts
-```
+---
 
 ## Format Support
 
-| Feature | DOCX | ODT | Markdown | PDF | TXT | DOC |
-|---|---|---|---|---|---|---|
-| Read | Yes | Yes | Yes | View* | Yes | Partial |
-| Write | Yes | Yes | Yes | Export | Yes | — |
-| Round-trip | Yes | Yes | Partial | — | Yes | — |
-| Paragraphs | Yes | Yes | Yes | Export | Lossy | Yes |
-| Tables | Yes | Yes | GFM | Export | Tab-sep | Partial |
-| Images | Yes | Yes | — | Export | — | — |
-| Lists | Yes | Yes | Yes | — | Markers | — |
-| Styles | Yes | Yes | — | Export | — | Partial |
-| Comments | Yes | Yes | — | — | — | — |
-| Headers/Footers | Yes | Yes | — | Export | — | — |
-| Hyperlinks | Yes | Yes | Yes | Export | — | — |
-| Track Changes | Yes | — | — | — | — | — |
+### Documents
 
-*PDF viewing is available in Rudra Office via PDF.js integration.
+| | DOCX | ODT | Markdown | PDF | TXT | DOC |
+|---|---|---|---|---|---|---|
+| **Read** | Yes | Yes | Yes | View | Yes | Partial |
+| **Write** | Yes | Yes | Yes | Export | Yes | -- |
+| **Round-trip** | Yes | Yes | Partial | -- | Yes | -- |
+| **Tables** | Yes | Yes | GFM | Export | Tab-sep | Partial |
+| **Images** | Yes | Yes | -- | Export | -- | -- |
+| **Styles** | Yes | Yes | -- | Export | -- | Partial |
+| **Comments** | Yes | Yes | -- | -- | -- | -- |
+| **Track Changes** | Yes | -- | -- | -- | -- | -- |
+
+### Spreadsheets
+
+| | XLSX | ODS | CSV |
+|---|---|---|---|
+| **Read/Write** | Yes | Yes | Yes |
+| **Formulas** | 60+ functions | 60+ | -- |
+| **Styles** | Yes | Yes | -- |
+| **Merged Cells** | Yes | Yes | -- |
+| **Charts** | UI | UI | -- |
+| **Multi-sheet** | Yes | Yes | -- |
+| **Frozen Panes** | Yes | Yes | -- |
+
+---
+
+## Building from Source
+
+```bash
+# Prerequisites: Rust 1.88+, wasm-pack (for WASM), Node.js 18+ (for editor)
+
+cargo build --workspace          # Build all crates
+cargo test --workspace           # Run 1,390+ tests
+cargo clippy --workspace -- -D warnings  # Lint
+```
+
+See `make help` for all build targets.
+
+---
 
 ## Documentation
 
-| Document | Description |
-|---|---|
-| [Architecture](docs/ARCHITECTURE.md) | System design, crate structure, core decisions |
-| [Specification](docs/SPECIFICATION.md) | Detailed technical spec for every module |
-| [API Design](docs/API_DESIGN.md) | Public API surface, feature flags, examples |
-| [Roadmap](docs/ROADMAP.md) | Development phases and milestones |
-| [Dependencies](docs/DEPENDENCIES.md) | External libraries with rationale |
-| [WASM Design](docs/WASM_DESIGN.md) | WASM bindings, rendering modes, font handling |
-| [Contributing](CONTRIBUTING.md) | How to contribute to the project |
-| [Changelog](CHANGELOG.md) | Release history |
+- **[Documentation Site](https://rudra-office.github.io/Rudra-Editor/)** — Guides, API reference, deployment
+- [Architecture](docs/ARCHITECTURE.md) — System design and crate structure
+- [Specification](docs/SPECIFICATION.md) — Technical spec for every module
+- [API Design](docs/API_DESIGN.md) — Public API surface and examples
+- [Roadmap](docs/ROADMAP.md) — Development phases and milestones
+- [Contributing](CONTRIBUTING.md) — How to contribute
+
+---
 
 ## Contributing
 
-We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Quick overview:**
-
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes (follow the coding conventions in CLAUDE.md)
-4. Run `make check` to verify tests, clippy, and formatting
-5. Submit a pull request
+3. Make your changes and run `make check`
+4. Submit a pull request
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for coding conventions and architecture rules.
+
+---
 
 ## License
 
-Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
-
-For commercial licensing options (proprietary use without AGPL obligations), contact the maintainers.
+[AGPL-3.0-or-later](LICENSE). Commercial dual-licensing available for proprietary use — [contact us](https://github.com/Rudra-Office/Rudra-Editor/discussions).
 
 ## Acknowledgments
 
-Rudra Code uses these pure-Rust libraries:
-
-- [rustybuzz](https://github.com/RazrFalcon/rustybuzz) — Text shaping (HarfBuzz port)
-- [ttf-parser](https://github.com/RazrFalcon/ttf-parser) — Font parsing
-- [fontdb](https://github.com/RazrFalcon/fontdb) — Font discovery
-- [pdf-writer](https://github.com/typst/pdf-writer) — PDF generation
-- [lopdf](https://github.com/J-F-Liu/lopdf) — PDF reading/editing
-- [quick-xml](https://github.com/tafia/quick-xml) — XML parsing
-- [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) — Markdown parsing
+Built on pure-Rust libraries: [rustybuzz](https://github.com/RazrFalcon/rustybuzz) (text shaping), [ttf-parser](https://github.com/RazrFalcon/ttf-parser) (fonts), [fontdb](https://github.com/RazrFalcon/fontdb) (font discovery), [pdf-writer](https://github.com/typst/pdf-writer) (PDF), [lopdf](https://github.com/J-F-Liu/lopdf) (PDF editing), [quick-xml](https://github.com/tafia/quick-xml) (XML), [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark) (Markdown).

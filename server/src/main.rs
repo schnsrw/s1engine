@@ -10,11 +10,13 @@
 
 use axum::{
     extract::DefaultBodyLimit,
+    http::Method,
     routing::{delete, get, post},
     Router,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -124,7 +126,7 @@ async fn main() {
         // Static editor files (fallback for SPA routing)
         .fallback_service(ServeDir::new(&static_dir).append_index_html_on_directories(true))
         // Middleware
-        .layer(CorsLayer::permissive())
+        .layer(build_cors_layer())
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024));
 
@@ -201,6 +203,37 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+/// Build the CORS layer.
+///
+/// If the environment variable `S1_CORS_ORIGINS` is set (comma-separated list
+/// of allowed origins, e.g. `https://app.example.com,https://admin.example.com`),
+/// only those origins are permitted. Otherwise, all origins are allowed.
+fn build_cors_layer() -> CorsLayer {
+    let cors = CorsLayer::new()
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers(tower_http::cors::Any)
+        .max_age(Duration::from_secs(3600));
+
+    if let Ok(origins_str) = std::env::var("S1_CORS_ORIGINS") {
+        let origins: Vec<_> = origins_str
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if !origins.is_empty() {
+            tracing::info!("CORS: restricting to {} allowed origin(s)", origins.len());
+            return cors.allow_origin(origins);
+        }
+    }
+    tracing::warn!("CORS: allowing all origins (set S1_CORS_ORIGINS to restrict)");
+    cors.allow_origin(tower_http::cors::Any)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {

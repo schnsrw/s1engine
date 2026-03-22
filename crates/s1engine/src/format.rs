@@ -17,7 +17,7 @@ pub enum Format {
     Pdf,
     /// Plain text (`.txt`)
     Txt,
-    /// Legacy Microsoft Word binary (`.doc`) -- read only, requires `doc-legacy` feature
+    /// Legacy Word binary (`.doc`) -- read only, requires `doc-legacy` feature
     Doc,
     /// Markdown (`.md`, `.markdown`)
     Md,

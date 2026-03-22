@@ -1,0 +1,34 @@
+# GPU override for Rudra AI sidecar
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up rudra-ai
+services:
+  rudra-ai:
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Override entrypoint to enable GPU layers
+    entrypoint:
+      - llama-server
+      - -m
+      - /models/qwen2.5-3b-instruct-q4_k_m.gguf
+      - -ngl
+      - "${AI_GPU_LAYERS:-99}"
+      - -c
+      - "4096"
+      - -np
+      - "4"
+      - -cb
+      - -t
+      - auto
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8081"
+      - --cors-allow-origin
+      - "*"

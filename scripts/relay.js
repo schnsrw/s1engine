@@ -56,9 +56,12 @@ const ROOM_TTL_DAYS = parseInt(process.env.ROOM_TTL_DAYS || '30', 10);
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 
+const MAX_WS_PAYLOAD = 256 * 1024; // Bug C23: 256KB max WebSocket message size
+
 const ROOMS_DIR = path.join(DATA_DIR, 'rooms');
 const OP_LOG_CAP = 10000;
 const OP_LOG_TRIM = 5000;
+let totalOpsTrimmed = new Map(); // roomId -> number of ops trimmed from the beginning
 const PERSIST_INTERVAL = 100; // Save every N ops
 const ROOM_CLEANUP_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const startTime = Date.now();
@@ -284,12 +287,25 @@ function cleanupRoom(roomId) {
     // Persist before starting cleanup timer
     saveRoom(roomId, room);
 
+    // C24: Clear any existing cleanup timer before setting a new one
+    // to prevent timer leaks if cleanupRoom is called multiple times
+    if (room._cleanupTimer) {
+      clearTimeout(room._cleanupTimer);
+      room._cleanupTimer = null;
+    }
+
     // Keep room alive for 5 minutes after last peer leaves (for reconnection)
     room._cleanupTimer = setTimeout(() => {
-      if (room.peers.size === 0) {
-        saveRoom(roomId, room);
-        rooms.delete(roomId);
-        log(`Room ${roomId} removed from memory (persisted to disk)`);
+      room._cleanupTimer = null;
+      try {
+        if (room.peers.size === 0) {
+          saveRoom(roomId, room);
+          rooms.delete(roomId);
+          totalOpsTrimmed.delete(roomId);
+          log(`Room ${roomId} removed from memory (persisted to disk)`);
+        }
+      } catch (e) {
+        logError(`Cleanup error for room ${roomId}: ${e.message}`);
       }
     }, ROOM_CLEANUP_TIMEOUT_MS);
   }
@@ -337,6 +353,29 @@ function isCommentOp(data) {
   return false;
 }
 
+// ─── Op Validation ───────────────────────────────────
+
+// Bug C18: Validate op data format before storing/relaying
+const VALID_OP_ACTIONS = new Set([
+  'op', 'insert', 'delete', 'format', 'structural',
+  'setText', 'fullSync', 'requestFullSync', 'stateVector', 'crdtOp',
+  'ssSetCell', 'ssFormat', 'ssSync', 'ssCursor',
+]);
+
+function validateOpData(dataStr) {
+  if (typeof dataStr !== 'string') return false;
+  if (dataStr.length > MAX_WS_PAYLOAD) return false;
+  try {
+    const parsed = JSON.parse(dataStr);
+    if (!parsed || typeof parsed !== 'object') return false;
+    // Must have an action field with a known value
+    if (parsed.action && !VALID_OP_ACTIONS.has(parsed.action)) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ─── Message Handlers ────────────────────────────────
 
 function handleJoin(ws, peerId, msg) {
@@ -369,14 +408,19 @@ function handleJoin(ws, peerId, msg) {
         access = 'view';
       }
       authenticatedName = payload.name || null;
+    } else {
+      // Bug C20: If JWT_SECRET is set but no token provided, reject the connection
+      sendTo(ws, { type: 'error', message: 'Authentication required' });
+      return;
     }
-    // If JWT_SECRET is set but no token provided, allow anonymous (backwards compatible)
   }
 
   // ── Room size limit ──
   const room = getOrCreateRoom(roomId);
   if (room.peers.size >= MAX_PEERS_PER_ROOM) {
     sendTo(ws, { type: 'error', message: `Room is full (max ${MAX_PEERS_PER_ROOM} peers)` });
+    // Bug C11: Close the connection with a clear status code so the client knows not to retry
+    ws.close(4002, 'Room full — maximum ' + MAX_PEERS_PER_ROOM + ' editors allowed');
     return;
   }
 
@@ -437,11 +481,21 @@ function handleOp(ws, peerId, msg) {
     }
   }
 
+  // Bug C18: Validate op data format before storing/relaying
+  if (typeof msg.data === 'string' && !validateOpData(msg.data)) {
+    sendTo(ws, { type: 'error', message: 'Invalid op data format' });
+    return;
+  }
+
   // Store op in room log (cap at OP_LOG_CAP to prevent memory issues)
   if (typeof msg.data === 'string') {
     room.opLog.push(msg.data);
+    // When trimming, track how many ops were removed so sync-req can detect stale requests
     if (room.opLog.length > OP_LOG_CAP) {
-      room.opLog.splice(0, room.opLog.length - OP_LOG_TRIM);
+      const trimCount = room.opLog.length - OP_LOG_TRIM;
+      log(`Room ${roomId}: trimming op log from ${room.opLog.length} to ${OP_LOG_TRIM}`);
+      room.opLog.splice(0, trimCount);
+      totalOpsTrimmed.set(roomId, (totalOpsTrimmed.get(roomId) || 0) + trimCount);
     }
 
     // Track ops for metrics
@@ -483,6 +537,24 @@ function handleSyncReq(ws, peerId, msg) {
   const room = rooms.get(roomId);
   if (!room) {
     sendTo(ws, { type: 'sync-resp', room: roomId, ops: [] });
+    return;
+  }
+
+  // Bug C10: If ops have been trimmed and the peer needs older ops,
+  // request a fullSync from an up-to-date peer instead of sending partial data
+  const trimmed = totalOpsTrimmed.get(roomId) || 0;
+  if (trimmed > 0 && msg.clientVersion !== undefined && msg.clientVersion < trimmed) {
+    // Peer is too far behind — ask an up-to-date peer to send fullSync
+    log(`[${roomId}] Peer ${peerId} too far behind (needs v${msg.clientVersion}, oldest available v${trimmed}). Requesting fullSync from peers.`);
+    // Broadcast a fullSync request to all other peers (one of them will respond)
+    broadcast(room, {
+      type: 'op',
+      room: roomId,
+      peerId: '__server__',
+      data: JSON.stringify({ action: 'requestFullSync', myVersion: 0, targetPeer: peerId }),
+    }, peerId);
+    // Also tell the requesting peer that their data is stale
+    sendTo(ws, { type: 'sync-resp', room: roomId, ops: room.opLog, trimmed: true });
     return;
   }
 
@@ -575,19 +647,33 @@ function acceptWebSocket(req, socket, head) {
       return;
     }
 
+    // C18: Validate message structure before processing
+    let msg;
     try {
-      const msg = JSON.parse(data);
+      msg = JSON.parse(data);
+    } catch (e) {
+      sendTo(ws, { type: 'error', message: 'Invalid JSON' });
+      return;
+    }
+    if (!msg || typeof msg !== 'object' || !msg.type || typeof msg.type !== 'string') {
+      sendTo(ws, { type: 'error', message: 'Invalid message structure: missing or invalid type field' });
+      return;
+    }
+
+    try {
       switch (msg.type) {
         case 'join':      handleJoin(ws, peerId, msg); break;
         case 'op':        handleOp(ws, peerId, msg); break;
         case 'awareness': handleAwareness(ws, peerId, msg); break;
         case 'sync-req':  handleSyncReq(ws, peerId, msg); break;
         case 'leave':     handleLeave(ws, peerId, msg); break;
+        case 'ping':      sendTo(ws, { type: 'pong' }); break;
         default:
           sendTo(ws, { type: 'error', message: `Unknown message type: ${msg.type}` });
       }
     } catch (e) {
-      sendTo(ws, { type: 'error', message: 'Invalid JSON' });
+      logError(`Message handler error for type=${msg.type}: ${e.message}`);
+      sendTo(ws, { type: 'error', message: 'Internal server error' });
     }
   });
 
@@ -607,6 +693,28 @@ function createWsWrapper(socket) {
     on(event, handler) {
       if (!events[event]) events[event] = [];
       events[event].push(handler);
+    },
+
+    // Bug C11: Allow closing the WebSocket with a status code and reason
+    close(code, reason) {
+      if (closed) return;
+      closed = true;
+      ws.readyState = 3;
+      try {
+        // Send WebSocket close frame with status code
+        const reasonBuf = reason ? Buffer.from(reason, 'utf8') : Buffer.alloc(0);
+        const payloadLen = 2 + reasonBuf.length;
+        const frame = Buffer.alloc(2 + payloadLen);
+        frame[0] = 0x88; // FIN + close opcode
+        frame[1] = payloadLen;
+        frame.writeUInt16BE(code || 1000, 2);
+        if (reasonBuf.length > 0) reasonBuf.copy(frame, 4);
+        socket.write(frame);
+        socket.end();
+      } catch (_) {
+        socket.destroy();
+      }
+      (events['close'] || []).forEach(h => h());
     },
 
     send(data) {
@@ -651,6 +759,16 @@ function createWsWrapper(socket) {
         if (buffer.length < 10) return;
         payloadLen = Number(buffer.readBigUInt64BE(2));
         offset = 10;
+      }
+
+      // Bug C23: Reject messages exceeding max payload size
+      if (payloadLen > MAX_WS_PAYLOAD) {
+        logError(`WebSocket message too large (${payloadLen} bytes, max ${MAX_WS_PAYLOAD})`);
+        closed = true;
+        ws.readyState = 3;
+        socket.end();
+        (events['close'] || []).forEach(h => h());
+        return;
       }
 
       const maskLen = masked ? 4 : 0;

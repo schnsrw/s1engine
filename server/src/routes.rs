@@ -2,19 +2,56 @@
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use crate::admin::{ErrorLog, RateLimiter};
 use crate::collab::RoomManager;
 use crate::file_sessions::FileSessionManager;
 use crate::storage::{DocumentMeta, StorageBackend};
 use crate::webhooks::{Webhook, WebhookRegistry};
+
+// ─── Upload Rate Limiting ─────────────────────────────
+
+/// In-memory rate limiter for file upload endpoints.
+/// Allows at most 20 uploads per IP per 60-second window.
+static UPLOAD_RATE: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
+
+fn upload_rate_map() -> &'static Mutex<HashMap<String, (u32, Instant)>> {
+    UPLOAD_RATE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Returns `true` if the IP is within the upload rate limit (20 per 60s).
+fn check_upload_rate(ip: &str) -> bool {
+    let mut map = upload_rate_map().lock().unwrap_or_else(|e| e.into_inner());
+    let entry = map.entry(ip.to_string()).or_insert((0, Instant::now()));
+    if entry.1.elapsed().as_secs() > 60 {
+        *entry = (1, Instant::now());
+        return true;
+    }
+    entry.0 += 1;
+    entry.0 <= 20
+}
+
+/// Extract client IP from request headers (X-Forwarded-For, X-Real-IP) with fallback.
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first_ip) = xff.split(',').next() {
+            return first_ip.trim().to_string();
+        }
+    }
+    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        return real_ip.trim().to_string();
+    }
+    "unknown".to_string()
+}
 
 /// Shared application state.
 pub struct AppState {
@@ -26,6 +63,31 @@ pub struct AppState {
     pub error_log: Arc<ErrorLog>,
     /// Rate limiter for admin login (5 attempts per IP per 60 seconds).
     pub login_limiter: Arc<RateLimiter>,
+}
+
+/// Sanitize a user-provided filename to prevent path traversal attacks.
+///
+/// Strips directory components, replaces dangerous characters, and ensures
+/// the result is never empty or composed only of dots.
+fn sanitize_filename(name: &str) -> String {
+    let name = name.trim();
+    // Take only the filename part (strip directory components)
+    let name = name.rsplit('/').next().unwrap_or(name);
+    let name = name.rsplit('\\').next().unwrap_or(name);
+    // Remove dangerous characters
+    let sanitized: String = name
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    // Prevent empty or dot-only names
+    if sanitized.is_empty() || sanitized.trim_matches('.').is_empty() {
+        return "document".to_string();
+    }
+    sanitized
 }
 
 /// Health check endpoint.
@@ -51,13 +113,24 @@ pub async fn server_info() -> Json<Value> {
 
 /// Create a new document (upload).
 pub async fn create_document(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+    // Rate limit: max 20 uploads per IP per 60 seconds
+    let ip = extract_client_ip(&headers);
+    if !check_upload_rate(&ip) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Upload rate limit exceeded (max 20 per minute)".to_string(),
+        ));
+    }
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
-            let filename = field.file_name().unwrap_or("document").to_string();
+            let raw_name = field.file_name().unwrap_or("document").to_string();
+            let filename = sanitize_filename(&raw_name);
             let data = field
                 .bytes()
                 .await
@@ -99,6 +172,8 @@ pub async fn create_document(
                 )
             })?;
 
+            let file_type = detect_file_type_category(&filename);
+
             return Ok((
                 StatusCode::CREATED,
                 Json(json!({
@@ -107,6 +182,7 @@ pub async fn create_document(
                     "size": data.len(),
                     "wordCount": word_count,
                     "title": doc.metadata().title,
+                    "fileType": file_type,
                     "detectedType": detected_type.extension(),
                     "detectedTypeLabel": detected_type.label(),
                     "isDocument": detected_type.is_document(),
@@ -198,6 +274,10 @@ pub async fn get_document(
 }
 
 /// Get document metadata by ID.
+///
+/// Includes a `fileType` field (`"document"`, `"spreadsheet"`, `"pdf"`,
+/// `"presentation"`) derived from the filename extension so the client
+/// knows which editor view to open.
 pub async fn get_document_meta(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -212,7 +292,13 @@ pub async fn get_document_meta(
         ),
     })?;
 
-    Ok(Json(serde_json::to_value(meta).unwrap_or_default()))
+    let file_type = detect_file_type_category(&meta.filename);
+    let mut value = serde_json::to_value(&meta).unwrap_or_default();
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("fileType".to_string(), json!(file_type));
+    }
+
+    Ok(Json(value))
 }
 
 /// Delete a document by ID.
@@ -306,6 +392,31 @@ fn check_session_access(session_mode: &str, required: &str) -> bool {
         "comment" => session_mode == "comment" || session_mode == "edit",
         "edit" => session_mode == "edit",
         _ => false,
+    }
+}
+
+/// Detect the file type category from a filename extension.
+///
+/// Returns a category string that the client uses to determine which editor
+/// view to open: `"document"`, `"spreadsheet"`, `"pdf"`, `"presentation"`,
+/// or `"unknown"`.
+///
+/// # Examples
+///
+/// ```ignore
+/// assert_eq!(detect_file_type_category("report.docx"), "document");
+/// assert_eq!(detect_file_type_category("data.xlsx"), "spreadsheet");
+/// assert_eq!(detect_file_type_category("slides.pptx"), "presentation");
+/// assert_eq!(detect_file_type_category("manual.pdf"), "pdf");
+/// ```
+pub fn detect_file_type_category(filename: &str) -> &'static str {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "docx" | "doc" | "odt" | "txt" | "md" => "document",
+        "xlsx" | "xls" | "ods" | "csv" => "spreadsheet",
+        "pdf" => "pdf",
+        "pptx" | "ppt" | "odp" => "presentation",
+        _ => "unknown",
     }
 }
 
@@ -419,13 +530,24 @@ pub async fn delete_webhook(
 /// Returns the fileId and editor URL. The session stays alive while
 /// editors are connected, then expires after configurable TTL.
 pub async fn upload_file(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+    // Rate limit: max 20 uploads per IP per 60 seconds
+    let ip = extract_client_ip(&headers);
+    if !check_upload_rate(&ip) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Upload rate limit exceeded (max 20 per minute)".to_string(),
+        ));
+    }
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
-            let filename = field.file_name().unwrap_or("document").to_string();
+            let raw_name = field.file_name().unwrap_or("document").to_string();
+            let filename = sanitize_filename(&raw_name);
             let data = field
                 .bytes()
                 .await
@@ -458,6 +580,8 @@ pub async fn upload_file(
                 )
                 .await;
 
+            let file_type = detect_file_type_category(&filename);
+
             return Ok((
                 StatusCode::CREATED,
                 Json(json!({
@@ -465,6 +589,7 @@ pub async fn upload_file(
                     "filename": filename,
                     "size": data.len(),
                     "wordCount": word_count,
+                    "fileType": file_type,
                     "detectedType": detected_type_str,
                     "detectedTypeLabel": detected_label,
                     "isDocument": detected_type.is_document(),
@@ -487,6 +612,10 @@ pub async fn list_files(State(state): State<Arc<AppState>>) -> Json<Value> {
 }
 
 /// Get info about a file editing session.
+///
+/// Includes a `fileType` field (`"document"`, `"spreadsheet"`, `"pdf"`,
+/// `"presentation"`) derived from the filename extension so the client
+/// knows which editor view to open.
 pub async fn get_file_info(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -499,7 +628,13 @@ pub async fn get_file_info(
     // Read endpoints: no restriction needed (Viewer permission is implicit).
     // All session modes (edit, comment, view) may read file info.
 
-    Ok(Json(serde_json::to_value(info).unwrap_or_default()))
+    let file_type = detect_file_type_category(&info.filename);
+    let mut value = serde_json::to_value(info).unwrap_or_default();
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("fileType".to_string(), json!(file_type));
+    }
+
+    Ok(Json(value))
 }
 
 /// Download the latest version of a file being edited.

@@ -8,16 +8,14 @@ import { getSelectionInfo } from './selection.js';
 
 let _panel, _messages, _input, _sendBtn, _stopBtn, _status, _modeSelect;
 let _floatingBar, _contextChip;
-let _isOpen = false;
-let _aiAvailable = false;
 let _selectionTimer = null;
 let _lastSelectedText = '';
 let _hintTimer = null;
 let _lastFloatingMode = null;
-let _conversationContext = []; // rolling context for multi-turn
 let _aiInlineModule = null;   // cached dynamic import for ai-inline.js (Bug 30)
 let _lastHealthCheck = 0;     // timestamp of last health check (Bug 32)
 let _lastHealthResult = false; // cached health check result (Bug 32)
+let _savedSelectionRange = null; // saved selection range for Replace action (Bug 60)
 
 // ── Context Detection (exported for ai-inline.js) ────
 
@@ -163,8 +161,8 @@ function getSpreadsheetSelection() {
 // ── Floating Selection Toolbar ─────────────────────
 
 function showFloatingBar(selectedText) {
-  if (!_floatingBar || !_aiAvailable) return;
-  if (_isOpen) return;
+  if (!_floatingBar || !state.aiAvailable) return;
+  if (state.aiPanelOpen) return;
   if (state.readOnlyMode) return;
 
   const sel = window.getSelection();
@@ -242,7 +240,7 @@ async function floatingAction(action) {
   } catch (err) {
     console.warn('[ai-panel] Inline module unavailable, falling back to panel:', err);
     // Fallback: open panel and submit
-    if (!_isOpen) toggleAIPanel();
+    if (!state.aiPanelOpen) toggleAIPanel();
     await new Promise(r => setTimeout(r, 300));
     const actionMap = {
       improve: { mode: 'writer', prompt: `Improve this text for clarity and flow:\n\n${text}` },
@@ -267,7 +265,7 @@ async function floatingAction(action) {
 // ── Proactive Hints ────────────────────────────────
 
 function showHint(message) {
-  if (!_aiAvailable) return;
+  if (!state.aiAvailable) return;
 
   const hint = $('aiHintBubble');
   if (!hint) return;
@@ -290,7 +288,7 @@ function dismissHint() {
 }
 
 function checkForHints() {
-  if (!_aiAvailable || _isOpen) return;
+  if (!state.aiAvailable || state.aiPanelOpen) return;
 
   const context = detectContext();
 
@@ -323,12 +321,11 @@ async function runAI(mode, userMessage) {
   const systemPrompt = buildContextPrompt(mode, context);
 
   state.aiGenerating = true;
+  // Track AI panel usage (Enhancement 88)
+  import('./analytics.js').then(m => m.trackEvent('ai_panel', mode)).catch(() => {});
   _sendBtn.style.display = 'none';
   _stopBtn.style.display = 'flex';
   showTyping();
-
-  _conversationContext.push({ role: 'user', content: userMessage });
-  if (_conversationContext.length > 12) _conversationContext = _conversationContext.slice(-12);
 
   try {
     let responseDiv = null;
@@ -336,7 +333,7 @@ async function runAI(mode, userMessage) {
 
     await aiComplete(mode, userMessage, {
       systemPrompt,
-      context: _conversationContext,
+      context: state.aiConversation,
       onChunk(chunk) {
         hideTyping();
         if (!responseDiv) {
@@ -358,7 +355,10 @@ async function runAI(mode, userMessage) {
       appendActionButtons(responseDiv, fullText);
     }
 
-    _conversationContext.push({ role: 'assistant', content: fullText });
+    state.aiConversation.push({ role: 'user', content: userMessage });
+    state.aiConversation.push({ role: 'assistant', content: fullText });
+    if (state.aiConversation.length > 12) state.aiConversation = state.aiConversation.slice(-12);
+    try { sessionStorage.setItem('rudra_ai_conversation', JSON.stringify(state.aiConversation)); } catch (_) {}
 
   } catch (err) {
     hideTyping();
@@ -426,7 +426,36 @@ function appendActionButtons(div, text) {
 
 /** Replace selection via WASM ops for undo/redo and collaboration support */
 function replaceSelection(text) {
-  const sel = window.getSelection();
+  let sel = window.getSelection();
+
+  // If current selection is collapsed, try saved range (Bug 60, Bug 75)
+  if ((!sel || sel.isCollapsed) && _savedSelectionRange) {
+    if (_savedSelectionRange.nodeId) {
+      // Reconstruct selection from saved nodeId + text (Bug 75 — stale-resistant)
+      const savedNode = $('editorCanvas')?.querySelector(`[data-node-id="${_savedSelectionRange.nodeId}"]`);
+      if (savedNode) {
+        const paraText = savedNode.textContent || '';
+        const idx = paraText.indexOf(_savedSelectionRange.text);
+        if (idx !== -1) {
+          const range = document.createRange();
+          const textNode = savedNode.firstChild;
+          if (textNode) {
+            range.setStart(textNode, idx);
+            range.setEnd(textNode, idx + _savedSelectionRange.text.length);
+            sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }
+      }
+    } else {
+      // Legacy: DOM Range fallback
+      sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(_savedSelectionRange);
+    }
+  }
+
   if (!sel || sel.isCollapsed || !sel.rangeCount) return;
 
   // Find the target paragraph node
@@ -446,9 +475,11 @@ function replaceSelection(text) {
       const startIdx = fullText.indexOf(selectedText);
 
       if (startIdx !== -1) {
-        // Use replace_text which preserves formatting of untouched runs (Bug 1 fix)
-        // Signature: replace_text(node_id, offset, length, replacement)
-        doc.replace_text(nodeId, startIdx, selectedText.length, text);
+        // Use replace_text which preserves formatting of untouched runs (Bug 1 fix).
+        // WASM expects Unicode codepoint offsets, not JS UTF-16 code units (Bug 42 fix).
+        const cpOffset = Array.from(fullText.slice(0, startIdx)).length;
+        const cpLength = Array.from(selectedText).length;
+        doc.replace_text(nodeId, cpOffset, cpLength, text);
 
         const before = fullText.slice(0, startIdx);
         const after = fullText.slice(startIdx + selectedText.length);
@@ -464,6 +495,8 @@ function replaceSelection(text) {
 
   // No DOM fallback — would create WASM/DOM divergence (Bug 5 fix)
   console.error('[ai-panel] Replace failed — no WASM path available');
+  // Show user-visible error (Bug 45 fix)
+  import('./toolbar-handlers.js').then(m => m.showToast('Replace failed — please try again', 'error')).catch(() => {});
 }
 
 /** Insert text below current paragraph via WASM ops */
@@ -486,6 +519,11 @@ function insertBelow(text) {
       // attributes. Mark dirty and let the render pipeline build correct DOM
       // on the next render cycle (Bug 6 fix).
       state.dirty = true;
+      // Trigger re-render so the new paragraph appears in DOM (Bug 46 fix)
+      try {
+        const editorCanvas = $('editorCanvas');
+        if (editorCanvas) editorCanvas.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (_) {}
       return;
     } catch (err) {
       console.warn('[ai-panel] WASM insert failed:', err);
@@ -494,6 +532,8 @@ function insertBelow(text) {
 
   // No DOM fallback — would create WASM/DOM divergence (Bug 6 fix)
   console.error('[ai-panel] Insert below failed — no WASM path available');
+  // Show user-visible error (Bug 45 fix)
+  import('./toolbar-handlers.js').then(m => m.showToast('Insert failed — please try again', 'error')).catch(() => {});
 }
 
 function formatAIResponse(text) {
@@ -548,6 +588,21 @@ async function sendMessage() {
 
   if (!userMessage) return;
 
+  // Save selection for later Replace action (Bug 60, Bug 75 — store nodeId + text instead of DOM Range)
+  const currentSel = window.getSelection();
+  if (currentSel && currentSel.rangeCount > 0 && !currentSel.isCollapsed) {
+    // Store nodeId + text instead of DOM Range (stale-resistant)
+    const selText = currentSel.toString();
+    let selNode = currentSel.anchorNode;
+    while (selNode && selNode.nodeType !== 1) selNode = selNode.parentNode;
+    while (selNode && !selNode.dataset?.nodeId) selNode = selNode.parentNode;
+    if (selNode?.dataset?.nodeId) {
+      _savedSelectionRange = { nodeId: selNode.dataset.nodeId, text: selText };
+    } else {
+      _savedSelectionRange = currentSel.getRangeAt(0).cloneRange();
+    }
+  }
+
   const displayText = text || `[${_modeSelect.options[_modeSelect.selectedIndex].text}]`;
   if (selectedText && !text) {
     addMessage('user', displayText + '\n' + selectedText.slice(0, 100) + (selectedText.length > 100 ? '...' : ''), { noActions: true });
@@ -564,10 +619,9 @@ async function sendMessage() {
 // ── Panel Toggle ───────────────────────────────────
 
 export function toggleAIPanel() {
-  _isOpen = !_isOpen;
-  state.aiPanelOpen = _isOpen;
+  state.aiPanelOpen = !state.aiPanelOpen;
 
-  if (_isOpen) {
+  if (state.aiPanelOpen) {
     _panel.style.display = 'flex';
     _panel.offsetHeight; // force reflow
     _panel.classList.add('show');
@@ -576,17 +630,27 @@ export function toggleAIPanel() {
     dismissHint();
     updateContextIndicator();
 
+    // One-time warning for external AI endpoints (Bug 66)
+    const aiUrl = window.S1_CONFIG?.aiUrl || '';
+    const isExternal = aiUrl && !aiUrl.includes('localhost') && !aiUrl.includes('127.0.0.1');
+    if (isExternal && !localStorage.getItem('rudra_ai_external_consent')) {
+      let host;
+      try { host = new URL(aiUrl).hostname; } catch { host = aiUrl; }
+      addMessage('ai', `Note: AI features will send selected text to ${host}. Your document content is transmitted to process AI requests. This is a one-time notice.`, { isError: false, noActions: true });
+      localStorage.setItem('rudra_ai_external_consent', '1');
+    }
+
     // Cache health check result for 30 seconds (Bug 32)
     const now = Date.now();
     if (now - _lastHealthCheck > 30000) {
       checkAIHealth().then(ok => {
         _lastHealthCheck = Date.now();
         _lastHealthResult = ok;
-        _aiAvailable = ok;
         state.aiAvailable = ok;
         _status.className = 'ai-panel-status ' + (ok ? 'connected' : 'error');
         _status.title = ok ? 'AI connected' : 'AI not reachable — start the sidecar with: docker compose up rudra-ai';
         if (!ok) {
+          _lastFloatingMode = null; // Reset so buttons rebuild when AI comes back (Bug 56)
           addMessage('ai', 'AI sidecar is not running. Start it with:\ndocker compose up rudra-ai', { isError: true, noActions: true });
         }
       });
@@ -596,7 +660,7 @@ export function toggleAIPanel() {
     }
   } else {
     _panel.classList.remove('show');
-    setTimeout(() => { if (!_isOpen) _panel.style.display = 'none'; }, 260);
+    setTimeout(() => { if (!state.aiPanelOpen) _panel.style.display = 'none'; }, 260);
   }
 }
 
@@ -637,6 +701,47 @@ export function initAIPanel() {
 
   if (!_panel) return;
 
+  // Drag-to-resize handle (Enhancement 86)
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'ai-panel-resize-handle';
+  resizeHandle.title = 'Drag to resize';
+  _panel.insertBefore(resizeHandle, _panel.firstChild);
+
+  let _resizing = false;
+  let _startX = 0;
+  let _startWidth = 0;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    _resizing = true;
+    _startX = e.clientX;
+    _startWidth = _panel.offsetWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!_resizing) return;
+    const delta = _startX - e.clientX; // Left edge drag = invert
+    const newWidth = Math.max(280, Math.min(600, _startWidth + delta));
+    _panel.style.width = newWidth + 'px';
+    _panel.style.minWidth = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (_resizing) {
+      _resizing = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+
+  // Restore conversation from session (Enhancement 68)
+  try {
+    const saved = sessionStorage.getItem('rudra_ai_conversation');
+    if (saved) state.aiConversation = JSON.parse(saved);
+  } catch (_) {}
+
   // Close
   $('aiPanelClose')?.addEventListener('click', toggleAIPanel);
 
@@ -669,8 +774,8 @@ export function initAIPanel() {
   // Clear conversation
   $('aiClearBtn')?.addEventListener('click', () => {
     _messages.innerHTML = '<div class="ai-welcome"><p>Select text in your document, then ask AI to help.</p><p class="ai-welcome-hint">Or type a question below.</p></div>';
-    _conversationContext = [];
     state.aiConversation = [];
+    sessionStorage.removeItem('rudra_ai_conversation');
   });
 
   // Menu item
@@ -715,7 +820,15 @@ export function initAIPanel() {
     }, 400);
   });
 
-  // Hide floating bar on scroll or click outside
+  // Hide floating bar on scroll (Bug 58)
+  const editorCanvas = $('editorCanvas');
+  if (editorCanvas) {
+    editorCanvas.addEventListener('scroll', () => {
+      if (state.aiFloatingBarVisible) hideFloatingBar();
+    }, { passive: true });
+  }
+
+  // Hide floating bar on click outside
   document.addEventListener('mousedown', (e) => {
     if (_floatingBar && !_floatingBar.contains(e.target)) {
       hideFloatingBar();
@@ -734,15 +847,15 @@ export function initAIPanel() {
 
   // Update context when view changes
   const viewObserver = new MutationObserver(() => {
-    if (_isOpen) updateContextIndicator();
+    if (state.aiPanelOpen) updateContextIndicator();
   });
   const toolbar = $('toolbar');
   if (toolbar) viewObserver.observe(toolbar, { attributes: true, subtree: true });
 
   // Check AI health at startup (silently)
   checkAIHealth().then(ok => {
-    _aiAvailable = ok;
     state.aiAvailable = ok;
+    if (!ok) _lastFloatingMode = null; // Reset so buttons rebuild when AI comes back (Bug 56)
     if (ok) {
       setTimeout(() => checkForHints(), 10000);
     }

@@ -183,9 +183,9 @@ pub fn detect_format(data: &[u8]) -> Option<SourceFormat> {
 pub enum FileType {
     /// DOCX (Office Open XML).
     Docx,
-    /// Microsoft Excel XLSX (Office Open XML Spreadsheet).
+    /// XLSX (Office Open XML Spreadsheet).
     Xlsx,
-    /// Microsoft PowerPoint PPTX (Office Open XML Presentation).
+    /// PPTX (Office Open XML Presentation).
     Pptx,
     /// OpenDocument Text (.odt).
     Odt,

@@ -90,8 +90,11 @@ export function showInlineAIPrompt() {
   if (sel && sel.rangeCount > 0) {
     const range = sel.getRangeAt(0);
     const rect = range.getBoundingClientRect();
-    _promptEl.style.top = rect.bottom + 4 + 'px';
-    _promptEl.style.left = Math.max(8, rect.left) + 'px';
+    let top = rect.bottom + 4;
+    // Clamp to viewport — if prompt would go below visible area, show above cursor
+    if (top + 80 > window.innerHeight) top = Math.max(8, rect.top - 80);
+    _promptEl.style.top = top + 'px';
+    _promptEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 300)) + 'px';
   }
 
   _promptEl.style.display = 'block';
@@ -116,8 +119,10 @@ function positionSuggestionNearNode(nodeId) {
   const nodeEl = canvas.querySelector(`[data-node-id="${nodeId}"]`);
   if (nodeEl) {
     const rect = nodeEl.getBoundingClientRect();
-    _suggestionEl.style.top = rect.bottom + 4 + 'px';
-    _suggestionEl.style.left = Math.max(8, rect.left) + 'px';
+    let top = rect.bottom + 4;
+    if (top + 200 > window.innerHeight) top = Math.max(8, rect.top - 200);
+    _suggestionEl.style.top = top + 'px';
+    _suggestionEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 340)) + 'px';
   }
 }
 
@@ -128,16 +133,68 @@ export function showInlineSuggestion(nodeId, original, suggested, action, startO
 
   state.aiInlineSuggestion = { nodeId, original, suggested, action, startOffset: startOffset ?? 0, multiNodeInfo: multiNodeInfo || null };
 
-  // Render word-level diff
-  _diffEl.innerHTML = renderDiffHTML(original, suggested);
+  // Show action label (Bug 59) + character count delta (Enhancement 90)
+  const actionLabels = { improve: 'Improve', shorter: 'Shorten', longer: 'Expand', grammar: 'Grammar', translate: 'Translate', custom: 'Custom' };
+  const label = actionLabels[action] || action;
+  const delta = suggested.length - original.length;
+  const deltaStr = delta > 0 ? `+${delta}` : String(delta);
+  const deltaColor = delta > 0 ? 'var(--success, #188038)' : delta < 0 ? 'var(--danger, #d93025)' : 'var(--text-muted)';
+  _diffEl.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;font-weight:500;">AI: ${escapeHTML(label)} <span style="color:${deltaColor};font-weight:400">(${deltaStr} chars)</span></div>` + renderDiffHTML(original, suggested);
 
   positionSuggestionNearNode(nodeId);
   _suggestionEl.style.display = 'block';
+  // Ensure suggestion is visible in viewport
+  requestAnimationFrame(() => {
+    _suggestionEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
 }
 
 export function hideInlineSuggestion() {
   if (_suggestionEl) _suggestionEl.style.display = 'none';
   state.aiInlineSuggestion = null;
+}
+
+// ── Table Detection & Insert (Enhancement 71) ──────
+
+function tryInsertAsTable(nodeId, aiText) {
+  // Detect markdown table format: lines with | separators
+  const lines = aiText.trim().split('\n').filter(l => l.includes('|'));
+  if (lines.length < 2) return false; // Not a table
+
+  // Skip separator lines (--- | ---)
+  const dataLines = lines.filter(l => !l.match(/^\s*\|?\s*[-:]+\s*(\|\s*[-:]+\s*)*\|?\s*$/));
+  if (dataLines.length < 1) return false;
+
+  // Parse cells
+  const rows = dataLines.map(l =>
+    l.split('|').map(c => c.trim()).filter(c => c !== '')
+  );
+  if (rows.length === 0 || rows[0].length === 0) return false;
+
+  const numCols = Math.max(...rows.map(r => r.length));
+  const numRows = rows.length;
+
+  const doc = state.doc;
+  if (!doc) return false;
+
+  try {
+    // Insert table via WASM
+    doc.insert_table(nodeId, numRows, numCols);
+
+    // Trigger re-render so the table appears in DOM
+    const editorCanvas = $('editorCanvas');
+    if (editorCanvas) editorCanvas.dispatchEvent(new Event('input', { bubbles: true }));
+
+    state.dirty = true;
+    state.undoHistory = state.undoHistory || [];
+    state.undoHistory.unshift({ label: 'AI table inserted', timestamp: Date.now() });
+    if (state.undoHistory.length > 50) state.undoHistory.length = 50;
+
+    return true;
+  } catch (e) {
+    console.warn('[ai-inline] Table insert failed:', e);
+    return false;
+  }
 }
 
 // ── Core AI Action Trigger ──────────────────────────
@@ -194,13 +251,27 @@ export async function triggerAIAction(action, customPrompt) {
 
   if (!selectedText) return;
 
-  // Capture the offset of the selected text within the paragraph (Bug 2 fix)
+  // Capture the offset of the selected text within the paragraph.
+  // Uses the browser Selection API to compute the actual character offset,
+  // avoiding indexOf failures with duplicate text (Bug 44 fix).
   let selStartOffset = 0;
-  if (targetNodeId) {
-    const el = $('editorCanvas')?.querySelector(`[data-node-id="${targetNodeId}"]`);
-    const paraText = el?.textContent || '';
-    const idx = paraText.indexOf(selectedText);
-    selStartOffset = idx >= 0 ? idx : 0;
+  if (sel && sel.rangeCount > 0 && targetNodeId) {
+    try {
+      const range = sel.getRangeAt(0);
+      const paraEl = $('editorCanvas')?.querySelector(`[data-node-id="${targetNodeId}"]`);
+      if (paraEl) {
+        const preRange = document.createRange();
+        preRange.setStart(paraEl, 0);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        selStartOffset = preRange.toString().length;
+      }
+    } catch (_) {
+      // Fallback to indexOf
+      const el = $('editorCanvas')?.querySelector(`[data-node-id="${targetNodeId}"]`);
+      const paraText = el?.textContent || '';
+      const idx = paraText.indexOf(selectedText);
+      selStartOffset = idx >= 0 ? idx : 0;
+    }
   }
 
   const context = detectContext();
@@ -214,13 +285,16 @@ export async function triggerAIAction(action, customPrompt) {
   };
 
   const prompt = actionPrompts[action] || actionPrompts.custom;
-  const mode = action === 'grammar' ? 'writer' : 'writer';
+  const mode = action === 'grammar' ? 'grammar' : 'writer';
   const systemPrompt = buildContextPrompt(mode, context);
 
   _lastAction = action;
   _lastPrompt = customPrompt || '';
 
   state.aiGenerating = true;
+
+  // Track AI action usage (Enhancement 88)
+  import('./analytics.js').then(m => m.trackEvent('ai_action', action)).catch(() => {});
 
   // Show loading indicator
   _suggestionEl = $('aiInlineSuggestion');
@@ -267,10 +341,25 @@ export async function triggerAIAction(action, customPrompt) {
     }
 
   } catch (err) {
-    if (err.name !== 'AbortError') {
+    if (err.name === 'AbortError') {
+      // Check if it was a timeout
+      const isTimeout = err.message?.includes('timed out') || (err.cause && String(err.cause).includes('timed out'));
+      if (isTimeout) {
+        // Show timeout-specific feedback in the suggestion area
+        if (_diffEl) _diffEl.innerHTML = '<span class="ai-inline-loading" style="color:var(--danger)">Request timed out. Try a shorter selection.</span>';
+        if (_suggestionEl) _suggestionEl.style.display = 'block';
+        // Auto-hide after 3 seconds
+        setTimeout(() => hideInlineSuggestion(), 3000);
+      } else {
+        hideInlineSuggestion();
+      }
+    } else {
       console.error('[ai-inline] Error:', err);
+      // Show error in suggestion area
+      if (_diffEl) _diffEl.innerHTML = '<span class="ai-inline-loading" style="color:var(--danger)">AI error: ' + escapeHTML(err.message || 'Unknown error') + '</span>';
+      if (_suggestionEl) _suggestionEl.style.display = 'block';
+      setTimeout(() => hideInlineSuggestion(), 4000);
     }
-    hideInlineSuggestion();
   } finally {
     state.aiGenerating = false;
     _lastRequestTime = Date.now(); // rate limiting cooldown (Enhancement 39)
@@ -287,25 +376,73 @@ export function acceptSuggestion() {
   const doc = state.doc;
   if (!doc) { hideInlineSuggestion(); return; }
 
+  // Check if AI generated a table — insert as real WASM table (Enhancement 71)
+  if (suggestion.action === 'custom' && suggested.includes('|') && suggested.split('\n').filter(l => l.includes('|')).length >= 2) {
+    if (tryInsertAsTable(nodeId, suggested)) {
+      hideInlineSuggestion();
+      return;
+    }
+  }
+
   try {
     if (multiNodeInfo && multiNodeInfo.length > 1) {
       // ── Multi-paragraph accept (Bug #35) ──────────────────────
+      // Verify paragraphs haven't been modified by collaborators since trigger time (Bug 54)
+      let staleDetected = false;
+      for (const para of multiNodeInfo) {
+        const el = $('editorCanvas')?.querySelector(`[data-node-id="${para.nodeId}"]`);
+        const currentText = el?.textContent || '';
+        if (currentText !== para.text) {
+          staleDetected = true;
+          break;
+        }
+      }
+      if (staleDetected) {
+        // Show warning in the suggestion area instead of silently applying
+        if (_diffEl) {
+          _diffEl.innerHTML = '<span class="ai-inline-loading" style="color:var(--danger)">Document was modified while AI was generating. Please retry.</span>';
+        }
+        if (_suggestionEl) _suggestionEl.style.display = 'block';
+        setTimeout(() => hideInlineSuggestion(), 4000);
+        return;
+      }
+
       // Split the AI-suggested text into paragraph-sized chunks by newlines.
       // Apply each chunk to its corresponding paragraph via set_paragraph_text.
-      const suggestedParas = suggested.split('\n');
+      const suggestedParas = suggested.split('\n').filter(s => s.trim());
+
+      // Warn if paragraph count doesn't match (Bug 74 fix)
+      if (suggestedParas.length !== multiNodeInfo.length) {
+        // If AI returned fewer paragraphs, pad with empty strings
+        while (suggestedParas.length < multiNodeInfo.length) {
+          suggestedParas.push('');
+        }
+        // If AI returned more, join the extras into the last paragraph
+        if (suggestedParas.length > multiNodeInfo.length) {
+          const extra = suggestedParas.splice(multiNodeInfo.length);
+          suggestedParas[multiNodeInfo.length - 1] += '\n' + extra.join('\n');
+        }
+      }
 
       for (let i = 0; i < multiNodeInfo.length; i++) {
         const para = multiNodeInfo[i];
         const newText = i < suggestedParas.length ? suggestedParas[i] : '';
         try {
-          doc.set_paragraph_text(para.nodeId, newText);
-          // Update DOM to reflect the change
-          const el = $('editorCanvas')?.querySelector(`[data-node-id="${para.nodeId}"]`);
-          if (el) el.textContent = newText;
+          // Use replace_text instead of set_paragraph_text to preserve
+          // formatting on runs not touched by the replacement (Bug 43 fix).
+          const cpLen = Array.from(para.text).length;
+          doc.replace_text(para.nodeId, 0, cpLen, newText);
+          // DOM will be updated by re-render below
         } catch (e) {
           console.warn('[ai-inline] Multi-para replace error for node', para.nodeId, e);
         }
       }
+
+      // Trigger re-render from WASM model to preserve inline elements
+      try {
+        const editorCanvas = $('editorCanvas');
+        if (editorCanvas) editorCanvas.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (_) {}
 
       // Mark dirty and record undo
       state.dirty = true;
@@ -321,21 +458,43 @@ export function acceptSuggestion() {
 
       // Use stored startOffset (captured at action trigger time) to avoid
       // indexOf failures with duplicate text (Bug 2 fix).
-      const offset = startOffset ?? 0;
+      // startOffset is a JS string index (from Selection API / indexOf).
+      const jsOffset = startOffset ?? 0;
+
+      // Verify paragraph hasn't been modified since suggestion was generated (I4 collab guard)
+      const currentText = el.textContent || '';
+      const expectedText = currentText.slice(jsOffset, jsOffset + original.length);
+      if (expectedText !== original) {
+        if (_diffEl) _diffEl.innerHTML = '<span class="ai-inline-loading" style="color:var(--danger)">Paragraph was modified. Please retry.</span>';
+        if (_suggestionEl) _suggestionEl.style.display = 'block';
+        setTimeout(() => hideInlineSuggestion(), 3000);
+        return;
+      }
+
+      // WASM replace_text expects Unicode codepoint offsets, not JS UTF-16 code unit
+      // indices. Convert using Array.from which splits by codepoint (Bug 42 fix).
+      const fullText = currentText;
+      const cpOffset = Array.from(fullText.slice(0, jsOffset)).length;
+      const cpLength = Array.from(original).length;
 
       // Replace via WASM replace_text which preserves formatting of untouched runs (Bug 1 fix).
-      // Signature: replace_text(node_id, offset, length, replacement)
+      // Signature: replace_text(node_id, codepoint_offset, codepoint_length, replacement)
       try {
-        doc.replace_text(nodeId, offset, original.length, suggested);
+        doc.replace_text(nodeId, cpOffset, cpLength, suggested);
       } catch (wasmErr) {
         console.warn('[ai-inline] WASM replace_text failed:', wasmErr);
       }
 
-      // Update DOM to reflect the change
-      const fullText = el.textContent || '';
-      const before = fullText.slice(0, offset);
-      const after = fullText.slice(offset + original.length);
-      el.textContent = before + suggested + after;
+      // Trigger re-render from WASM model to preserve inline elements (images, links, equations)
+      try {
+        const editorCanvas = $('editorCanvas');
+        if (editorCanvas) editorCanvas.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (_) {
+        // Fallback: direct textContent update (loses inline formatting elements)
+        const before = fullText.slice(0, jsOffset);
+        const after = fullText.slice(jsOffset + original.length);
+        el.textContent = before + suggested + after;
+      }
 
       // Mark dirty and record undo (Enhancement 34)
       state.dirty = true;
@@ -349,7 +508,7 @@ export function acceptSuggestion() {
         const range = document.createRange();
         const textNode = el.firstChild;
         if (textNode) {
-          const endPos = offset + suggested.length;
+          const endPos = jsOffset + suggested.length;
           const safePos = Math.min(endPos, textNode.textContent?.length || 0);
           range.setStart(textNode, safePos);
           range.collapse(true);
@@ -379,9 +538,13 @@ export function retrySuggestion() {
 
   hideInlineSuggestion();
 
-  // Re-trigger with the same action
-  if (_lastAction) {
-    triggerAIAction(_lastAction, _lastPrompt || undefined);
+  // Open inline prompt pre-filled with last prompt for editing (Enhancement 89)
+  showInlineAIPrompt();
+  if (_promptInput) {
+    const actionLabels = { improve: 'Improve this text', shorter: 'Make more concise', longer: 'Expand with detail', grammar: 'Fix grammar', translate: 'Translate', custom: '' };
+    const prefill = _lastPrompt || actionLabels[_lastAction] || '';
+    _promptInput.value = prefill;
+    _promptInput.setSelectionRange(0, prefill.length);
   }
 }
 
@@ -419,13 +582,19 @@ export function initAIInline() {
   $('aiInlineReject')?.addEventListener('click', rejectSuggestion);
   $('aiInlineRetry')?.addEventListener('click', retrySuggestion);
 
-  // Keyboard: Escape=reject when suggestion is visible
+  // Keyboard: Escape=reject, Ctrl/Cmd+Enter=accept when suggestion is visible
   document.addEventListener('keydown', (e) => {
     if (!state.aiInlineSuggestion) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      acceptSuggestion();
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       rejectSuggestion();
     }
   });

@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:; worker-src 'self' blob:;">
   <title>Rudra Office</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#1a73e8">
@@ -33,8 +34,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto+Mono:wght@400&display=swap" rel="stylesheet">
   <!-- KaTeX — equation rendering -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Ber5SFKL5rp6u2u0R1iBBcWqo/eOhXDAZlEZhPL" crossorigin="anonymous"></script>
 </head>
 <body>
 <a href="#pageContainer" class="skip-link">Skip to document</a>
@@ -48,22 +49,25 @@
     <div class="sep"></div>
     <input class="doc-name" id="docName" value="Untitled Document" spellcheck="false" title="Document name — click to rename">
     <div class="spacer"></div>
-    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnPages" title="Toggle pages panel"><span class="msi">view_sidebar</span></button>
-    <button class="menu-btn menubar-collapsible-1024" id="btnPropsPanel" title="Toggle properties panel"><span class="msi">tune</span></button>
-    <button class="menu-btn menubar-collapsible-1024" id="btnCommentsToggle" title="Toggle comments panel"><span class="msi">comment</span></button>
-    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnHistory" title="Version History"><span class="msi">history</span></button>
+    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnPages" title="Toggle pages panel" aria-label="Toggle pages panel"><span class="msi">view_sidebar</span></button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnPropsPanel" title="Toggle properties panel" aria-label="Toggle properties panel"><span class="msi">tune</span></button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnCommentsToggle" title="Toggle comments panel" aria-label="Toggle comments panel"><span class="msi">comment</span></button>
+    <button class="menu-btn menubar-collapsible-1024 doc-only-btn" id="btnHistory" title="Version History" aria-label="Version History"><span class="msi">history</span></button>
     <div class="collab-avatars" id="collabAvatars" title="Connected collaborators"></div>
-    <button class="menu-btn menubar-collapsible-1024" id="btnShare" title="Start a collaboration session"><span class="msi">share</span> Share</button>
+    <button class="menu-btn menubar-collapsible-1024" id="btnShare" title="Start a collaboration session" aria-label="Start a collaboration session"><span class="msi">share</span> Share</button>
     <div class="collab-status" id="collabStatus" style="display:none">
       <div class="collab-indicator" id="collabIndicator" title="Connection status"></div>
       <span class="collab-peer-count" id="collabPeerCount"></span>
     </div>
     <div class="sep"></div>
-    <div class="wasm-status">
-      <div class="wasm-dot" id="wasmDot"></div>
-      <span class="wasm-label" id="wasmLabel">loading...</span>
+    <div class="wasm-status" role="status" aria-live="polite">
+      <div class="wasm-dot" id="wasmDot" aria-hidden="true"></div>
+      <span class="wasm-label" id="wasmLabel">Loading...</span>
     </div>
   </div>
+
+  <!-- Open Files Tab Bar -->
+  <div class="file-tab-bar" id="fileTabBar" role="tablist" aria-label="Open files"></div>
 
   <!-- Menu Bar (File / Edit / View / Insert / Format / Tools) -->
   <div class="app-menubar" id="appMenubar" role="menubar" aria-label="Menu bar">
@@ -216,9 +220,9 @@
   </div>
 
   <!-- Hidden file inputs (used by JS) -->
-  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf,.csv,.xlsx" hidden>
-  <input type="file" id="csvInput" accept=".csv,.xlsx" hidden>
-  <input type="file" id="imageInput" accept="image/*" hidden>
+  <input type="file" id="fileInput" accept=".docx,.odt,.txt,.md,.doc,.pdf,.csv,.xlsx" hidden aria-label="Open document file">
+  <input type="file" id="csvInput" accept=".csv,.xlsx" hidden aria-label="Open spreadsheet file">
+  <input type="file" id="imageInput" accept="image/*" hidden aria-label="Insert image file">
 
   <!-- Toolbar -->
   <div class="toolbar" id="toolbar" role="toolbar" aria-label="Formatting toolbar">
@@ -807,12 +811,12 @@
   <div class="pdf-view" id="pdfView">
     <div class="pdf-toolbar" id="pdfToolbar">
       <div class="pdf-toolbar-group">
-        <button class="tb-btn" id="pdfPrevPage" title="Previous page"><span class="msi">navigate_before</span></button>
+        <button class="tb-btn" id="pdfPrevPage" title="Previous page" aria-label="Previous page"><span class="msi">navigate_before</span></button>
         <span class="pdf-page-info" id="pdfPageInfo">1 / 1</span>
-        <button class="tb-btn" id="pdfNextPage" title="Next page"><span class="msi">navigate_next</span></button>
+        <button class="tb-btn" id="pdfNextPage" title="Next page" aria-label="Next page"><span class="msi">navigate_next</span></button>
       </div>
       <div class="pdf-toolbar-group">
-        <button class="tb-btn" id="pdfZoomOut" title="Zoom out"><span class="msi">remove</span></button>
+        <button class="tb-btn" id="pdfZoomOut" title="Zoom out" aria-label="Zoom out"><span class="msi">remove</span></button>
         <select class="pdf-zoom-select" id="pdfZoomSelect" title="Zoom level">
           <option value="0.5">50%</option>
           <option value="0.75">75%</option>
@@ -823,7 +827,7 @@
           <option value="fit-page">Fit Page</option>
           <option value="fit-width">Fit Width</option>
         </select>
-        <button class="tb-btn" id="pdfZoomIn" title="Zoom in"><span class="msi">add</span></button>
+        <button class="tb-btn" id="pdfZoomIn" title="Zoom in" aria-label="Zoom in"><span class="msi">add</span></button>
       </div>
       <div class="pdf-toolbar-group pdf-tools">
         <button class="tb-btn pdf-tool-btn active" id="pdfToolSelect" data-tool="select" title="Select text" aria-pressed="true" aria-label="Select text"><span class="msi">near_me</span></button>
@@ -851,7 +855,7 @@
       <div class="pdf-annotations-panel" id="pdfAnnotationsPanel">
         <div class="pdf-annot-header">
           <h3>Annotations</h3>
-          <button class="pdf-annot-close" id="pdfAnnotClose" title="Close panel"><span class="msi">close</span></button>
+          <button class="pdf-annot-close" id="pdfAnnotClose" title="Close panel" aria-label="Close panel"><span class="msi">close</span></button>
         </div>
         <div class="pdf-annot-list" id="pdfAnnotList"></div>
       </div>
@@ -905,7 +909,8 @@
         <button class="app-menu-btn" role="menuitem" aria-haspopup="true" aria-expanded="false" tabindex="-1">Insert</button>
         <div class="app-menu-dropdown" id="ssInsertMenu" role="menu" aria-label="Insert">
           <button class="app-menu-entry" id="ssMenuInsertChart" role="menuitem" tabindex="-1" title="Insert a chart from selected data"><span class="msi">bar_chart</span> Chart...</button>
-          <button class="app-menu-entry disabled" role="menuitem" tabindex="-1" title="Image insertion is not available yet" aria-disabled="true"><span class="msi">image</span> Image</button>
+          <button class="app-menu-entry" id="ssMenuInsertImage" role="menuitem" tabindex="-1" title="Insert an image from file"><span class="msi">image</span> Image</button>
+          <button class="app-menu-entry" id="ssMenuInsertShape" role="menuitem" tabindex="-1" title="Insert a shape or text box"><span class="msi">shapes</span> Shape...</button>
           <div class="app-menu-sep" role="separator"></div>
           <button class="app-menu-entry" id="ssMenuFunction" role="menuitem" tabindex="-1" title="Insert a function into the selected cell"><span class="msi">functions</span> Function</button>
           <div class="app-menu-sep" role="separator"></div>
@@ -942,8 +947,8 @@
 
     <!-- S1.2: Spreadsheet Formatting Toolbar -->
     <div class="ss-toolbar" id="ssToolbar">
-      <button class="tb-btn" id="ssUndo" title="Undo (Ctrl+Z)"><span class="msi">undo</span></button>
-      <button class="tb-btn" id="ssRedo" title="Redo (Ctrl+Y)"><span class="msi">redo</span></button>
+      <button class="tb-btn" id="ssUndo" title="Undo (Ctrl+Z)" aria-label="Undo"><span class="msi">undo</span></button>
+      <button class="tb-btn" id="ssRedo" title="Redo (Ctrl+Y)" aria-label="Redo"><span class="msi">redo</span></button>
       <div class="tb-sep" role="separator"></div>
       <select class="ss-tb-select" id="ssFontFamily" title="Font family">
         <option value="Arial, sans-serif">Arial</option>
@@ -973,30 +978,30 @@
         <option value="72">72</option>
       </select>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssBold" title="Bold (Ctrl+B)"><b>B</b></button>
-      <button class="tb-btn" id="ssItalic" title="Italic (Ctrl+I)"><i>I</i></button>
-      <button class="tb-btn" id="ssUnderline" title="Underline (Ctrl+U)"><u>U</u></button>
-      <button class="tb-btn" id="ssStrikethrough" title="Strikethrough"><s>S</s></button>
+      <button class="tb-btn" id="ssBold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+      <button class="tb-btn" id="ssItalic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+      <button class="tb-btn" id="ssUnderline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+      <button class="tb-btn" id="ssStrikethrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button>
       <div class="tb-sep" role="separator"></div>
-      <label class="tb-btn ss-color-btn" title="Font color" id="ssFontColorWrap">
+      <label class="tb-btn ss-color-btn" title="Font color" id="ssFontColorWrap" aria-label="Font color">
         <span class="msi">format_color_text</span>
         <input type="color" id="ssFontColor" value="#000000" class="ss-color-input">
         <span class="ss-color-indicator" id="ssFontColorBar" style="background:#000000"></span>
       </label>
-      <label class="tb-btn ss-color-btn" title="Fill color" id="ssFillColorWrap">
+      <label class="tb-btn ss-color-btn" title="Fill color" id="ssFillColorWrap" aria-label="Fill color">
         <span class="msi">format_color_fill</span>
         <input type="color" id="ssFillColor" value="#ffffff" class="ss-color-input">
         <span class="ss-color-indicator" id="ssFillColorBar" style="background:#ffffff"></span>
       </label>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssBorders" title="Borders" disabled><span class="msi">border_all</span></button>
+      <button class="tb-btn" id="ssBorders" title="Borders" aria-label="Borders" disabled><span class="msi">border_all</span></button>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssAlignLeft" title="Align left"><span class="msi">format_align_left</span></button>
-      <button class="tb-btn" id="ssAlignCenter" title="Align center"><span class="msi">format_align_center</span></button>
-      <button class="tb-btn" id="ssAlignRight" title="Align right"><span class="msi">format_align_right</span></button>
+      <button class="tb-btn" id="ssAlignLeft" title="Align left" aria-label="Align left"><span class="msi">format_align_left</span></button>
+      <button class="tb-btn" id="ssAlignCenter" title="Align center" aria-label="Align center"><span class="msi">format_align_center</span></button>
+      <button class="tb-btn" id="ssAlignRight" title="Align right" aria-label="Align right"><span class="msi">format_align_right</span></button>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssMergeCells" title="Merge cells"><span class="msi">call_merge</span></button>
-      <button class="tb-btn" id="ssTextWrap" title="Toggle text wrap"><span class="msi">wrap_text</span></button>
+      <button class="tb-btn" id="ssMergeCells" title="Merge cells" aria-label="Merge cells"><span class="msi">call_merge</span></button>
+      <button class="tb-btn" id="ssTextWrap" title="Toggle text wrap" aria-label="Toggle text wrap"><span class="msi">wrap_text</span></button>
       <div class="tb-sep" role="separator"></div>
       <select class="ss-tb-select" id="ssNumberFormat" title="Number format">
         <option value="general">General</option>
@@ -1008,7 +1013,7 @@
         <option value="scientific">Scientific</option>
       </select>
       <div class="tb-sep" role="separator"></div>
-      <button class="tb-btn" id="ssFindReplace" title="Find & Replace (Ctrl+F)"><span class="msi">search</span></button>
+      <button class="tb-btn" id="ssFindReplace" title="Find & Replace (Ctrl+F)" aria-label="Find and Replace"><span class="msi">search</span></button>
     </div>
 
     <div class="spreadsheet-container" id="spreadsheetContainer">
@@ -1050,18 +1055,18 @@
   <div class="ai-hint-bubble" id="aiHintBubble" style="display:none" role="alert" aria-live="polite"></div>
 
   <!-- AI Inline Prompt (appears at cursor for /ai command) -->
-  <div class="ai-inline-prompt" id="aiInlinePrompt" style="display:none">
-    <input class="ai-inline-prompt-input" id="aiInlinePromptInput" type="text" placeholder="Tell AI what to do..." title="Type an instruction for AI" autocomplete="off">
+  <div class="ai-inline-prompt" id="aiInlinePrompt" style="display:none" role="dialog" aria-label="AI instruction prompt">
+    <input class="ai-inline-prompt-input" id="aiInlinePromptInput" type="text" placeholder="Tell AI what to do..." title="Type an instruction for AI" autocomplete="off" maxlength="500" aria-label="AI instruction">
     <span class="ai-inline-prompt-hint">Enter to submit, Esc to cancel</span>
   </div>
 
   <!-- AI Inline Suggestion (diff view with accept/reject) -->
-  <div class="ai-inline-suggestion" id="aiInlineSuggestion" style="display:none">
+  <div class="ai-inline-suggestion" id="aiInlineSuggestion" style="display:none" role="region" aria-label="AI suggestion">
     <div class="ai-inline-diff" id="aiInlineDiff"></div>
     <div class="ai-inline-actions">
-      <button class="ai-inline-accept" id="aiInlineAccept" title="Accept suggestion (Enter)"><span class="msi" style="font-size:16px">check</span> Accept</button>
+      <button class="ai-inline-accept" id="aiInlineAccept" title="Accept suggestion (Ctrl+Enter)"><span class="msi" style="font-size:16px">check</span> Accept</button>
       <button class="ai-inline-reject" id="aiInlineReject" title="Reject suggestion (Escape)"><span class="msi" style="font-size:16px">close</span> Reject</button>
-      <button class="ai-inline-retry" id="aiInlineRetry" title="Try again with same prompt"><span class="msi" style="font-size:16px">refresh</span> Retry</button>
+      <button class="ai-inline-retry" id="aiInlineRetry" title="Retry with editable prompt"><span class="msi" style="font-size:16px">refresh</span> Retry</button>
     </div>
   </div>
 
@@ -1161,9 +1166,9 @@
 </div>
 
 <!-- Table Insert Modal -->
-<div class="modal-overlay" id="tableModal" role="dialog" aria-modal="true" aria-label="Insert Table">
+<div class="modal-overlay" id="tableModal" role="dialog" aria-modal="true" aria-labelledby="tableModalTitle">
   <div class="modal">
-    <h3><span class="msi modal-icon">table</span> Insert Table</h3>
+    <h3 id="tableModalTitle"><span class="msi modal-icon">table</span> Insert Table</h3>
     <label>Rows: <input type="number" id="tableRows" value="3" min="1" max="50"></label>
     <label>Columns: <input type="number" id="tableCols" value="3" min="1" max="20"></label>
     <div class="modal-actions">
@@ -1174,9 +1179,9 @@
 </div>
 
 <!-- Comment Insert Modal -->
-<div class="modal-overlay" id="commentModal" role="dialog" aria-modal="true" aria-label="Add Comment">
+<div class="modal-overlay" id="commentModal" role="dialog" aria-modal="true" aria-labelledby="commentModalTitle">
   <div class="modal">
-    <h3><span class="msi modal-icon">add_comment</span> Add Comment</h3>
+    <h3 id="commentModalTitle"><span class="msi modal-icon">add_comment</span> Add Comment</h3>
     <label>Comment: <textarea id="commentText" rows="3" placeholder="Write your comment..." style="width:100%;resize:vertical;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></textarea></label>
     <label>Author: <input type="text" id="commentAuthor" value="User" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
     <div class="modal-actions">
@@ -1187,9 +1192,9 @@
 </div>
 
 <!-- Hyperlink Insert Modal -->
-<div class="modal-overlay" id="linkModal" role="dialog" aria-modal="true" aria-label="Insert Hyperlink">
+<div class="modal-overlay" id="linkModal" role="dialog" aria-modal="true" aria-labelledby="linkModalTitle">
   <div class="modal">
-    <h3><span class="msi modal-icon">link</span> Insert Hyperlink</h3>
+    <h3 id="linkModalTitle"><span class="msi modal-icon">link</span> Insert Hyperlink</h3>
     <label>URL: <input type="url" id="linkUrl" placeholder="https://example.com" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-ui);font-size:13px;outline:none"></label>
     <div class="modal-actions">
       <button id="linkCancelBtn">Cancel</button>
@@ -1854,7 +1859,7 @@
       <div class="sig-upload-area" id="sigUploadArea">
         <span class="msi">upload_file</span>
         <span>Click or drop an image</span>
-        <input type="file" id="sigUploadInput" accept="image/*">
+        <input type="file" id="sigUploadInput" accept="image/*" aria-label="Upload signature image">
       </div>
       <div class="sig-upload-preview" id="sigUploadPreview"></div>
     </div>
@@ -1872,7 +1877,7 @@
     <div class="pdf-page-grid" id="pdfPageGrid"></div>
     <div class="modal-actions">
       <button id="pdfPageMergeBtn" title="Merge another PDF"><span class="msi">merge</span> Merge PDF</button>
-      <input type="file" id="pdfMergeInput" accept=".pdf" style="display:none">
+      <input type="file" id="pdfMergeInput" accept=".pdf" style="display:none" aria-label="Select PDF file to merge">
       <button id="pdfPageExtractBtn" title="Extract selected pages"><span class="msi">content_cut</span> Extract Selected</button>
       <div class="spacer"></div>
       <button id="pdfPageCancelBtn">Close</button>
@@ -1886,7 +1891,7 @@
     <h3><span class="msi modal-icon">verified_user</span> Sign Document</h3>
     <form onsubmit="return false" autocomplete="off">
     <label>Certificate file (.p12/.pfx)
-      <input type="file" id="digSignCertInput" accept=".p12,.pfx">
+      <input type="file" id="digSignCertInput" accept=".p12,.pfx" aria-label="Upload certificate file">
     </label>
     <label>Certificate password
       <input type="password" class="dig-sign-password" id="digSignPassword" placeholder="Enter password" autocomplete="new-password">
@@ -1915,7 +1920,7 @@
     <div id="signDocStatus" style="margin-bottom:12px;padding:8px 10px;border-radius:var(--radius-sm,4px);font-size:13px;display:none"></div>
     <div class="modal-field">
       <label for="signCertInput">Certificate file (.pem / .der / .crt)</label>
-      <input type="file" id="signCertInput" accept=".pem,.der,.crt,.cer" title="Upload an X.509 certificate file" style="width:100%;padding:4px 0;font-family:var(--font-ui);font-size:13px">
+      <input type="file" id="signCertInput" accept=".pem,.der,.crt,.cer" title="Upload an X.509 certificate file" aria-label="Upload X.509 certificate file" style="width:100%;padding:4px 0;font-family:var(--font-ui);font-size:13px">
     </div>
     <div class="modal-field" style="margin-top:8px">
       <label for="signReason">Reason for signing</label>
