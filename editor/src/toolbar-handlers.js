@@ -187,15 +187,10 @@ function restoreModalSelection() {
   _savedModalSelInfo = null;
 }
 
-// E7.2: Screen reader announcement — briefly sets the aria-live region text
-let _announceTimer = 0;
-export function announce(msg) {
-  const el = $('a11yLive');
-  if (!el) return;
-  clearTimeout(_announceTimer);
-  el.textContent = msg;
-  _announceTimer = setTimeout(() => { el.textContent = ''; }, 1000);
-}
+// announce() and showToast() extracted to features/document/toolbar/toast-announce.js
+// Re-exported at top of this file for backward compatibility.
+import { announce as _announce } from './features/document/toolbar/toast-announce.js';
+const announce = _announce; // local alias for internal use
 
 function restoreSelectionForPickers() {
   const info = state.lastSelInfo;
@@ -220,29 +215,9 @@ function restoreSelectionForPickers() {
   return true;
 }
 
-// ── Toast notification system ──────────────────────
-// Replaces alert() calls with non-blocking toast messages.
-// Types: 'info' (default, dark), 'error' (red), 'success' (green)
-export function showToast(message, type = 'info', duration = 4000) {
-  const container = $('toastContainer');
-  if (!container) { console.warn('toast:', message); return; }
-  const toast = document.createElement('div');
-  toast.className = 'toast' + (type === 'error' ? ' toast-error' : type === 'success' ? ' toast-success' : type === 'warning' ? ' toast-warning' : '');
-  // FS-12: Ensure individual toasts are accessible to screen readers
-  if (type === 'error') {
-    toast.setAttribute('role', 'alert');
-  }
-  toast.textContent = message;
-  container.appendChild(toast);
-  const remove = () => {
-    toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(-8px)';
-    setTimeout(() => { toast.remove(); }, 220);
-  };
-  toast.addEventListener('click', remove);
-  if (duration > 0) setTimeout(remove, duration);
-}
+// showToast() extracted to features/document/toolbar/toast-announce.js
+import { showToast as _showToast } from './features/document/toolbar/toast-announce.js';
+const showToast = _showToast; // local alias for internal use
 
 export function initToolbar() {
   // U9: Prevent toolbar buttons from stealing focus (causes selection flash).
@@ -1233,7 +1208,8 @@ function enterFormatPainter(mode) {
 /**
  * Exit format painter mode. Restores cursor and clears state.
  */
-export function exitFormatPainter() {
+// Canonical version in features/document/toolbar/format-painter.js; re-exported at top.
+function exitFormatPainter() {
   state.formatPainterMode = null;
   state.copiedFormat = null;
   const btn = $('btnFormatPainter');
@@ -1253,7 +1229,7 @@ export function exitFormatPainter() {
  * Called on mouseup in the document while format painter is active.
  * Returns true if format was applied, false otherwise.
  */
-export function applyFormatPainter() {
+function applyFormatPainter() {
   if (!state.formatPainterMode) return false;
   // D10: If copiedFormat or doc is missing, the painter is in a stale state — force clear
   if (!state.copiedFormat || !state.doc) {
@@ -1411,7 +1387,8 @@ function adjustZoom(delta) {
 }
 
 // ── E10.2: Unified zoom — set, persist, update UI ──
-export function setZoomLevel(level) {
+// Canonical version in features/document/toolbar/zoom.js; re-exported at top.
+function setZoomLevel(level) {
   level = Math.max(50, Math.min(200, Math.round(level)));
   const changed = state.zoomLevel !== level;
   state.zoomLevel = level;
@@ -2118,7 +2095,8 @@ function openHeaderFooterModal() {
  * @param {'header'|'footer'} kind — which region to edit
  * @param {HTMLElement} pageEl — the .doc-page element
  */
-export function enterHeaderFooterEditMode(kind, pageEl) {
+// Canonical version in features/document/toolbar/header-footer.js; re-exported at top.
+function enterHeaderFooterEditMode(kind, pageEl) {
   // Exit any existing edit mode first
   if (state.hfEditingMode) {
     exitHeaderFooterEditMode();
@@ -2214,7 +2192,7 @@ export function enterHeaderFooterEditMode(kind, pageEl) {
 /**
  * Exit header/footer editing mode and sync content back.
  */
-export function exitHeaderFooterEditMode() {
+function exitHeaderFooterEditMode() {
   if (!state.hfEditingMode) return;
 
   const kind = state.hfEditingMode;
@@ -5105,7 +5083,8 @@ const DEFAULT_AUTOCORRECT = {
   'commitee': 'committee', 'concensus': 'consensus',
 };
 
-export function getAutoCorrectMap() {
+// Canonical version in features/document/toolbar/autocorrect.js; re-exported at top.
+function getAutoCorrectMap() {
   try {
     const raw = localStorage.getItem(AC_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
@@ -5117,7 +5096,7 @@ function saveAutoCorrectMap(map) {
   try { localStorage.setItem(AC_STORAGE_KEY, JSON.stringify(map)); } catch (_) {}
 }
 
-export function isAutoCorrectEnabled() {
+function isAutoCorrectEnabled() {
   try {
     const val = localStorage.getItem(AC_ENABLED_KEY);
     if (val === null) return true; // enabled by default

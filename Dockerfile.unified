@@ -38,8 +38,19 @@ COPY editor/ ./
 RUN rm -rf wasm-pkg && mkdir -p wasm-pkg
 COPY --from=rust-builder /app/wasm-out/ ./wasm-pkg/
 
-# Try Vite build; if it fails, source files are used directly
-RUN npx vite build 2>/dev/null || true
+# Build editor with Vite. If it fails, fall back to serving source files directly.
+# The WASM import uses /* @vite-ignore */ so Vite treats it as an external.
+RUN npx vite build || echo "WARN: Vite build failed, falling back to source files"
+
+# Ensure dist/ exists — if Vite failed, copy source files as fallback
+RUN if [ ! -d dist ]; then \
+      echo "Creating dist/ from source files..."; \
+      mkdir -p dist/src dist/wasm-pkg dist/public; \
+      cp index.html admin.html dist/ 2>/dev/null || true; \
+      cp -r src/ dist/src/; \
+      cp -r wasm-pkg/ dist/wasm-pkg/; \
+      cp -r public/ dist/public/; \
+    fi
 
 # ─── Stage 3: Minimal runtime ───────────────────────────
 FROM debian:bookworm-slim
@@ -52,9 +63,7 @@ RUN apt-get update \
 # Copy stripped server binary (~15MB)
 COPY --from=rust-builder /app/target/release/s1-server /usr/local/bin/s1-server
 
-# Copy editor static files — Vite build output only
-# The dist/ directory contains the built index.html that references
-# hashed assets in /assets/ (not /src/main.js which needs Vite dev server)
+# Copy editor static files — Vite build output if available, source fallback otherwise
 RUN mkdir -p /app/public
 COPY --from=web-builder /app/editor/dist/ /app/public/
 

@@ -38,14 +38,16 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // Skip health/metrics/API endpoints
+  // Skip API, health, metrics, and admin endpoints — never cache dynamic data
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/api/v1/')) return;
   if (url.pathname.startsWith('/health') || url.pathname.startsWith('/metrics')) return;
 
   // Skip WebSocket upgrade requests
   if (event.request.headers.get('upgrade') === 'websocket') return;
 
-  // Skip room/admin API endpoints
+  // Skip room/admin/edit endpoints
   if (url.pathname.startsWith('/rooms') || url.pathname.startsWith('/admin')) return;
+  if (url.pathname.startsWith('/edit')) return;
 
   // X10: Always fetch fresh for WASM and JS bundles — prevents stale WASM/JS from being served.
   // WASM binaries must always match the JS glue code version.
