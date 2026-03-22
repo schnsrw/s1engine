@@ -50,13 +50,17 @@ self.addEventListener('fetch', (event) => {
       const fetchPromise = fetch(event.request)
         .then((response) => {
           // Only cache successful responses
-          if (response.ok) {
+          if (response && response.ok) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return response;
         })
-        .catch(() => cached);
+        .catch(() => {
+          // Return cached version if available, otherwise a proper error response
+          if (cached) return cached;
+          return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
+        });
 
       // Return cached version immediately, update in background
       return cached || fetchPromise;

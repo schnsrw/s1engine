@@ -1,48 +1,41 @@
-# Rudra AI Sidecar — CPU-optimized LLM inference via llama.cpp
+# Rudra AI Sidecar — LLM inference via llama.cpp
 # Model: Qwen2.5-3B-Instruct (Q4_K_M quantization)
 # Exposes OpenAI-compatible API on port 8081
 
-FROM ghcr.io/ggml-org/llama.cpp:server AS runtime
+# ── Stage 1: Build llama-server statically ──
+FROM debian:bookworm-slim AS builder
 
-# Model configuration
-ENV MODEL_REPO=Qwen/Qwen2.5-3B-Instruct-GGUF
-ENV MODEL_FILE=qwen2.5-3b-instruct-q4_k_m.gguf
-ENV MODEL_DIR=/models
-
-# Model is baked into the image at build time for instant startup.
-# For smaller images, mount a volume instead:
-#   docker run -v /path/to/models:/models rudra-ai
-# and download the model separately:
-#   huggingface-cli download Qwen/Qwen2.5-3B-Instruct-GGUF qwen2.5-3b-instruct-q4_k_m.gguf --local-dir /path/to/models
-
-# Download model at build time for faster startup
-# Using huggingface-cli to fetch the GGUF directly
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-pip curl && \
-    pip3 install --no-cache-dir --break-system-packages huggingface-hub && \
-    mkdir -p ${MODEL_DIR} && \
-    huggingface-cli download ${MODEL_REPO} ${MODEL_FILE} \
-      --local-dir ${MODEL_DIR} --local-dir-use-symlinks False && \
-    apt-get purge -y python3 python3-pip && apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/* /root/.cache
+      build-essential cmake git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git /src
+WORKDIR /src
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_NATIVE=OFF \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DLLAMA_BUILD_SERVER=ON && \
+    cmake --build build --target llama-server -j$(nproc)
+
+# ── Stage 2: Slim runtime ──
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /src/build/bin/llama-server /usr/local/bin/llama-server
+RUN chmod +x /usr/local/bin/llama-server
+
+ENV MODEL_DIR=/models
+ENV MODEL_FILE=qwen2.5-3b-instruct-q4_k_m.gguf
+ENV MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf
 
 EXPOSE 8081
 
-# llama-server flags optimized for CPU throughput:
-#   -ngl 0        : no GPU layers (pure CPU)
-#   -c 4096       : context window (enough for doc tasks)
-#   -np 4         : 4 parallel request slots for throughput
-#   -cb            : continuous batching for concurrent requests
-#   -t auto       : auto-detect optimal thread count
-#   --host 0.0.0.0 : listen on all interfaces
-#   --port 8081
-ENTRYPOINT ["llama-server", \
-    "-m", "/models/qwen2.5-3b-instruct-q4_k_m.gguf", \
-    "-ngl", "0", \
-    "-c", "4096", \
-    "-np", "4", \
-    "-cb", \
-    "-t", "auto", \
-    "--host", "0.0.0.0", \
-    "--port", "8081", \
-    "--cors-allow-origin", "*"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

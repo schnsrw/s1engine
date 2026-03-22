@@ -36,11 +36,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${AI_PORT:-8081}:8081"
+    volumes:
+      - ai-models:/models
     deploy:
       resources:
         limits:
-          cpus: "${AI_CPUS:-4}"
-          memory: "${AI_MEMORY:-4G}"
+          cpus: "${AI_CPUS:-2}"
+          memory: "${AI_MEMORY:-2G}"
         reservations:
           memory: "2G"
     restart: unless-stopped
@@ -53,3 +55,4 @@ services:
 
 volumes:
   s1-data:
+  ai-models:
