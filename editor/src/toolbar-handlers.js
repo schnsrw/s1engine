@@ -5954,23 +5954,11 @@ function enhanceTemplateGrid() {
 
     const preview = document.createElement('div');
     preview.className = 'template-preview template-preview-custom';
-    // Render a tiny preview from saved HTML (sanitized via DOM parsing)
+    // Render a text-only preview (safe — no HTML interpretation)
     const previewInner = document.createElement('div');
     previewInner.className = 'template-preview-content';
-    const tmpDoc = new DOMParser().parseFromString(tpl.html || '', 'text/html');
-    // Remove all scripts and event handlers
-    tmpDoc.querySelectorAll('script,link[rel="import"],iframe,object,embed,form').forEach(el => el.remove());
-    tmpDoc.querySelectorAll('*').forEach(el => {
-      for (const attr of [...el.attributes]) {
-        if (attr.name.startsWith('on') || attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
-          el.removeAttribute(attr.name);
-        }
-      }
-    });
-    previewInner.textContent = '';
-    for (const child of tmpDoc.body.childNodes) {
-      previewInner.appendChild(document.importNode(child, true));
-    }
+    const tmpParse = new DOMParser().parseFromString(tpl.html || '', 'text/html');
+    previewInner.textContent = (tmpParse.body.textContent || '').slice(0, 200);
     preview.appendChild(previewInner);
 
     const icon = document.createElement('span');
@@ -6011,14 +5999,13 @@ function loadCustomTemplate(idx) {
       try {
         state.doc.import_html(tpl.html);
       } catch (_) {
-        const tmp = document.createElement('div');
-        tmp.innerHTML = tpl.html;
-        state.doc.append_paragraph(tmp.textContent || '');
+        // Fallback: extract plain text via DOMParser (no innerHTML)
+        const parsed = new DOMParser().parseFromString(tpl.html, 'text/html');
+        state.doc.append_paragraph(parsed.body.textContent || '');
       }
     } else {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = tpl.html || '';
-      state.doc.append_paragraph(tmp.textContent || '');
+      const parsed = new DOMParser().parseFromString(tpl.html || '', 'text/html');
+      state.doc.append_paragraph(parsed.body.textContent || '');
     }
 
     state.doc.clear_history();
