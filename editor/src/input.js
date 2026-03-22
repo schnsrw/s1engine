@@ -3757,7 +3757,15 @@ function doUndo() {
     restoreCursorAfterUndoRedo(savedSel);
     updateToolbarState();
     renderUndoHistory();
-    broadcastOp({ action: 'fullDocSync' });
+    // Broadcast undo result with inline doc state so peers can apply
+    // directly without a round-trip requestFullSync
+    try {
+      const bytes = state.doc.export('docx');
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+      broadcastOp({ action: 'fullDocSync', docBase64: base64 });
+    } catch (_) {
+      broadcastOp({ action: 'fullDocSync' });
+    }
   } catch (e) { console.error('undo:', e); }
   finally { state._applyingUndo = false; }
   // X18: Apply any remote ops that were deferred during undo
@@ -3787,7 +3795,15 @@ function doRedo() {
     restoreCursorAfterUndoRedo(savedSel);
     updateToolbarState();
     renderUndoHistory();
-    broadcastOp({ action: 'fullDocSync' });
+    // Broadcast redo result with inline doc state so peers can apply
+    // directly without a round-trip requestFullSync
+    try {
+      const bytes = state.doc.export('docx');
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+      broadcastOp({ action: 'fullDocSync', docBase64: base64 });
+    } catch (_) {
+      broadcastOp({ action: 'fullDocSync' });
+    }
   } catch (e) { console.error('redo:', e); }
   finally { state._applyingUndo = false; }
   // X18: Apply any remote ops that were deferred during redo

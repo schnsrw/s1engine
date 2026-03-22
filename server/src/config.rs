@@ -49,6 +49,11 @@ impl Config {
         if let Ok(dir) = std::env::var("S1_DATA_DIR") {
             config.data_dir = dir;
         }
+        if let Ok(size) = std::env::var("S1_MAX_UPLOAD_SIZE") {
+            if let Ok(s) = size.parse() {
+                config.max_upload_size = s;
+            }
+        }
         config
     }
 }

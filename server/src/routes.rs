@@ -1,7 +1,7 @@
 //! API route handlers.
 
 use axum::{
-    extract::{Multipart, Path, Query, State},
+    extract::{ConnectInfo, Multipart, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
@@ -40,15 +40,36 @@ fn check_upload_rate(ip: &str) -> bool {
     entry.0 <= 20
 }
 
-/// Extract client IP from request headers (X-Forwarded-For, X-Real-IP) with fallback.
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first_ip) = xff.split(',').next() {
-            return first_ip.trim().to_string();
+/// Extract client IP for rate limiting.
+///
+/// Only trusts `X-Forwarded-For` / `X-Real-IP` headers when
+/// `S1_TRUSTED_PROXY=true` is set, preventing spoofable rate-limit bypass.
+/// Falls back to the TCP socket address.
+fn extract_client_ip(
+    headers: &HeaderMap,
+    peer_addr: Option<std::net::SocketAddr>,
+) -> String {
+    static TRUST_PROXY: OnceLock<bool> = OnceLock::new();
+    let trust_proxy = *TRUST_PROXY.get_or_init(|| {
+        std::env::var("S1_TRUSTED_PROXY")
+            .unwrap_or_default()
+            .eq_ignore_ascii_case("true")
+    });
+
+    if trust_proxy {
+        if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            if let Some(first_ip) = xff.split(',').next() {
+                return first_ip.trim().to_string();
+            }
+        }
+        if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            return real_ip.trim().to_string();
         }
     }
-    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        return real_ip.trim().to_string();
+
+    // Fall back to socket address
+    if let Some(addr) = peer_addr {
+        return addr.ip().to_string();
     }
     "unknown".to_string()
 }
@@ -113,12 +134,13 @@ pub async fn server_info() -> Json<Value> {
 
 /// Create a new document (upload).
 pub async fn create_document(
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
     // Rate limit: max 20 uploads per IP per 60 seconds
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, Some(peer));
     if !check_upload_rate(&ip) {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
@@ -147,11 +169,17 @@ pub async fn create_document(
             let word_count = text.split_whitespace().count();
             let now = chrono::Utc::now().to_rfc3339();
 
-            // Detect format from filename
-            let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
-
-            // Detect file type from bytes (Phase 6: multi-app routing)
+            // Detect file type from bytes (authoritative) with filename as fallback
             let detected_type = s1_convert::detect_file_type(&data);
+            let filename_ext = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
+            let format = {
+                let detected_ext = detected_type.extension();
+                if !detected_ext.is_empty() && detected_ext != "bin" {
+                    detected_ext.to_string()
+                } else {
+                    filename_ext
+                }
+            };
 
             let meta = DocumentMeta {
                 id: doc_id.clone(),
@@ -530,12 +558,13 @@ pub async fn delete_webhook(
 /// Returns the fileId and editor URL. The session stays alive while
 /// editors are connected, then expires after configurable TTL.
 pub async fn upload_file(
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
     // Rate limit: max 20 uploads per IP per 60 seconds
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, Some(peer));
     if !check_upload_rate(&ip) {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,
@@ -560,13 +589,18 @@ pub async fn upload_file(
                 .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid document: {e}")))?;
 
             let file_id = uuid::Uuid::new_v4().to_string();
-            let format = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
             let word_count = doc.to_plain_text().split_whitespace().count();
 
-            // Detect file type from bytes (Phase 6: multi-app routing)
+            // Detect file type from bytes (authoritative) with filename as fallback
             let detected_type = s1_convert::detect_file_type(&data);
             let detected_type_str = detected_type.extension().to_string();
             let detected_label = detected_type.label().to_string();
+            let filename_ext = filename.rsplit('.').next().unwrap_or("bin").to_lowercase();
+            let format = if !detected_type_str.is_empty() && detected_type_str != "bin" {
+                detected_type_str.clone()
+            } else {
+                filename_ext
+            };
 
             state
                 .sessions

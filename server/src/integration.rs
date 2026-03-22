@@ -222,6 +222,11 @@ fn validate_integration_jwt(token: &str, secret: &str) -> Result<IntegrationClai
 /// - Link-local: 169.254.0.0/16, fe80::/10
 /// - Multicast, broadcast, unspecified
 ///
+/// **Known limitation:** This function does NOT perform DNS resolution. A public
+/// hostname that resolves to a private IP address (e.g., `evil.example.com` → `10.0.0.1`)
+/// will not be caught. In production deployments, run the server behind a reverse proxy
+/// that performs DNS-aware SSRF filtering, or use a DNS-resolving HTTP client policy.
+///
 /// Returns `true` if the address is private/internal and should be blocked.
 pub fn is_private_ip(addr: &str) -> bool {
     use std::net::IpAddr;

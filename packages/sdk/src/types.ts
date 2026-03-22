@@ -90,6 +90,9 @@ export interface LayoutConfig {
 // ─── Editor Options ───────────────────────────────
 
 export interface EditorOptions {
+  /** URL to the editor HTML file. Defaults to '/editor/index.html'.
+   *  Set this for non-root deployments, CDN hosting, or custom editor builds. */
+  editorUrl?: string;
   /** Theme: 'default', 'dark', 'minimal', or custom Theme object. */
   theme?: 'default' | 'dark' | 'minimal' | Theme;
   /** Locale for UI strings (e.g., 'en', 'es', 'fr'). */

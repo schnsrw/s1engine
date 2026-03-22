@@ -47,17 +47,21 @@ export const S1EditorVue = defineComponent({
           ? Toolbars[props.toolbar as keyof typeof Toolbars]
           : props.toolbar;
 
-      const editor = await S1Editor.create(containerRef.value, {
-        theme: props.theme,
-        toolbar: resolvedToolbar || undefined,
-        readOnly: props.readOnly,
-        spellcheck: props.spellcheck,
-        onReady: () => emit('ready'),
-        onChange: (e) => emit('change', e),
-        onError: (e) => emit('error', e),
-      });
+      try {
+        const editor = await S1Editor.create(containerRef.value, {
+          theme: props.theme,
+          toolbar: resolvedToolbar || undefined,
+          readOnly: props.readOnly,
+          spellcheck: props.spellcheck,
+          onReady: () => emit('ready'),
+          onChange: (e) => emit('change', e),
+          onError: (e) => emit('error', e),
+        });
 
-      editorRef.value = editor;
+        editorRef.value = editor;
+      } catch (err) {
+        emit('error', err);
+      }
     });
 
     onUnmounted(() => {

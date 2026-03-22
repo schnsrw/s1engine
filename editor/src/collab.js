@@ -76,6 +76,7 @@ let missedPongs = 0; // Bug C6: count missed heartbeat responses
 let _roomFullRetries = 0; // C11: exponential backoff retry when room is full
 // X18: Deferred remote ops — queued during undo/redo execution to prevent race conditions
 let _deferredRemoteOps = [];
+let _deltaSyncReceived = false; // Tracks whether delta sync delivered ops (C15 fallback guard)
 
 // ─── Public API ───────────────────────────────────────
 
@@ -105,6 +106,14 @@ export function startCollab(room, name, relayUrl) {
     } catch (e) {
       console.warn('CRDT collab not available:', e);
     }
+  }
+  // Warn users when CRDT is not available — collaboration will use reduced-
+  // fidelity best-effort mode with higher latency and more snapshot-based
+  // convergence. This typically means the WASM build lacks CRDT support.
+  if (!state.collabDoc) {
+    console.warn('[collab] CRDT not available — using reduced-fidelity sync mode. ' +
+      'Text edits may have higher latency and structural operations rely on periodic snapshots.');
+    showCollabToast('Real-time sync: reduced fidelity (CRDT unavailable)');
   }
 
   connect(relayUrl || DEFAULT_RELAY_URL);
@@ -167,11 +176,25 @@ export function broadcastTextSync(nodeId, text) {
  * Broadcast a structural operation (split, merge, format, delete).
  * Called from input.js / toolbar.js after applying the operation locally.
  *
- * In CRDT mode, structural ops still use fullSync for convergence
- * since the CRDT layer handles text-level ops natively.
+ * When CRDT is active, also applies the structural op to collabDoc to keep
+ * it in sync, and uses a longer fullSync debounce since CRDT handles text
+ * convergence natively. Structural ops still need fullSync as a safety net
+ * because the CRDT layer does not yet model structural operations natively.
  */
 export function broadcastOp(opData) {
   if (!roomId || applyingRemote) return;
+
+  // Keep collabDoc in sync with structural ops when CRDT is active.
+  // This prevents the collabDoc from drifting from state.doc between
+  // fullSync cycles, reducing the need for coarse snapshot replacement.
+  if (state.collabDoc) {
+    try {
+      _applyCrdtStructuralOp(opData);
+    } catch (e) {
+      tracing('collabDoc structural sync failed (non-fatal):', e.message);
+    }
+  }
+
   // D17: Only increment version after successful send to keep version monotonic
   const pendingVersion = localVersion + 1;
   try {
@@ -181,7 +204,36 @@ export function broadcastOp(opData) {
     // Don't increment — operation wasn't sent
     console.warn('broadcastOp send failed:', e);
   }
-  scheduleDebouncedFullSync();
+  // In CRDT mode, use longer debounce since text convergence is already
+  // handled natively — fullSync is only a safety net for structural ops.
+  scheduleDebouncedFullSync(state.collabDoc ? true : false);
+}
+
+/**
+ * Apply a structural operation to the CRDT collabDoc to keep it in sync.
+ * This is best-effort — failures are non-fatal since fullSync will correct.
+ */
+function _applyCrdtStructuralOp(opData) {
+  const cd = state.collabDoc;
+  if (!cd) return;
+  switch (opData.action) {
+    case 'splitParagraph': cd.split_paragraph(opData.nodeId, opData.offset); break;
+    case 'mergeParagraphs': cd.merge_paragraphs(opData.nodeId1, opData.nodeId2); break;
+    case 'setHeading': cd.set_heading_level(opData.nodeId, opData.level); break;
+    case 'setAlignment': cd.set_alignment(opData.nodeId, opData.alignment); break;
+    case 'setListFormat': cd.set_list_format(opData.nodeId, opData.format, opData.level || 0); break;
+    case 'setIndent': cd.set_indent(opData.nodeId, opData.side, opData.value); break;
+    case 'setLineSpacing': cd.set_line_spacing(opData.nodeId, opData.value); break;
+    case 'insertParagraph': cd.insert_paragraph_after(opData.afterNodeId, opData.text || ''); break;
+    case 'deleteNode': cd.delete_node(opData.nodeId); break;
+    case 'insertTable': cd.insert_table(opData.afterNodeId, opData.rows, opData.cols); break;
+    case 'insertHR': cd.insert_horizontal_rule(opData.afterNodeId); break;
+    case 'insertPageBreak': cd.insert_page_break(opData.afterNodeId); break;
+    case 'formatSelection': cd.format_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset, opData.key, opData.value); break;
+    case 'deleteSelection': cd.delete_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset); break;
+    // Ops without collabDoc equivalents are silently skipped —
+    // fullSync will handle convergence for these.
+  }
 }
 
 /**
@@ -197,16 +249,20 @@ export function broadcastCrdtOp(crdtOpJson) {
 // After any local edit, schedule a full document sync.
 // This ensures the receiver always converges to the correct state
 // even if individual ops fail due to node ID mismatch.
-// In CRDT mode, fullSync is less frequent (5s) as CRDT handles convergence.
+// When CRDT is active, fullSync is a safety net (longer debounce)
+// since CRDT handles text convergence natively.
 let _fullSyncTimer = null;
-const FULL_SYNC_DEBOUNCE_MS = 1500; // Bug C8: unified to 1.5s for faster convergence
+const FULL_SYNC_DEBOUNCE_MS = 1500; // Non-CRDT: 1.5s for faster convergence
+const FULL_SYNC_DEBOUNCE_CRDT_MS = 5000; // CRDT active: 5s (safety net only)
+let _consecutiveOpFailures = 0; // Track consecutive failures to avoid fullSync storms
 
-function scheduleDebouncedFullSync() {
+function scheduleDebouncedFullSync(crdtActive = false) {
   if (_fullSyncTimer) clearTimeout(_fullSyncTimer);
+  const delay = crdtActive ? FULL_SYNC_DEBOUNCE_CRDT_MS : FULL_SYNC_DEBOUNCE_MS;
   _fullSyncTimer = setTimeout(() => {
     _fullSyncTimer = null;
     sendFullSync();
-  }, FULL_SYNC_DEBOUNCE_MS);
+  }, delay);
 }
 
 // Bug C8: Request immediate fullSync on node ID mismatch instead of waiting for debounce
@@ -634,14 +690,17 @@ function handleMessage(msg) {
         try {
           const sv = state.collabDoc.get_state_vector();
           sendOp({ action: 'stateVector', sv });
+          _deltaSyncReceived = false;
         } catch (_) {}
-        // C15: Fallback — if delta sync doesn't deliver within 5s, request fullSync.
-        // This handles the case where 3+ peers join quickly and delta exchange is incomplete.
+        // C15: Fallback — if delta sync doesn't deliver within 10s, request fullSync.
+        // Extended from 5s to 10s to give delta exchange more time with 3+ peers.
+        // Only triggers if no delta ops were received in the meantime.
         setTimeout(() => {
-          if (roomId && connected) {
+          if (roomId && connected && !_deltaSyncReceived) {
+            tracing('Delta sync timeout — requesting fullSync fallback');
             requestImmediateFullSync();
           }
-        }, 5000);
+        }, 10000);
       }
       break;
 
@@ -649,17 +708,21 @@ function handleMessage(msg) {
       // Only handle if it's a different peer (not self)
       if (msg.peerId === peerId) break;
       addPeer(msg.peerId, msg.userName, msg.userColor);
-      // Send CRDT delta if available, otherwise fullSync
+      // Send CRDT delta if available — prefer delta over fullSync to
+      // reduce bandwidth and avoid disrupting other peers' editing context.
       if (state.collabDoc) {
         try {
           const sv = state.collabDoc.get_state_vector();
           sendOp({ action: 'stateVector', sv });
         } catch (_) {}
       }
-      // C15: Always send fullSync as fallback — delta sync can be unreliable
-      // with 3+ peers joining in quick succession. The fullSync ensures
-      // convergence even if CRDT delta exchange fails or is incomplete.
-      sendFullSync();
+      // C15: Send fullSync as fallback for the new peer, but use a short
+      // delay to give delta sync a chance to work first.
+      setTimeout(() => {
+        if (roomId && connected) {
+          sendFullSync();
+        }
+      }, 2000);
       break;
 
     case 'stateVector': {
@@ -746,7 +809,52 @@ function getParaOffset(paraEl, targetNode, nodeOffset) {
   return offset + nodeOffset;
 }
 
-// Bug C19: Helpers to save/restore cursor across fullSync document replacement
+// ─── Editing Context Save/Restore ─────────────────────
+// Preserves cursor, selection, scroll position, and active formatting
+// across fullSync document replacements to maintain UX continuity.
+
+/** Save full editing context before a document replacement. */
+function _saveEditingContext() {
+  const ctx = { nodeId: null, offset: 0, scrollTop: 0, scrollLeft: 0 };
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      let el = sel.anchorNode;
+      while (el && el !== document && !el.dataset?.nodeId) el = el.parentElement;
+      ctx.nodeId = el?.dataset?.nodeId || null;
+      if (ctx.nodeId && el) {
+        ctx.offset = getParaOffset(el, sel.anchorNode, sel.anchorOffset);
+      }
+    }
+  } catch (_) {}
+  try {
+    const container = $('pageContainer')?.parentElement;
+    if (container) {
+      ctx.scrollTop = container.scrollTop;
+      ctx.scrollLeft = container.scrollLeft;
+    }
+  } catch (_) {}
+  return ctx;
+}
+
+/** Restore editing context after a document replacement + re-render. */
+function _restoreEditingContext(ctx) {
+  if (!ctx) return;
+  // Restore scroll position
+  try {
+    const container = $('pageContainer')?.parentElement;
+    if (container) {
+      container.scrollTop = ctx.scrollTop;
+      container.scrollLeft = ctx.scrollLeft;
+    }
+  } catch (_) {}
+  // Restore cursor position
+  if (ctx.nodeId) {
+    _restoreSelectionToNode(ctx.nodeId, ctx.offset);
+  }
+}
+
+// Bug C19: Legacy helpers (kept for inline fullDocSync handler compatibility)
 function _getSelectionNodeId() {
   try {
     const sel = window.getSelection();
@@ -794,6 +902,21 @@ function _restoreSelectionToNode(nodeId, offset) {
     }
   } catch (_) {}
 }
+
+/** Quick hash of doc plain text for skip-if-identical optimization. */
+function _quickDocHash() {
+  try {
+    const text = state.doc?.to_plain_text?.() || '';
+    // Simple FNV-1a style hash for fast comparison
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = (hash * 0x01000193) >>> 0;
+    }
+    return hash;
+  } catch (_) { return 0; }
+}
+let _lastAppliedDocHash = 0;
 
 function sendFullSync() {
   if (!state.doc) return;
@@ -863,6 +986,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
     switch (op.action) {
       case 'crdtOp': {
         // CRDT operation from a peer — apply via WasmCollabDocument
+        _deltaSyncReceived = true; // C15: mark that delta sync is working
         if (state.collabDoc && op.ops) {
           try {
             const opsStr = typeof op.ops === 'string' ? op.ops : JSON.stringify(op.ops);
@@ -1226,9 +1350,30 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'fullDocSync': {
-        // C16: Peer performed undo/redo — request fullSync from them to converge.
-        // The undo/redo happened on the sender's side; we need their updated state.
-        requestImmediateFullSync();
+        // C16: Peer performed undo/redo. If they included their doc state inline,
+        // apply it directly without a round-trip requestFullSync. This preserves
+        // cursor continuity and reduces convergence latency.
+        if (op.docBase64 && state.engine) {
+          try {
+            const binary = atob(op.docBase64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            if (bytes.length > 0) {
+              const savedNodeId = _getSelectionNodeId();
+              const savedOffset = _getSelectionOffset();
+              state.doc = state.engine.open(bytes);
+              renderDocument();
+              if (savedNodeId) _restoreSelectionToNode(savedNodeId, savedOffset);
+              tracing('Applied inline undo/redo sync', bytes.length, 'bytes');
+            }
+          } catch (e) {
+            console.debug('[collab] inline fullDocSync failed, requesting full sync:', e);
+            requestImmediateFullSync();
+          }
+        } else {
+          // Legacy fallback: peer didn't include doc state, request it
+          requestImmediateFullSync();
+        }
         break;
       }
 
@@ -1252,20 +1397,30 @@ function applyRemoteOp(dataStr, fromPeerId) {
           if (op.docBase64 && state.engine) {
             // Snapshot any pending local ops before overwriting (Bug C4)
             const pendingLocalOps = offlineBuffer.filter(o => o._localVersion > incomingVersion);
-            // Bug C19: Save cursor position before fullSync overwrites the document
-            const savedNodeId = _getSelectionNodeId();
-            const savedOffset = _getSelectionOffset();
             const binary = atob(op.docBase64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             if (bytes.length > 0) {
-              state.doc = state.engine.open(bytes);
-              if (incomingVersion > 0) lastSyncedVersion = incomingVersion;
-              renderDocument();
-              // Bug C19: Restore cursor position after fullSync re-render
-              if (savedNodeId) {
-                _restoreSelectionToNode(savedNodeId, savedOffset);
+              // Skip replacement if incoming doc matches current state (no-op optimization).
+              // This avoids unnecessary re-renders, cursor resets, and scroll jumps
+              // when the fullSync contains the same document we already have.
+              const incomingDoc = state.engine.open(bytes);
+              const incomingText = incomingDoc.to_plain_text();
+              const localText = state.doc?.to_plain_text?.() || '';
+              if (incomingText === localText && pendingLocalOps.length === 0) {
+                tracing('Skipping no-op fullSync v' + incomingVersion, '(content identical)');
+                if (incomingVersion > 0) lastSyncedVersion = incomingVersion;
+                break;
               }
+
+              // Save full editing context (cursor, scroll) before replacement
+              const editCtx = _saveEditingContext();
+              state.doc = incomingDoc;
+              if (incomingVersion > 0) lastSyncedVersion = incomingVersion;
+              _lastAppliedDocHash = _quickDocHash();
+              renderDocument();
+              // Restore full editing context after re-render
+              _restoreEditingContext(editCtx);
               tracing('Applied fullSync v' + incomingVersion, bytes.length, 'bytes');
               // Re-apply any locally-sent ops that were sent after the sync version (Bug C4)
               if (pendingLocalOps.length > 0) {

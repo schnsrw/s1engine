@@ -1150,18 +1150,29 @@ impl WasmDocument {
 
     /// Set the entire text content of a paragraph.
     ///
-    /// **WARNING**: When an edit spans multiple runs, this replaces ALL runs
-    /// in the paragraph with a single run, destroying any inline formatting
-    /// (bold, italic, links, etc.). Use `replace_text()` instead if you need
-    /// to preserve run-level formatting.
+    /// # Formatting preservation behavior
     ///
-    /// For single-run edits and no-change cases, formatting IS preserved:
-    /// - If the total text across all runs already matches `new_text`, it is
-    ///   a no-op (preserving per-run formatting).
-    /// - If the edit falls within a single run, a targeted insert/delete is
-    ///   used and that run's formatting is preserved.
-    /// - Only when an edit spans multiple runs are extra runs deleted and the
-    ///   remaining single run receives the new text.
+    /// - **No change**: If `new_text` matches the existing text across all runs,
+    ///   this is a no-op — per-run formatting is fully preserved.
+    /// - **Single-run edit**: If the diff falls within a single run, a targeted
+    ///   insert/delete is used and that run's formatting is preserved.
+    /// - **Cross-run edit**: When the edit spans multiple runs, extra runs are
+    ///   deleted and the surviving run receives the new text. **This collapses
+    ///   inline formatting** (bold, italic, links, font changes, etc.) to a
+    ///   single formatting context.
+    ///
+    /// # Preferred alternatives
+    ///
+    /// For DOM-driven edits from the editor, prefer range-aware operations:
+    /// - `insert_text_in_paragraph()` — insert at a specific offset
+    /// - `delete_text_in_paragraph()` — delete a range within a paragraph
+    /// - `format_selection()` — apply formatting to a character range
+    /// - `replace_text()` — replace text in a range (preserves surrounding formatting)
+    ///
+    /// These operations work at the character/run level and never collapse
+    /// formatting outside the edited range. `set_paragraph_text` should be
+    /// reserved for sync/convergence scenarios where the full paragraph text
+    /// needs to be force-set (e.g., non-CRDT collaboration fallback).
     pub fn set_paragraph_text(&mut self, node_id_str: &str, new_text: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
@@ -1382,6 +1393,10 @@ impl WasmDocument {
     // ─── Formatting ───────────────────────────────────────────────
 
     /// Set bold on a paragraph's first run.
+    ///
+    /// For selection-aware formatting, use [`format_selection`] or
+    /// [`set_bold_range`] instead — they correctly handle mixed-format
+    /// paragraphs by splitting runs at selection boundaries.
     pub fn set_bold(&mut self, node_id_str: &str, bold: bool) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
@@ -1391,7 +1406,25 @@ impl WasmDocument {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Set bold on a selection range. Preferred over `set_bold` for toolbar
+    /// actions when the user has an active text selection.
+    pub fn set_bold_range(
+        &mut self,
+        start_node_str: &str,
+        start_offset: usize,
+        end_node_str: &str,
+        end_offset: usize,
+        bold: bool,
+    ) -> Result<(), JsError> {
+        self.format_selection(
+            start_node_str, start_offset,
+            end_node_str, end_offset,
+            "bold", if bold { "true" } else { "false" },
+        )
+    }
+
     /// Set italic on a paragraph's first run.
+    /// For selection-aware formatting, use `set_italic_range` or `format_selection`.
     pub fn set_italic(&mut self, node_id_str: &str, italic: bool) -> Result<(), JsError> {
         let doc = self.doc_mut()?;
         let para_id = parse_node_id(node_id_str)?;
@@ -1470,6 +1503,65 @@ impl WasmDocument {
         let attrs = s1_model::AttributeMap::new().color(color);
         doc.apply(Operation::set_attributes(run_id, attrs))
             .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    // ─── Selection-aware formatting helpers ─────────────────────
+    // These delegate to format_selection and are the preferred API
+    // for toolbar actions when the user has an active text selection.
+
+    /// Set italic on a selection range.
+    pub fn set_italic_range(
+        &mut self,
+        start_node_str: &str, start_offset: usize,
+        end_node_str: &str, end_offset: usize,
+        italic: bool,
+    ) -> Result<(), JsError> {
+        self.format_selection(start_node_str, start_offset, end_node_str, end_offset,
+            "italic", if italic { "true" } else { "false" })
+    }
+
+    /// Set underline on a selection range.
+    pub fn set_underline_range(
+        &mut self,
+        start_node_str: &str, start_offset: usize,
+        end_node_str: &str, end_offset: usize,
+        underline: bool,
+    ) -> Result<(), JsError> {
+        self.format_selection(start_node_str, start_offset, end_node_str, end_offset,
+            "underline", if underline { "single" } else { "none" })
+    }
+
+    /// Set font size on a selection range (in points).
+    pub fn set_font_size_range(
+        &mut self,
+        start_node_str: &str, start_offset: usize,
+        end_node_str: &str, end_offset: usize,
+        size_pt: f64,
+    ) -> Result<(), JsError> {
+        self.format_selection(start_node_str, start_offset, end_node_str, end_offset,
+            "fontSize", &size_pt.to_string())
+    }
+
+    /// Set font family on a selection range.
+    pub fn set_font_family_range(
+        &mut self,
+        start_node_str: &str, start_offset: usize,
+        end_node_str: &str, end_offset: usize,
+        font: &str,
+    ) -> Result<(), JsError> {
+        self.format_selection(start_node_str, start_offset, end_node_str, end_offset,
+            "fontFamily", font)
+    }
+
+    /// Set text color on a selection range (hex string like "FF0000").
+    pub fn set_color_range(
+        &mut self,
+        start_node_str: &str, start_offset: usize,
+        end_node_str: &str, end_offset: usize,
+        hex: &str,
+    ) -> Result<(), JsError> {
+        self.format_selection(start_node_str, start_offset, end_node_str, end_offset,
+            "color", hex)
     }
 
     /// Set paragraph alignment ("left", "center", "right", "justify").

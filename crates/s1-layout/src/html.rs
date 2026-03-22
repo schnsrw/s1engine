@@ -568,24 +568,42 @@ fn render_image(
 ) {
     let b = &block.bounds;
 
+    // Extract media_id for the data attribute (useful for lazy loading by the editor)
+    let media_id = if let LayoutBlockKind::Image { media_id, .. } = &block.kind {
+        media_id.as_str()
+    } else {
+        ""
+    };
+
     if let Some(data) = image_data {
         let mime = content_type.as_deref().unwrap_or("image/png");
         let b64 = base64_encode(data);
         html.push_str(&format!(
-            "<img class=\"s1-image\" src=\"data:{mime};base64,{b64}\" style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt\" alt=\"\"/>",
+            "<img class=\"s1-image\" data-media-id=\"{mid}\" src=\"data:{mime};base64,{b64}\" \
+             style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt\" alt=\"\"/>",
+            mid = escape_attr(media_id),
             x = fmt_pt(b.x - x_offset),
             y = fmt_pt(b.y - y_offset),
             w = fmt_pt(b.width),
             h = fmt_pt(b.height),
         ));
     } else {
-        // No image data available — render a placeholder
+        // No image data available — render an informative placeholder that preserves
+        // the layout dimensions and provides context for the editor to attempt loading.
         html.push_str(&format!(
-            "<div class=\"s1-image-placeholder\" style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt;background:#eee;border:1px dashed #aaa\"></div>",
+            "<div class=\"s1-image-placeholder\" data-media-id=\"{mid}\" \
+             style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt;\
+             background:#f5f5f5;border:1px dashed #bbb;display:flex;align-items:center;\
+             justify-content:center;font:10pt sans-serif;color:#888;box-sizing:border-box\">\
+             <span style=\"text-align:center\">Image loading\u{2026}<br/>\
+             <span style=\"font-size:8pt\">{w2}\u{00d7}{h2}pt</span></span></div>",
+            mid = escape_attr(media_id),
             x = fmt_pt(b.x - x_offset),
             y = fmt_pt(b.y - y_offset),
             w = fmt_pt(b.width),
             h = fmt_pt(b.height),
+            w2 = b.width as u32,
+            h2 = b.height as u32,
         ));
     }
 }

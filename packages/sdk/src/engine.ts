@@ -18,9 +18,12 @@ import type { Format, SourceFormat } from './types.js';
 export class S1Engine {
   /** @internal */
   private _wasm: any;
+  /** @internal — WASM module reference for creating layout configs etc. */
+  private _wasmModule: any;
 
-  private constructor(wasmEngine: any) {
+  private constructor(wasmEngine: any, wasmModule: any) {
     this._wasm = wasmEngine;
+    this._wasmModule = wasmModule;
   }
 
   /**
@@ -49,7 +52,7 @@ export class S1Engine {
       }
 
       const wasmEngine = new wasmModule.WasmEngine();
-      return new S1Engine(wasmEngine);
+      return new S1Engine(wasmEngine, wasmModule);
     } catch (e) {
       if (e instanceof S1Error) throw e;
       throw new S1Error(
@@ -64,7 +67,7 @@ export class S1Engine {
    */
   create(): S1Document {
     const wasmDoc = this._wasm.create();
-    return new S1Document(wasmDoc);
+    return new S1Document(wasmDoc, this._wasmModule);
   }
 
   /**
@@ -76,7 +79,7 @@ export class S1Engine {
     try {
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
       const wasmDoc = this._wasm.open(bytes);
-      return new S1Document(wasmDoc);
+      return new S1Document(wasmDoc, this._wasmModule);
     } catch (e) {
       throw new S1Error(
         ErrorCodes.WASM_ERROR,

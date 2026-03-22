@@ -12,7 +12,7 @@ use axum::{
     extract::DefaultBodyLimit,
     http::Method,
     routing::{delete, get, post},
-    Router,
+    Extension, Router,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -110,6 +110,32 @@ async fn main() {
         );
     }
 
+    // Build auth config from environment
+    let auth_config = std::sync::Arc::new(auth::AuthConfig {
+        enabled: auth_enabled,
+        jwt_secret: std::env::var("S1_JWT_SECRET").ok().filter(|s| !s.is_empty()),
+        allow_anonymous: !auth_enabled,
+        api_keys: Vec::new(), // Loaded from s1.toml if configured
+    });
+
+    // Fail fast: auth is enabled but no JWT secret is configured
+    if auth_enabled && auth_config.jwt_secret.is_none() {
+        tracing::error!(
+            "S1_AUTH_ENABLED=true but S1_JWT_SECRET is not set — \
+             API authentication will reject all Bearer tokens"
+        );
+    }
+
+    // Conditionally attach auth middleware to API routes
+    let api = api_routes();
+    let api = if auth_enabled {
+        tracing::info!("Authentication enabled — API routes are protected");
+        api.layer(axum::middleware::from_fn(auth::auth_middleware))
+            .layer(Extension(auth_config))
+    } else {
+        api
+    };
+
     let app = Router::new()
         // Health
         .route("/health", get(routes::health))
@@ -118,8 +144,8 @@ async fn main() {
         .route("/ws/collab/{file_id}", get(collab::ws_collab_handler))
         // Integration entry point: /edit?token=<jwt>
         .route("/edit", get(integration::handle_edit))
-        // REST API
-        .nest("/api/v1", api_routes())
+        // REST API (auth-protected when S1_AUTH_ENABLED=true)
+        .nest("/api/v1", api)
         // Admin panel (protected by Basic Auth)
         .nest("/admin", admin_routes())
         .with_state(state)
@@ -144,7 +170,7 @@ async fn main() {
             response
         }))
         .layer(TraceLayer::new_for_http())
-        .layer(DefaultBodyLimit::max(64 * 1024 * 1024));
+        .layer(DefaultBodyLimit::max(config.max_upload_size));
 
     // Background: save dirty collab rooms every 30s
     tokio::spawn(async move {
@@ -218,7 +244,12 @@ async fn main() {
     tracing::info!("═══════════════════════════════════════");
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 /// Build the CORS layer.

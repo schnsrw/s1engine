@@ -25,12 +25,15 @@ interface DocumentEvents {
 export class S1Document extends EventEmitter<DocumentEvents> {
   /** @internal */
   _wasm: any;
+  /** @internal — WASM module reference for creating layout configs etc. */
+  private _wasmModule: any;
   private _dirty = false;
 
   /** @internal */
-  constructor(wasmDoc: any) {
+  constructor(wasmDoc: any, wasmModule?: any) {
     super();
     this._wasm = wasmDoc;
+    this._wasmModule = wasmModule;
   }
 
   // ─── Content ──────────────────────────────────────
@@ -42,11 +45,19 @@ export class S1Document extends EventEmitter<DocumentEvents> {
 
   /** Get the document as paginated HTML with layout. */
   toPaginatedHTML(config?: LayoutConfig): string {
-    if (config) {
-      // Apply layout config if provided
-      const wasmConfig = this._wasm.get_layout_config?.();
-      if (wasmConfig && config.pageWidth) wasmConfig.set_page_width(config.pageWidth);
-      if (wasmConfig && config.pageHeight) wasmConfig.set_page_height(config.pageHeight);
+    if (config && this._wasmModule?.WasmLayoutConfig) {
+      try {
+        const wasmConfig = new this._wasmModule.WasmLayoutConfig();
+        if (config.pageWidth !== undefined) wasmConfig.set_page_width(config.pageWidth);
+        if (config.pageHeight !== undefined) wasmConfig.set_page_height(config.pageHeight);
+        if (config.marginTop !== undefined) wasmConfig.set_margin_top(config.marginTop);
+        if (config.marginBottom !== undefined) wasmConfig.set_margin_bottom(config.marginBottom);
+        if (config.marginLeft !== undefined) wasmConfig.set_margin_left(config.marginLeft);
+        if (config.marginRight !== undefined) wasmConfig.set_margin_right(config.marginRight);
+        return this._wasm.to_paginated_html_with_config(wasmConfig);
+      } catch {
+        // Fall through to default if config creation fails
+      }
     }
     return this._wasm.to_paginated_html?.() ?? this._wasm.to_html();
   }
@@ -80,11 +91,20 @@ export class S1Document extends EventEmitter<DocumentEvents> {
     return new Blob([buffer], { type: mimeTypes[format] || 'application/octet-stream' });
   }
 
-  /** Export the document as a data URL string. */
-  exportDataUrl(format: Format): string {
+  /**
+   * Export the document as an object URL.
+   *
+   * The caller is responsible for revoking the URL via `URL.revokeObjectURL()`
+   * when it is no longer needed to prevent memory leaks.
+   */
+  exportObjectUrl(format: Format): string {
     const blob = this.exportBlob(format);
-    // Note: For large documents, use exportBlob() and URL.createObjectURL() instead.
     return URL.createObjectURL(blob);
+  }
+
+  /** @deprecated Use `exportObjectUrl()` instead. Returns an object URL, not a data URL. */
+  exportDataUrl(format: Format): string {
+    return this.exportObjectUrl(format);
   }
 
   // ─── Editing ──────────────────────────────────────
@@ -118,10 +138,15 @@ export class S1Document extends EventEmitter<DocumentEvents> {
     return id;
   }
 
-  /** Insert an image after a node. */
-  insertImage(afterNodeId: string, data: ArrayBuffer, mimeType: string): string {
+  /** Insert an image after a node.
+   *  @param width - Image width in points (default: 300pt ~4.17in)
+   *  @param height - Image height in points (default: 200pt ~2.78in)
+   */
+  insertImage(afterNodeId: string, data: ArrayBuffer, mimeType: string, width?: number, height?: number): string {
     const bytes = new Uint8Array(data);
-    const id = this._wasm.insert_image(afterNodeId, bytes, mimeType);
+    const w = width ?? 300;
+    const h = height ?? 200;
+    const id = this._wasm.insert_image(afterNodeId, bytes, mimeType, w, h);
     this._markDirty('structure');
     return id;
   }

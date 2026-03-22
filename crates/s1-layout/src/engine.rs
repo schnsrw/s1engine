@@ -131,17 +131,28 @@ impl<'a> LayoutEngine<'a> {
             _ => return self.layout(),
         };
 
-        // Full re-layout (block caching via LayoutCache still avoids re-shaping
-        // unchanged paragraphs). Then replace clean prefix with previous pages
-        // for stable node IDs and consistent references.
+        // Run full layout (block caching avoids re-shaping unchanged paragraphs).
         let mut result = self.layout()?;
 
-        // Replace clean prefix pages with previous ones for stability
-        if result.pages.len() >= dirty_page && previous.pages.len() >= dirty_page {
+        // Compare page heights for the clean prefix. If they match the previous
+        // result, the pagination is stable and we can reuse the previous pages
+        // verbatim. This avoids visual jitter from minor float differences.
+        let prefix_stable = result.pages.len() >= dirty_page
+            && previous.pages.len() >= dirty_page
+            && (0..dirty_page).all(|i| {
+                (result.pages[i].height - previous.pages[i].height).abs() < 0.01
+                    && result.pages[i].blocks.len() == previous.pages[i].blocks.len()
+            });
+
+        if prefix_stable {
+            // Replace clean prefix pages with previous ones for stable node IDs
+            // and consistent visual output — prevents momentary reflow artifacts
             for i in 0..dirty_page {
                 result.pages[i] = previous.pages[i].clone();
             }
         }
+        // If prefix is not stable (an early-page height changed), we must use
+        // the freshly computed pages since all subsequent page breaks shifted.
 
         Ok(result)
     }

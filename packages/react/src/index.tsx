@@ -84,6 +84,8 @@ export const S1EditorComponent = forwardRef<S1EditorRef, S1EditorProps>(
         if (!mounted) { e.destroy(); return; }
         editor = e;
         editorRef.current = e;
+      }).catch((err) => {
+        editorOptions.onError?.({ name: 'S1Error', message: err.message, code: 'INIT_FAILED' } as any);
       });
 
       return () => {

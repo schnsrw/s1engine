@@ -511,6 +511,47 @@ Current round-trip coverage:
 
 ---
 
+## Live Editing Fidelity
+
+The feature matrix above covers **round-trip fidelity** (import → export preservation).
+Live editing fidelity — how faithfully features render while the user is actively editing
+— has additional limitations:
+
+### Round-trip safe vs. live-edit visible
+
+| Feature | Round-trip | Live editor | Notes |
+|---------|:----------:|:-----------:|-------|
+| Widow/orphan control | Preserved | Not enforced | Layout engine pagination does not yet split at widow/orphan boundaries |
+| Outline level | Preserved | Not rendered | Stored in paragraph properties but not reflected in editor view |
+| Small caps / all caps | Preserved | Not rendered | Attribute preserved but CSS rendering not applied in editor |
+| Text effects (shadow, emboss, etc.) | Preserved | Not rendered | Stored as raw attribute, no visual representation |
+| Section columns | Preserved | Rendered | Fully supported in layout engine |
+| Headers/footers | Preserved | Rendered | Fully supported in paginated view |
+| Page breaks | Preserved | Rendered | Rendered as page boundaries |
+| Conditional table formatting | Preserved | Not applied | Table band/first-row styles not resolved during editing |
+
+### Collaborative editing fidelity
+
+During real-time collaboration, additional fidelity constraints apply:
+
+- **Text convergence** is CRDT-native when the CRDT module is available, providing
+  character-level consistency with sub-second convergence.
+- **Structural operations** (paragraph split/merge, table edits, image changes)
+  converge via periodic document snapshots, which may cause temporary divergence
+  (typically 1-5 seconds) between peers' visible page layouts.
+- **Pagination** is recomputed locally by each peer after receiving changes, so page
+  breaks may briefly differ between peers during rapid editing.
+- **Undo/redo** broadcasts the resulting document state inline to peers, avoiding an
+  extra round-trip but still requiring a full re-render on the receiving side.
+
+### Recommendation for consumers
+
+Distinguish between these two fidelity guarantees in release notes and user-facing
+documentation. "Document preserved" means the data survives a round-trip. "Visually
+accurate" means the live editor renders it faithfully while editing.
+
+---
+
 ## Version History
 
 | Date | Change |

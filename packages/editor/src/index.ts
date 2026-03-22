@@ -64,6 +64,12 @@ export const Toolbars = {
   } satisfies ToolbarConfig,
 };
 
+/** Default initialization timeout in milliseconds. */
+const INIT_TIMEOUT_MS = 10_000;
+
+/** Default export timeout in milliseconds. */
+const EXPORT_TIMEOUT_MS = 30_000;
+
 /**
  * Embeddable document editor.
  *
@@ -76,6 +82,9 @@ export class S1Editor {
   private iframe: HTMLIFrameElement | null = null;
   private _ready = false;
   private _dirty = false;
+  private _iframeOrigin: string = '';
+  private _messageHandler: ((e: MessageEvent) => void) | null = null;
+  private _pendingExportCleanups: Array<() => void> = [];
 
   private constructor(container: HTMLElement, options: EditorOptions) {
     this.container = container;
@@ -110,6 +119,11 @@ export class S1Editor {
    */
   async openUrl(url: string): Promise<void> {
     const response = await fetch(url);
+    if (!response.ok) {
+      const message = `Failed to fetch document: ${response.status} ${response.statusText}`;
+      this._emitError('DOCUMENT_NOT_FOUND', message);
+      throw new Error(message);
+    }
     const buffer = await response.arrayBuffer();
     this.open(buffer);
   }
@@ -126,16 +140,32 @@ export class S1Editor {
    */
   async exportDocument(format: Format): Promise<Blob> {
     return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        const message = `Export timed out after ${EXPORT_TIMEOUT_MS}ms`;
+        this._emitError('EXPORT_FAILED', message);
+        reject(new Error(message));
+      }, EXPORT_TIMEOUT_MS);
+
       const handler = (e: MessageEvent) => {
+        if (!this._isValidMessage(e)) return;
         if (e.data?.type === 'exported' && e.data.format === format) {
-          window.removeEventListener('message', handler);
+          cleanup();
           resolve(new Blob([new Uint8Array(e.data.bytes)]));
         }
         if (e.data?.type === 'exportError') {
-          window.removeEventListener('message', handler);
+          cleanup();
           reject(new Error(e.data.message));
         }
       };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        this._pendingExportCleanups = this._pendingExportCleanups.filter(fn => fn !== cleanup);
+      };
+
+      this._pendingExportCleanups.push(cleanup);
       window.addEventListener('message', handler);
       this._postMessage({ type: 'export', format });
     });
@@ -170,19 +200,30 @@ export class S1Editor {
 
   /** Destroy the editor and clean up resources. */
   destroy(): void {
+    // Clean up pending export listeners
+    for (const cleanup of this._pendingExportCleanups) {
+      cleanup();
+    }
+    this._pendingExportCleanups = [];
+
+    // Remove global message handler
+    if (this._messageHandler) {
+      window.removeEventListener('message', this._messageHandler);
+      this._messageHandler = null;
+    }
+
     if (this.iframe) {
       this.iframe.remove();
       this.iframe = null;
     }
     this.container.innerHTML = '';
     this._ready = false;
+    this._dirty = false;
   }
 
   // ─── Private ──────────────────────────────────────
 
   private async _init(): Promise<void> {
-    // For now, embed the editor via iframe pointing to the built editor
-    // In the future, this will render directly into the container
     this.container.style.position = 'relative';
     this.container.style.overflow = 'hidden';
 
@@ -193,36 +234,85 @@ export class S1Editor {
     this.iframe.setAttribute('title', 's1 Document Editor');
     this.iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
 
-    // The src would point to the built editor
-    // For development, this can be localhost
-    const editorUrl = this.options.branding?.logo
-      ? '/editor/index.html' // customized
-      : '/editor/index.html'; // default
+    // Configurable editor URL — supports non-root deployments, CDN hosting,
+    // and custom editor builds. Defaults to '/editor/index.html'.
+    const editorUrl = this.options.editorUrl ?? '/editor/index.html';
+    this._iframeOrigin = this._resolveOrigin(editorUrl);
 
     this.iframe.src = editorUrl;
     this.container.appendChild(this.iframe);
 
+    // Set up persistent message handler for change/save/error events
+    this._messageHandler = (e: MessageEvent) => this._handleMessage(e);
+    window.addEventListener('message', this._messageHandler);
+
     // Wait for editor to signal ready
-    await new Promise<void>((resolve) => {
-      const handler = (e: MessageEvent) => {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (!this._ready) {
+          const message =
+            `Editor failed to initialize within ${INIT_TIMEOUT_MS}ms. ` +
+            `Ensure the editor is hosted at: ${editorUrl}`;
+          this._emitError('INIT_FAILED', message);
+          reject(new Error(message));
+        }
+      }, INIT_TIMEOUT_MS);
+
+      const readyHandler = (e: MessageEvent) => {
+        if (!this._isValidMessage(e)) return;
         if (e.data?.type === 's1-editor-ready') {
-          window.removeEventListener('message', handler);
+          window.removeEventListener('message', readyHandler);
+          clearTimeout(timeout);
           this._ready = true;
           this._applyOptions();
           this.options.onReady?.();
           resolve();
         }
       };
-      window.addEventListener('message', handler);
-
-      // Timeout fallback
-      setTimeout(() => {
-        if (!this._ready) {
-          this._ready = true;
-          resolve();
-        }
-      }, 5000);
+      window.addEventListener('message', readyHandler);
     });
+  }
+
+  /** Handle incoming messages from the editor iframe. */
+  private _handleMessage(e: MessageEvent): void {
+    if (!this._isValidMessage(e)) return;
+
+    switch (e.data?.type) {
+      case 's1-document-changed':
+        this._dirty = true;
+        this.options.onChange?.(e.data.event ?? { type: 'structure', timestamp: Date.now() });
+        break;
+      case 's1-document-saved':
+        this._dirty = false;
+        this.options.onSave?.(e.data.document);
+        break;
+      case 's1-editor-error':
+        this._emitError(e.data.code ?? 'WASM_ERROR', e.data.message ?? 'Unknown editor error');
+        break;
+    }
+  }
+
+  /** Validate that a message event comes from our editor iframe. */
+  private _isValidMessage(e: MessageEvent): boolean {
+    // Verify the message comes from the expected origin
+    if (this._iframeOrigin && e.origin !== this._iframeOrigin) return false;
+    // Verify the message comes from our iframe's window
+    if (this.iframe && e.source !== this.iframe.contentWindow) return false;
+    return true;
+  }
+
+  /** Resolve the origin from an editor URL (handles relative and absolute URLs). */
+  private _resolveOrigin(url: string): string {
+    try {
+      return new URL(url, window.location.href).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
+
+  /** Emit an error through the onError callback. */
+  private _emitError(code: string, message: string): void {
+    this.options.onError?.({ name: 'S1Error', message, code } as any);
   }
 
   private _applyOptions(): void {
@@ -237,11 +327,24 @@ export class S1Editor {
     } else if (this.options.toolbar) {
       this._postMessage({ type: 'setToolbar', config: this.options.toolbar });
     }
+    // Forward additional supported options to the iframe editor
+    if (this.options.statusBar !== undefined) {
+      this._postMessage({ type: 'setStatusBar', value: this.options.statusBar });
+    }
+    if (this.options.ruler !== undefined) {
+      this._postMessage({ type: 'setRuler', value: this.options.ruler });
+    }
+    if (this.options.pageView !== undefined) {
+      this._postMessage({ type: 'setPageView', value: this.options.pageView });
+    }
+    if (this.options.spellcheck !== undefined) {
+      this._postMessage({ type: 'setSpellcheck', value: this.options.spellcheck });
+    }
   }
 
   private _postMessage(message: Record<string, unknown>): void {
     if (this.iframe?.contentWindow) {
-      this.iframe.contentWindow.postMessage(message, '*');
+      this.iframe.contentWindow.postMessage(message, this._iframeOrigin || '*');
     }
   }
 }
