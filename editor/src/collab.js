@@ -243,6 +243,9 @@ function _applyCrdtStructuralOp(opData) {
 export function broadcastCrdtOp(crdtOpJson) {
   if (!roomId || applyingRemote || !crdtOpJson || crdtOpJson === '[]' || crdtOpJson === 'null') return;
   sendOp({ action: 'crdtOp', ops: crdtOpJson });
+  // Keep the server/session snapshot reasonably fresh even during pure CRDT
+  // text activity so reconnect and fresh-join flows converge to recent data.
+  scheduleDebouncedFullSync(true);
 }
 
 // ─── Debounced Full Sync ─────────────────────────────
@@ -341,7 +344,7 @@ function connect(url) {
     }
     // Add user info as query params for the server
     const sep = wsUrl.includes('?') ? '&' : '?';
-    wsUrl += `${sep}user=${encodeURIComponent(userName)}&uid=${encodeURIComponent(peerId || 'u-' + Math.random().toString(36).slice(2,8))}&access=${encodeURIComponent(accessLevel)}`;
+    wsUrl += `${sep}user=${encodeURIComponent(userName)}&uid=${encodeURIComponent(peerId || 'u-' + Math.random().toString(36).slice(2,8))}&access=${encodeURIComponent(accessLevel)}&mode=${encodeURIComponent(accessLevel)}`;
   }
 
   try {
@@ -396,7 +399,7 @@ function connect(url) {
     // Bug C7: Request server catchup before flushing local buffer
     // This ensures we apply any ops we missed while disconnected before replaying ours
     try {
-      ws.send(JSON.stringify({ type: 'sync-req', room: roomId, stateVector: null }));
+      ws.send(JSON.stringify({ type: 'requestCatchup', room: roomId, fromVersion: serverVersion }));
       tracing('Requested server catchup on reconnect (fromVersion:', serverVersion, ')');
     } catch (_) {}
 

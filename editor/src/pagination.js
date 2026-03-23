@@ -393,6 +393,11 @@ export function repaginate() {
     }
   }
 
+  // Finalize paragraph fragments produced by the WASM page map so split
+  // paragraphs are visually clipped to their page slice instead of showing the
+  // full paragraph on both pages.
+  applySplitParagraphClipping();
+
   // Second pass: remove any orphaned nodes (nodes in DOM not in any page)
   for (const pageEl of state.pageElements) {
     const contentEl = pageEl.querySelector('.page-content');
