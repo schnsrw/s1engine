@@ -6,7 +6,7 @@ import {
   getEditableText,
   addSecondaryCursor, clearSecondarySelections,
 } from './selection.js';
-import { renderDocument, renderNodeById, renderSingleParagraphIfPossible, syncParagraphText, syncAllText, syncAllTextFull, debouncedSync, markLayoutDirty } from './render.js';
+import { renderDocument, renderNodeById, renderSmart, renderSingleParagraphIfPossible, syncParagraphText, syncAllText, syncAllTextFull, debouncedSync, markLayoutDirty } from './render.js';
 import { toggleFormat, applyFormat, updateToolbarState, updateUndoRedo, recordUndoAction, renderUndoHistory } from './toolbar.js';
 import { deleteSelectedImage, setupImages } from './images.js';
 import { deleteSelectedShape, hasSelectedShape } from './shapes.js';
@@ -65,15 +65,6 @@ function _showPromptModal(message, defaultValue) {
   });
 }
 
-/**
- * Try incremental render for a single paragraph; fall back to full renderDocument.
- * Use this for operations that change one paragraph (formatting, list toggle, heading).
- * Do NOT use for structural operations (split, merge, table, paste multi-paragraph).
- */
-function renderSmart(nodeId) {
-  if (nodeId && renderSingleParagraphIfPossible(nodeId)) return;
-  renderDocument();
-}
 
 export function initInput() {
   const page = $('pageContainer');
@@ -312,8 +303,7 @@ export function initInput() {
               }
               if (state.doc) {
                 try {
-                  state.doc.set_paragraph_text(info.startNodeId,
-                    getEditableText(info.startEl));
+                  syncParagraphText(info.startEl);
                 } catch (syncErr) {
                   console.error('[input] CRDT/doc sync divergence on delete:', syncErr);
                   setTimeout(() => {
@@ -1238,38 +1228,87 @@ export function initInput() {
       if (cell) {
         e.preventDefault();
         const row = cell.parentElement;
-        const table = row?.closest('table');
-        if (!table) return;
-        const cells = Array.from(table.querySelectorAll('td, th'));
+        const currentTable = row?.closest('table');
+        if (!currentTable) return;
+
+        const cells = Array.from(currentTable.querySelectorAll('td, th'));
         const idx = cells.indexOf(cell);
-        const next = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
-        if (next) {
-          const textNode = next.querySelector('[data-node-id]');
-          if (textNode) { setCursorAtStart(textNode); }
-          else { next.focus(); }
-        } else if (!e.shiftKey && idx === cells.length - 1) {
-          // E4.1: Tab in last cell — insert new row
-          const tableNodeId = table.dataset?.nodeId;
-          if (tableNodeId && doc) {
-            try {
-              syncAllText();
-              const dims = JSON.parse(doc.get_table_dimensions(tableNodeId));
-              const rowIdx = dims.rows; // Insert at end
-              doc.insert_table_row(tableNodeId, rowIdx);
-              broadcastOp({ action: 'insertTableRow', tableNodeId, rowIndex: rowIdx });
-              renderDocument();
-              // Focus first cell of new row
-              const updatedTable = page.querySelector(`[data-node-id="${tableNodeId}"]`);
-              if (updatedTable) {
-                const newCells = updatedTable.querySelectorAll('td, th');
-                const firstNewCell = newCells[newCells.length - dims.cols];
-                if (firstNewCell) {
-                  const tn = firstNewCell.querySelector('[data-node-id]');
+        
+        if (e.shiftKey) {
+          // Backward navigation
+          if (idx > 0) {
+            const prevCell = cells[idx - 1];
+            const tn = prevCell.querySelector('[data-node-id]');
+            if (tn) setCursorAtStart(tn);
+            else prevCell.focus();
+          } else {
+            // At start of current chunk — look for previous chunk
+            const tableId = currentTable.dataset.nodeId.split('-p')[0];
+            const allTables = Array.from(document.querySelectorAll('table'));
+            const tableIdx = allTables.indexOf(currentTable);
+            for (let i = tableIdx - 1; i >= 0; i--) {
+              if (allTables[i].dataset.nodeId.startsWith(tableId)) {
+                const prevChunkCells = Array.from(allTables[i].querySelectorAll('td, th'));
+                if (prevChunkCells.length > 0) {
+                  const lastCell = prevChunkCells[prevChunkCells.length - 1];
+                  const tn = lastCell.querySelector('[data-node-id]');
                   if (tn) setCursorAtStart(tn);
+                  else lastCell.focus();
+                  return;
                 }
               }
-              updateUndoRedo(); markDirty();
-            } catch (err) { console.error('Tab add row:', err); }
+            }
+          }
+        } else {
+          // Forward navigation
+          if (idx < cells.length - 1) {
+            const nextCell = cells[idx + 1];
+            const tn = nextCell.querySelector('[data-node-id]');
+            if (tn) setCursorAtStart(tn);
+            else nextCell.focus();
+          } else {
+            // At end of current chunk — look for next chunk
+            const tableId = currentTable.dataset.nodeId.split('-p')[0];
+            const allTables = Array.from(document.querySelectorAll('table'));
+            const tableIdx = allTables.indexOf(currentTable);
+            for (let i = tableIdx + 1; i < allTables.length; i++) {
+              if (allTables[i].dataset.nodeId.startsWith(tableId)) {
+                const nextChunkCells = Array.from(allTables[i].querySelectorAll('td, th'));
+                if (nextChunkCells.length > 0) {
+                  const firstCell = nextChunkCells[0];
+                  const tn = firstCell.querySelector('[data-node-id]');
+                  if (tn) setCursorAtStart(tn);
+                  else firstCell.focus();
+                  return;
+                }
+              }
+            }
+
+            // If no next chunk, try to add a new row
+            const tableNodeId = tableId; // Use base ID
+            if (tableNodeId && doc) {
+              try {
+                syncAllText();
+                const dims = JSON.parse(doc.get_table_dimensions(tableNodeId));
+                const rowIdx = dims.rows; // Insert at end
+                doc.insert_table_row(tableNodeId, rowIdx);
+                broadcastOp({ action: 'insertTableRow', tableNodeId, rowIndex: rowIdx });
+                renderDocument();
+                // Focus first cell of new row (which might be on a new page)
+                const page = $('pageContainer');
+                const updatedTable = page.querySelector(`[data-node-id="${tableNodeId}"]`) || 
+                                     page.querySelector(`table[data-node-id^="${tableNodeId}-p"]`);
+                if (updatedTable) {
+                  const newCells = updatedTable.querySelectorAll('td, th');
+                  const firstNewCell = newCells[newCells.length - dims.cols];
+                  if (firstNewCell) {
+                    const tn = firstNewCell.querySelector('[data-node-id]');
+                    if (tn) setCursorAtStart(tn);
+                  }
+                }
+                updateUndoRedo(); markDirty();
+              } catch (err) { console.error('Tab add row:', err); }
+            }
           }
         }
         return;
@@ -1623,102 +1662,116 @@ export function initInput() {
     const text = rawText ? rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n') : '';
     const html = e.clipboardData.getData('text/html');
 
-    // E2.2: Try rich paste (HTML → structured content via WASM)
-    if (html) {
-      const parsed = parseClipboardHtml(html);
-      if (parsed && parsed.elements.length > 0) {
-        recordUndoAction('Paste formatted content');
-        const ok = pasteStructuredContent(doc, info, parsed, page);
-        if (ok) {
-          renderDocument();
-          placeCursorAfterPaste(page, text || '', info.startNodeId, info.startOffset);
-          updateUndoRedo();
-          markDirty();
-          return;
-        }
-        // Rich paste failed entirely — fall through to plain text
-        console.warn('Rich paste returned no content, falling back to plain text');
-      }
+    // S3-14: If both formats are available and not holding Shift, show Paste Special dialog
+    if (html && text && !e.shiftKey) {
+      showPasteSpecialDialog(html, text, info);
+      return;
     }
 
-    if (!text) return;
-
-    // X14: Ensure WASM state is current before paste — flush any pending debounced sync.
-    // This prevents stale offsets when pasting plain text with newlines.
-    clearTimeout(state.syncTimer);
-    syncAllText();
-
-    if (text.includes('\n')) {
-      try {
-        recordUndoAction('Paste text');
-        doc.paste_plain_text(info.startNodeId, info.startOffset, text);
-        broadcastOp({ action: 'pasteText', nodeId: info.startNodeId, offset: info.startOffset, text });
-        // Bug R4: Apply pending formats to pasted text
-        if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
-          try {
-            const pastedLen = text.replace(/\n/g, '').length;
-            const endOffset = info.startOffset + pastedLen;
-            for (const [key, value] of Object.entries(state.pendingFormats)) {
-              doc.format_selection(info.startNodeId, info.startOffset, info.startNodeId, endOffset, key, value);
-              broadcastOp({ action: 'formatSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.startNodeId, endOffset: endOffset, key, value });
-            }
-          } catch (_) {}
-        }
-        // X14: After multi-line paste that creates new paragraphs, sync all text
-        // to ensure WASM offsets are fresh before any subsequent operations
-        syncAllText();
-        renderDocument();
-        placeCursorAfterPaste(page, text, info.startNodeId, info.startOffset);
-        updateUndoRedo();
-        markDirty();
-      } catch (err) {
-        console.error('paste multi-line:', err);
-        showToast('Operation failed', 'error');
-        // Fallback: insert as single line via WASM
-        try {
-          const flatText = text.replace(/\n/g, ' ');
-          doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, flatText);
-          broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text: flatText });
-          syncAllText(); // X14: Sync after fallback paste too
-          renderDocument();
-          updateUndoRedo();
-        } catch (e2) { console.error('paste fallback:', e2); showToast('Operation failed', 'error'); }
-      }
+    // Default behavior: holding Shift forces plain text; otherwise try rich paste
+    if (e.shiftKey || !html) {
+      _doPlainTextPaste(text, info);
     } else {
-      try {
-        recordUndoAction('Paste text');
-        doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
-        broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text });
-        // Bug R4: Apply pending formats to pasted text
-        if (state.pendingFormats && Object.keys(state.pendingFormats).length > 0) {
-          try {
-            const pastedLen = Array.from(text).length;
-            const endOffset = info.startOffset + pastedLen;
-            for (const [key, value] of Object.entries(state.pendingFormats)) {
-              doc.format_selection(info.startNodeId, info.startOffset, info.startNodeId, endOffset, key, value);
-              broadcastOp({ action: 'formatSelection', startNode: info.startNodeId, startOffset: info.startOffset, endNode: info.startNodeId, endOffset: endOffset, key, value });
-            }
-          } catch (_) {}
-        }
-        renderDocument();
-        const container = $('pageContainer');
-        const updated = container?.querySelector(`[data-node-id="${info.startNodeId}"]`);
-        if (updated) setCursorAtOffset(updated, info.startOffset + Array.from(text).length);
-        updateUndoRedo();
-        markDirty();
-      } catch (err) {
-        console.error('paste single-line:', err);
-      }
+      _doRichPaste(html, text, info);
     }
+  } catch (err) {
+    console.error('Paste error:', err);
+  } finally {
+    state._pasteInProgress = false;
+  }
+});
 
-    // D3: After paste triggers re-render, verify selection nodes are still in DOM.
-    // If the selection references detached nodes, clear it to prevent stale references.
-    const selAfterPaste = window.getSelection();
-    if (selAfterPaste && selAfterPaste.anchorNode && !document.contains(selAfterPaste.anchorNode)) {
-      selAfterPaste.removeAllRanges();
+/** S3-14: Show a modal for choosing paste format */
+function showPasteSpecialDialog(html, text, info) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.zIndex = '3000';
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal-content paste-special-modal';
+  modal.innerHTML = `
+    <h3>Paste Special</h3>
+    <p>Choose how you want to paste the content:</p>
+    <div class="paste-options-list" style="display:flex;flex-direction:column;gap:12px;margin:20px 0">
+      <button class="paste-option-btn primary" id="pasteFormatted" style="display:flex;align-items:center;gap:12px;padding:12px;text-align:left;cursor:pointer">
+        <span class="msi" style="font-size:24px">format_paint</span>
+        <div class="paste-option-text" style="display:flex;flex-direction:column">
+          <strong>Keep Source Formatting</strong>
+          <span style="font-size:12px;opacity:0.8">Preserve styles, tables, and images.</span>
+        </div>
+      </button>
+      <button class="paste-option-btn" id="pastePlain" style="display:flex;align-items:center;gap:12px;padding:12px;text-align:left;cursor:pointer">
+        <span class="msi" style="font-size:24px">notes</span>
+        <div class="paste-option-text" style="display:flex;flex-direction:column">
+          <strong>Plain Text</strong>
+          <span style="font-size:12px;opacity:0.8">Strip all formatting and keep only text.</span>
+        </div>
+      </button>
+    </div>
+    <div class="modal-actions" style="display:flex;justify-content:flex-end">
+      <button class="modal-cancel">Cancel</button>
+    </div>
+  `;
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); state._pasteInProgress = false; };
+
+  modal.querySelector('#pasteFormatted').onclick = () => { close(); _doRichPaste(html, text, info); };
+  modal.querySelector('#pastePlain').onclick = () => { close(); _doPlainTextPaste(text, info); };
+  modal.querySelector('.modal-cancel').onclick = close;
+  
+  // Close on Escape
+  const escHandler = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escHandler); } };
+  document.addEventListener('keydown', escHandler);
+}
+
+function _doRichPaste(html, text, info) {
+  const page = $('pageContainer');
+  const doc = state.doc;
+  const parsed = parseClipboardHtml(html);
+  if (parsed && parsed.elements.length > 0) {
+    recordUndoAction('Paste formatted content');
+    const ok = pasteStructuredContent(doc, info, parsed, page);
+    if (ok) {
+      renderDocument();
+      placeCursorAfterPaste(page, text || '', info.startNodeId, info.startOffset);
+      updateUndoRedo();
+      markDirty();
+      return true;
     }
-    } finally { state._pasteInProgress = false; }
-  });
+  }
+  return _doPlainTextPaste(text, info);
+}
+
+function _doPlainTextPaste(text, info) {
+  if (!text) return false;
+  const page = $('pageContainer');
+  const doc = state.doc;
+  clearTimeout(state.syncTimer);
+  syncAllText();
+  try {
+    recordUndoAction('Paste text');
+    if (text.includes('\n')) {
+      doc.paste_plain_text(info.startNodeId, info.startOffset, text);
+      broadcastOp({ action: 'pasteText', nodeId: info.startNodeId, offset: info.startOffset, text });
+    } else {
+      doc.insert_text_in_paragraph(info.startNodeId, info.startOffset, text);
+      broadcastOp({ action: 'insertText', nodeId: info.startNodeId, offset: info.startOffset, text });
+    }
+    syncAllText();
+    renderDocument();
+    placeCursorAfterPaste(page, text, info.startNodeId, info.startOffset);
+    updateUndoRedo();
+    markDirty();
+    return true;
+  } catch (e) {
+    console.error('Plain text paste failed:', e);
+    return false;
+  }
+}
+
 
   // ─── Selection change ──────────────────────────
   // E-01 fix: Clear pending formats when cursor moves or selection changes
@@ -2123,6 +2176,31 @@ export function initInput() {
       addSep();
       addItem('Delete table', '', () => {
         try { state.doc.delete_node(tableId); broadcastOp({ action: 'deleteNode', nodeId: tableId }); renderDocument(); recordUndoAction('Delete table'); updateUndoRedo(); markDirty(); } catch (e) { console.error(e); }
+      });
+      addSep();
+      // S4-18: Table Sort
+      const colIdx = cell ? Array.from(cell.parentNode.children).indexOf(cell) : 0;
+      addItem('Sort column ascending', '', () => {
+        try {
+          if (state.collabDoc) {
+            const crdtRes = state.collabDoc.sort_table_by_column(tableId, colIdx, true);
+            broadcastOp({ action: 'sortTable', tableId, colIndex: colIdx, ascending: true }, crdtRes);
+          } else {
+            state.doc.sort_table_by_column(tableId, colIdx, true);
+          }
+          renderDocument(); recordUndoAction('Sort table'); markDirty();
+        } catch (e) { console.error('Sort failed:', e); }
+      });
+      addItem('Sort column descending', '', () => {
+        try {
+          if (state.collabDoc) {
+            const crdtRes = state.collabDoc.sort_table_by_column(tableId, colIdx, false);
+            broadcastOp({ action: 'sortTable', tableId, colIndex: colIdx, ascending: false }, crdtRes);
+          } else {
+            state.doc.sort_table_by_column(tableId, colIdx, false);
+          }
+          renderDocument(); recordUndoAction('Sort table'); markDirty();
+        } catch (e) { console.error('Sort failed:', e); }
       });
       addSep();
     }

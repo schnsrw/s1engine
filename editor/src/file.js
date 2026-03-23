@@ -941,7 +941,89 @@ export function updateTrackChanges() {
     } else {
       $('tcBar').classList.remove('show');
     }
+    
+    // S3-12: Refresh sidebar if open
+    if ($('tcPanel')?.classList.contains('show')) {
+      refreshTrackChangesSidebar();
+    }
   } catch (_) { $('tcBar').classList.remove('show'); }
+}
+
+/** S3-12: Refresh the Track Changes sidebar with actionable cards */
+export function refreshTrackChangesSidebar() {
+  const { doc } = state;
+  const list = $('tcPanelList');
+  if (!list || !doc) return;
+
+  try {
+    const changesJson = doc.tracked_changes_json();
+    const changes = JSON.parse(changesJson);
+
+    if (!changes || changes.length === 0) {
+      list.innerHTML = `
+        <div class="tc-panel-empty">
+          <span class="msi tc-empty-icon">check_circle</span>
+          <p>No tracked changes</p>
+        </div>`;
+      return;
+    }
+
+    let html = '';
+    changes.forEach(ch => {
+      const author = ch.author || 'Unknown';
+      const type = ch.type || 'Insert';
+      const typeClass = type.toLowerCase();
+      const date = ch.date ? new Date(ch.date).toLocaleString() : 'Recently';
+      
+      html += `
+        <div class="tc-card" data-node-id="${escapeAttr(ch.nodeId)}">
+          <div class="tc-card-header">
+            <span class="tc-type-badge tc-type-${typeClass}">${escapeHtml(type)}</span>
+            <span class="tc-author">${escapeHtml(author)}</span>
+          </div>
+          <div class="tc-card-body">
+            <div class="tc-date">${escapeHtml(date)}</div>
+          </div>
+          <div class="tc-card-actions">
+            <button class="tc-accept-btn" data-id="${escapeAttr(ch.nodeId)}" title="Accept change">Accept</button>
+            <button class="tc-reject-btn" data-id="${escapeAttr(ch.nodeId)}" title="Reject change">Reject</button>
+          </div>
+        </div>
+      `;
+    });
+
+    list.innerHTML = html;
+
+    // Wire up buttons
+    list.querySelectorAll('.tc-accept-btn').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.dataset.id;
+        try {
+          doc.accept_change(id);
+          broadcastOp({ action: 'acceptChange', nodeId: id });
+          renderDocument();
+          updateTrackChanges();
+          refreshTrackChangesSidebar();
+        } catch (e) { console.error('Accept change failed:', e); }
+      };
+    });
+
+    list.querySelectorAll('.tc-reject-btn').forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.dataset.id;
+        try {
+          doc.reject_change(id);
+          broadcastOp({ action: 'rejectChange', nodeId: id });
+          renderDocument();
+          updateTrackChanges();
+          refreshTrackChangesSidebar();
+        } catch (e) { console.error('Reject change failed:', e); }
+      };
+    });
+
+  } catch (err) {
+    console.warn('Failed to refresh track changes sidebar:', err);
+  }
 }
 
 export function initFileHandlers() {

@@ -155,8 +155,16 @@ export function renderSingleParagraphIfPossible(nodeId, options = {}) {
   }
 
   // Perform the incremental render
+  const oldHeight = existingEl.offsetHeight;
   const updatedEl = renderNodeById(nodeId);
   if (!updatedEl) return false;
+
+  // D21: If height changed significantly, we must re-paginate the document
+  // to avoid page overflow or gaps. A threshold of 2px ignores rounding errors.
+  const newHeight = updatedEl.offsetHeight;
+  if (Math.abs(newHeight - oldHeight) > 2) {
+    return false; // Height changed — full re-render needed for pagination
+  }
 
   // D15: Ensure node map is up-to-date after incremental render
   // (renderNodeById handles replacements, but ensure map consistency for edge cases)
@@ -833,22 +841,32 @@ export function syncParagraphText(el) {
   if (!doc || state.ignoreInput || !el) return;
   // Never sync header/footer paragraphs — their displayed text includes
   // substituted page number / page count values from field elements.
-  // Syncing that text back to the WASM model would duplicate it alongside
-  // the Field nodes, causing garbled page numbers (e.g. "Page 1Page 1").
   if (el.closest('.page-header, .page-footer')) return;
   const nodeId = el.dataset?.nodeId;
   if (!nodeId) return;
+
   // Use getEditableText to exclude list marker text from sync
   const newText = getEditableText(el);
-  // Bug R6: If cache exists but doesn't match current DOM, clear it so sync proceeds
-  const cached = syncedTextCache.get(nodeId);
-  if (cached !== undefined && cached !== newText && cached !== el.textContent) {
-    syncedTextCache.delete(nodeId);
-  }
+
+  // If the text in DOM matches our JS cache, no change needed.
   if (syncedTextCache.get(nodeId) === newText) return;
+
   try {
-    const previousText = syncedTextCache.get(nodeId);
+    // Determine the baseline text to diff against.
+    // We prefer the JS cache for speed, but fall back to the WASM model
+    // if the cache is missing or possibly stale.
+    let previousText = syncedTextCache.get(nodeId);
+    if (typeof previousText !== 'string') {
+      try {
+        previousText = doc.get_paragraph_text(nodeId);
+      } catch (e) {
+        previousText = null;
+      }
+    }
+
     if (typeof previousText === 'string' && typeof doc.replace_text === 'function') {
+      // Perform minimal diff to preserve inline formatting (bold/italic runs)
+      // outside the modified range.
       const oldChars = Array.from(previousText);
       const newChars = Array.from(newText);
       let prefixLen = 0;
@@ -869,12 +887,16 @@ export function syncParagraphText(el) {
       }
       const deleteCount = oldChars.length - prefixLen - suffixLen;
       const replacement = newChars.slice(prefixLen, newChars.length - suffixLen).join('');
+      
       if (deleteCount > 0 || replacement) {
         doc.replace_text(nodeId, prefixLen, deleteCount, replacement);
       }
     } else {
+      // Final fallback: full paragraph replacement (destroys formatting)
       doc.set_paragraph_text(nodeId, newText);
     }
+
+    // Update the JS cache with the current truth
     syncedTextCache.set(nodeId, newText);
     markDirty();
     clearFindHighlights();
@@ -1842,4 +1864,16 @@ function teardownVirtualScroll() {
   // Clear all references so entries + indexMap can be GC'd
   vs.entries.length = 0;
   state.virtualScroll = null;
+}
+
+/**
+ * Try incremental render for a single paragraph; fall back to full renderDocument.
+ * Use this for operations that change one paragraph (formatting, list toggle, heading).
+ * Do NOT use for structural operations (split, merge, table, paste multi-paragraph).
+ *
+ * @param {string} nodeId - The node ID to attempt incremental render for
+ */
+export function renderSmart(nodeId) {
+  if (nodeId && renderSingleParagraphIfPossible(nodeId)) return;
+  renderDocument();
 }

@@ -101,14 +101,22 @@ export function repaginate() {
 
   // Get page dimensions
   const dims = state.pageDims || { marginTopPt: 72, marginBottomPt: 72, marginLeftPt: 72, marginRightPt: 72 };
+// Build nodeToPage map, table chunk map, and paragraph split map
+const newNodeToPage = new Map();
+// tableChunkMap: Map<pageNum, Map<tableId, {rowIds, isContinuation, chunkId}>>
+const tableChunkMap = new Map();
+// paraSplitMap: Map<pageNum, Map<nodeId, {isContinuation, splitAtLine, lineCount, blockHeight, splitId}>>
+const paraSplitMap = new Map();
 
-  // Build nodeToPage map, table chunk map, and paragraph split map
-  const newNodeToPage = new Map();
-  // tableChunkMap: Map<pageNum, Map<tableId, {rowIds, isContinuation, chunkId}>>
-  const tableChunkMap = new Map();
-  // paraSplitMap: Map<pageNum, Map<nodeId, {isContinuation, splitAtLine, lineCount, blockHeight, splitId}>>
-  const paraSplitMap = new Map();
-  for (const pg of pages) {
+// S3-15: Load section properties for per-section headers/footers
+let sections = [];
+try {
+  sections = JSON.parse(state.doc.get_sections_json());
+} catch (e) { console.error('Failed to load sections:', e); }
+
+for (const pg of pages) {
+  // ... same loop ...
+
     // Process table chunks for this page
     if (pg.tableChunks && pg.tableChunks.length > 0) {
       const pageChunks = new Map();
@@ -175,11 +183,36 @@ export function repaginate() {
 
   // Create missing pages
   for (let i = existingCount; i < numPages; i++) {
+    const pg = pages[i];
     const pageNum = i + 1;
-    const isFirstPage = pageNum === 1;
-    const hdr = (isFirstPage && hasDifferentFirst) ? firstPageHeaderHtml : defaultHeaderHtml;
-    const ftr = (isFirstPage && hasDifferentFirst) ? firstPageFooterHtml : defaultFooterHtml;
-    const pageEl = createPageElement(pageNum, pages[i], dims, hdr, ftr, numPages);
+    
+    // S3-15: Section-aware header/footer rendering
+    let hdr = '', ftr = '';
+    const section = sections[pg.sectionIndex];
+    if (section) {
+      // Determine type based on page number within section
+      // For simplicity, we use global page number for First/Even logic
+      let hfType = 'default';
+      if (pageNum === 1) hfType = 'first';
+      else if (pageNum % 2 === 0) hfType = 'even';
+
+      const hRef = section.headers.find(h => h.type === hfType) || section.headers.find(h => h.type === 'default');
+      const fRef = section.footers.find(f => f.type === hfType) || section.footers.find(f => f.type === 'default');
+
+      if (hRef) {
+        try { hdr = state.doc.render_node_html(hRef.nodeId); } catch(_) {}
+      }
+      if (fRef) {
+        try { ftr = state.doc.render_node_html(fRef.nodeId); } catch(_) {}
+      }
+    } else {
+      // Fallback to legacy global headers if section info missing
+      const isFirstPage = pageNum === 1;
+      hdr = (isFirstPage && hasDifferentFirst) ? firstPageHeaderHtml : defaultHeaderHtml;
+      ftr = (isFirstPage && hasDifferentFirst) ? firstPageFooterHtml : defaultFooterHtml;
+    }
+
+    const pageEl = createPageElement(pageNum, pg, dims, hdr, ftr, numPages);
     container.appendChild(pageEl);
   }
 
@@ -292,6 +325,7 @@ export function repaginate() {
               // on the inner paragraph to scroll the content up, hiding the already-shown lines.
               newEl.dataset.splitContinuation = 'true';
               newEl.dataset.splitAtLine = String(split.splitAtLine);
+              newEl.dataset.splitOffsetHeight = String(split.offsetHeight);
               newEl.style.listStyleType = 'none'; // Don't repeat list markers
             } else {
               // First part of split: mark it so we can apply height clipping after layout
@@ -796,27 +830,15 @@ function applySplitParagraphClipping() {
     // Handle continuation split paragraphs: hide already-shown lines
     contentEl.querySelectorAll('[data-split-continuation]').forEach(el => {
       try {
-      const splitAtLine = parseInt(el.dataset.splitAtLine, 10) || 0;
-      if (splitAtLine <= 0) return;
+        const splitAtLine = parseInt(el.dataset.splitAtLine, 10) || 0;
+        if (splitAtLine <= 0) return;
 
-      const nid = el.dataset.nodeId || el.getAttribute('data-node-id');
-      if (!nid) return;
-      const originalId = nid.replace(/-cont$/, '');
-      let firstHalfHeight = 0;
+        // Use the WASM-provided offset height for precise clipping
+        const offsetHeightPt = parseFloat(el.dataset.splitOffsetHeight);
+        if (isNaN(offsetHeightPt) || offsetHeightPt <= 0) return;
 
-      for (const otherPage of pageEls) {
-        if (otherPage === pageEl) continue;
-        const otherContent = otherPage.querySelector('.page-content');
-        if (!otherContent) continue;
-        const firstHalf = otherContent.querySelector(`[data-node-id="${CSS.escape(originalId)}"][data-split-first]`);
-        if (firstHalf) {
-          // Use the rendered height of the first half as the offset
-          firstHalfHeight = firstHalf.scrollHeight;
-          break;
-        }
-      }
+        const offsetHeightPx = Math.ceil(offsetHeightPt * PT_TO_PX);
 
-      if (firstHalfHeight > 0) {
         // If the element isn't already wrapped, wrap it
         if (!el.parentElement?.classList?.contains('split-cont-wrapper')) {
           const wrapper = document.createElement('div');
@@ -828,11 +850,11 @@ function applySplitParagraphClipping() {
           wrapper.dataset.nodeId = el.dataset.nodeId;
           el.removeAttribute('data-node-id');
         }
-        el.style.marginTop = `-${firstHalfHeight}px`;
-      }
+        
+        el.style.marginTop = `-${offsetHeightPx}px`;
 
-      // Make continuation non-editable to avoid duplicate editing
-      el.contentEditable = 'false';
+        // Make continuation non-editable to avoid duplicate editing
+        el.contentEditable = 'false';
       } catch (_) { /* skip malformed split elements */ }
     });
   }

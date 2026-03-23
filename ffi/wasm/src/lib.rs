@@ -484,6 +484,9 @@ impl WasmDocument {
 
     fn serialize_page_map(&self, layout: &s1_layout::LayoutDocument) -> Result<String, JsError> {
         let mut pages_json = Vec::new();
+        // Track accumulated height for paragraphs that split across pages
+        let mut para_accumulated_heights = std::collections::HashMap::new();
+
         for (i, page) in layout.pages.iter().enumerate() {
             let mut node_ids = Vec::new();
             let mut table_chunks_json = Vec::new();
@@ -516,13 +519,17 @@ impl WasmDocument {
                     ..
                 } = &block.kind
                 {
-                    if *split_at_line > 0 {
+                    if *split_at_line > 0 || *is_continuation {
                         // This paragraph was split across pages
                         let line_count = lines.len();
-                        let total_height: f64 = lines.iter().map(|l| l.height).sum();
+                        let block_height: f64 = lines.iter().map(|l| l.height).sum();
+                        
+                        let offset_height = para_accumulated_heights.get(&block.source_id).cloned().unwrap_or(0.0);
+                        para_accumulated_heights.insert(block.source_id, offset_height + block_height);
+
                         para_splits_json.push(format!(
-                            "{{\"nodeId\":\"{}\",\"isContinuation\":{},\"splitAtLine\":{},\"lineCount\":{},\"blockHeight\":{:.2}}}",
-                            id_str, is_continuation, split_at_line, line_count, total_height,
+                            "{{\"nodeId\":\"{}\",\"isContinuation\":{},\"splitAtLine\":{},\"lineCount\":{},\"blockHeight\":{:.2},\"offsetHeight\":{:.2}}}",
+                            id_str, is_continuation, split_at_line, line_count, block_height, offset_height,
                         ));
                         // Always include the node ID (even duplicates for split paragraphs)
                         node_ids.push(id_str);
@@ -3200,6 +3207,24 @@ impl WasmDocument {
 
     // ─── P.2: Table Operations API ──────────────────────────────
 
+    /// Set column widths for a table. Widths should be in points (CSV string).
+    pub fn set_table_column_widths(
+        &mut self,
+        table_id_str: &str,
+        widths_csv: &str,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let table_id = parse_node_id(table_id_str)?;
+        let mut txn = Transaction::with_label("Set table column widths");
+        txn.push(Operation::set_attribute(
+            table_id,
+            AttributeKey::TableColumnWidths,
+            AttributeValue::String(widths_csv.to_string()),
+        ));
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Insert a table after the specified body-level node.
     ///
     /// Creates a table with the given number of rows and columns,
@@ -4579,8 +4604,33 @@ impl WasmDocument {
         let sections = doc.sections();
         let mut entries = Vec::new();
         for sec in sections {
+            let mut headers_json = Vec::new();
+            for h in &sec.headers {
+                let h_type = match h.hf_type {
+                    s1_model::HeaderFooterType::First => "first",
+                    s1_model::HeaderFooterType::Even => "even",
+                    _ => "default",
+                };
+                headers_json.push(format!(
+                    "{{\"type\":\"{}\",\"nodeId\":\"{}:{}\"}}",
+                    h_type, h.node_id.replica, h.node_id.counter
+                ));
+            }
+            let mut footers_json = Vec::new();
+            for f in &sec.footers {
+                let f_type = match f.hf_type {
+                    s1_model::HeaderFooterType::First => "first",
+                    s1_model::HeaderFooterType::Even => "even",
+                    _ => "default",
+                };
+                footers_json.push(format!(
+                    "{{\"type\":\"{}\",\"nodeId\":\"{}:{}\"}}",
+                    f_type, f.node_id.replica, f.node_id.counter
+                ));
+            }
+
             entries.push(format!(
-                "{{\"pageWidth\":{},\"pageHeight\":{},\"marginTop\":{},\"marginBottom\":{},\"marginLeft\":{},\"marginRight\":{},\"columns\":{},\"columnSpacing\":{:.1}}}",
+                "{{\"pageWidth\":{},\"pageHeight\":{},\"marginTop\":{},\"marginBottom\":{},\"marginLeft\":{},\"marginRight\":{},\"columns\":{},\"columnSpacing\":{:.1},\"headers\":[{}],\"footers\":[{}]}}",
                 sec.page_width,
                 sec.page_height,
                 sec.margin_top,
@@ -4589,6 +4639,8 @@ impl WasmDocument {
                 sec.margin_right,
                 sec.columns,
                 sec.column_spacing,
+                headers_json.join(","),
+                footers_json.join(","),
             ));
         }
         Ok(format!("[{}]", entries.join(",")))
@@ -4957,12 +5009,24 @@ impl WasmDocument {
         Ok(format!("[{}]", results.join(",")))
     }
 
+    /// Replace text in a paragraph by character range. Alias to `replace_text`.
+    ///
+    /// Preserves inline formatting (bold, italic, etc.) outside the modified range.
+    pub fn replace_text_range(
+        &mut self,
+        node_id_str: &str,
+        start_offset: usize,
+        end_offset: usize,
+        replacement: &str,
+    ) -> Result<(), JsError> {
+        let length = end_offset.saturating_sub(start_offset);
+        self.replace_text(node_id_str, start_offset, length, replacement)
+    }
+
     /// Replace text at a specific location.
     ///
     /// Note: insert_text into an existing text node inherits the parent run's
     /// formatting (bold, italic, etc.) — no explicit attribute copy needed.
-    /// The text node returned by `find_text_node_at_char_offset` belongs to a
-    /// run, so the replacement text automatically gets that run's formatting.
     pub fn replace_text(
         &mut self,
         node_id_str: &str,
@@ -10597,42 +10661,56 @@ impl WasmCollabDocument {
     // implementations, then reconstruct the CollabDocument. This preserves full
     // editor compatibility while the CRDT layer handles text-level ops natively.
 
-    /// Helper: apply a closure that mutates a WasmDocument, then reconstruct CollabDocument.
-    fn with_wasm_doc<F>(&mut self, f: F) -> Result<(), JsError>
+    /// Helper: apply a closure that mutates a WasmDocument, then sync the operations
+    /// back to the original CollabDocument to generate CRDT-native operations.
+    fn with_wasm_doc<F>(&mut self, f: F) -> Result<String, JsError>
     where
         F: FnOnce(&mut WasmDocument) -> Result<(), JsError>,
     {
-        let collab = self
+        let mut collab = self
             .inner
             .take()
             .ok_or_else(|| JsError::new("Document freed"))?;
-        let replica = collab.replica_id();
+        
         let model = collab.model().clone();
         let mut wasm_doc = WasmDocument {
             batch_label: None,
             batch_count: 0,
             inner: Some(s1engine::Document::from_model(model)),
         };
+
+        // Run the mutation (e.g. split_paragraph) on the temporary engine document
         f(&mut wasm_doc)?;
-        let doc = wasm_doc
-            .inner
-            .take()
-            .ok_or_else(|| JsError::new("Internal error"))?;
-        self.inner = Some(s1_crdt::CollabDocument::from_model(
-            doc.into_model(),
-            replica,
-        ));
-        Ok(())
+
+        // Capture the operations that were performed
+        let last_txn = wasm_doc.inner.as_ref().and_then(|d| d.last_txn.as_ref());
+        let mut crdt_ops_json = Vec::new();
+
+        if let Some(txn) = last_txn {
+            // Replay the operations on the CollabDocument to generate CRDT metadata
+            // using the CORRECT Lamport clock and State Vector.
+            let crdt_ops = collab
+                .apply_local_transaction(txn.operations.clone())
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            
+            for op in crdt_ops {
+                crdt_ops_json.push(serialize_crdt_op_to_json(&op));
+            }
+        }
+
+        self.inner = Some(collab);
+        Ok(format!("[{}]", crdt_ops_json.join(",")))
     }
 
     /// Delete a text selection (single or cross-paragraph).
+    /// Returns serialized CRDT operations.
     pub fn delete_selection(
         &mut self,
         start_node_str: &str,
         start_offset: usize,
         end_node_str: &str,
         end_offset: usize,
-    ) -> Result<(), JsError> {
+    ) -> Result<String, JsError> {
         let s = start_node_str.to_string();
         let e = end_node_str.to_string();
         self.with_wasm_doc(|doc| doc.delete_selection(&s, start_offset, &e, end_offset))
@@ -10649,6 +10727,7 @@ impl WasmCollabDocument {
     }
 
     /// Format a selection.
+    /// Returns serialized CRDT operations.
     pub fn format_selection(
         &mut self,
         start_node_str: &str,
@@ -10657,7 +10736,7 @@ impl WasmCollabDocument {
         end_offset: usize,
         key: &str,
         value: &str,
-    ) -> Result<(), JsError> {
+    ) -> Result<String, JsError> {
         let s = start_node_str.to_string();
         let e = end_node_str.to_string();
         let k = key.to_string();
@@ -10666,31 +10745,36 @@ impl WasmCollabDocument {
     }
 
     /// Split a paragraph at the given offset.
+    /// Returns JSON: { "newId": "replica:counter", "ops": [ ... ] }
     pub fn split_paragraph(&mut self, node_id_str: &str, offset: usize) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let mut new_id = String::new();
-        self.with_wasm_doc(|doc| {
+        let ops_json = self.with_wasm_doc(|doc| {
             new_id = doc.split_paragraph(&n, offset)?;
             Ok(())
         })?;
-        Ok(new_id)
+        Ok(format!(
+            "{{\"newId\":\"{}\",\"ops\":{}}}",
+            new_id, ops_json
+        ))
     }
 
     /// Merge two paragraphs.
-    pub fn merge_paragraphs(&mut self, node1_str: &str, node2_str: &str) -> Result<(), JsError> {
+    /// Returns serialized CRDT operations.
+    pub fn merge_paragraphs(&mut self, node1_str: &str, node2_str: &str) -> Result<String, JsError> {
         let n1 = node1_str.to_string();
         let n2 = node2_str.to_string();
         self.with_wasm_doc(|doc| doc.merge_paragraphs(&n1, &n2))
     }
 
     /// Set heading level for a paragraph.
-    pub fn set_heading_level(&mut self, node_id_str: &str, level: u8) -> Result<(), JsError> {
+    pub fn set_heading_level(&mut self, node_id_str: &str, level: u8) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         self.with_wasm_doc(|doc| doc.set_heading_level(&n, level))
     }
 
     /// Set alignment for a paragraph.
-    pub fn set_alignment(&mut self, node_id_str: &str, alignment: &str) -> Result<(), JsError> {
+    pub fn set_alignment(&mut self, node_id_str: &str, alignment: &str) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let a = alignment.to_string();
         self.with_wasm_doc(|doc| doc.set_alignment(&n, &a))
@@ -10702,7 +10786,7 @@ impl WasmCollabDocument {
         node_id_str: &str,
         format: &str,
         level: u32,
-    ) -> Result<(), JsError> {
+    ) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let f = format.to_string();
         self.with_wasm_doc(|doc| doc.set_list_format(&n, &f, level))
@@ -10714,7 +10798,7 @@ impl WasmCollabDocument {
         node_id_str: &str,
         offset: usize,
         text: &str,
-    ) -> Result<(), JsError> {
+    ) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let t = text.to_string();
         self.with_wasm_doc(|doc| doc.paste_plain_text(&n, offset, &t))
@@ -10729,29 +10813,32 @@ impl WasmCollabDocument {
         let n = after_node_str.to_string();
         let t = text.to_string();
         let mut new_id = String::new();
-        self.with_wasm_doc(|doc| {
+        let ops_json = self.with_wasm_doc(|doc| {
             new_id = doc.insert_paragraph_after(&n, &t)?;
             Ok(())
         })?;
-        Ok(new_id)
+        Ok(format!(
+            "{{\"newId\":\"{}\",\"ops\":{}}}",
+            new_id, ops_json
+        ))
     }
 
     /// Set line spacing for a paragraph.
-    pub fn set_line_spacing(&mut self, node_id_str: &str, value: &str) -> Result<(), JsError> {
+    pub fn set_line_spacing(&mut self, node_id_str: &str, value: &str) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let v = value.to_string();
         self.with_wasm_doc(|doc| doc.set_line_spacing(&n, &v))
     }
 
     /// Set indent for a paragraph.
-    pub fn set_indent(&mut self, node_id_str: &str, side: &str, value: f64) -> Result<(), JsError> {
+    pub fn set_indent(&mut self, node_id_str: &str, side: &str, value: f64) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         let s = side.to_string();
         self.with_wasm_doc(|doc| doc.set_indent(&n, &s, value))
     }
 
     /// Delete a node.
-    pub fn delete_node(&mut self, node_id_str: &str) -> Result<(), JsError> {
+    pub fn delete_node(&mut self, node_id_str: &str) -> Result<String, JsError> {
         let n = node_id_str.to_string();
         self.with_wasm_doc(|doc| doc.delete_node(&n))
     }
@@ -10760,11 +10847,82 @@ impl WasmCollabDocument {
     pub fn append_paragraph(&mut self, text: &str) -> Result<String, JsError> {
         let t = text.to_string();
         let mut new_id = String::new();
-        self.with_wasm_doc(|doc| {
+        let ops_json = self.with_wasm_doc(|doc| {
             new_id = doc.append_paragraph(&t)?;
             Ok(())
         })?;
-        Ok(new_id)
+        Ok(format!(
+            "{{\"newId\":\"{}\",\"ops\":{}}}",
+            new_id, ops_json
+        ))
+    }
+
+    /// Sort a table by the content of a specific column.
+    pub fn sort_table_by_column(
+        &mut self,
+        table_id_str: &str,
+        col_index: u32,
+        ascending: bool,
+    ) -> Result<(), JsError> {
+        let doc = self.doc_mut()?;
+        let table_id = parse_node_id(table_id_str)?;
+        let model = doc.model();
+        let table = model.node(table_id).ok_or_else(|| JsError::new("Table not found"))?;
+        
+        let mut row_data = Vec::new();
+        for &row_id in &table.children {
+            let row = model.node(row_id).ok_or_else(|| JsError::new("Row not found"))?;
+            let cell_id = row.children.get(col_index as usize).cloned().ok_or_else(|| JsError::new("Column index out of bounds"))?;
+            let text = extract_node_text(model, cell_id);
+            row_data.push((row_id, text));
+        }
+
+        // Sort rows (skipping header if any - heuristic: first row is header if more than 1 row)
+        let has_header = row_data.len() > 1;
+        let start_idx = if has_header { 1 } else { 0 };
+        
+        let sort_slice = &mut row_data[start_idx..];
+        sort_slice.sort_by(|a, b| {
+            if ascending {
+                a.1.cmp(&b.1)
+            } else {
+                b.1.cmp(&a.1)
+            }
+        });
+
+        // Apply row reordering via move_node_after
+        let mut txn = Transaction::with_label("Sort table");
+        let mut last_id = if has_header { Some(row_data[0].0) } else { None };
+        
+        for i in start_idx..row_data.len() {
+            let row_id = row_data[i].0;
+            match last_id {
+                Some(prev_id) => {
+                    txn.push(Operation::move_node_after(row_id, prev_id));
+                }
+                None => {
+                    // Moving first row to start of table (already there, but ensures order)
+                    txn.push(Operation::move_node_before(row_id, table.children[0]));
+                }
+            }
+            last_id = Some(row_id);
+        }
+
+        doc.apply_transaction(&txn)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Sort a table.
+    pub fn sort_table_by_column(&mut self, table_id_str: &str, col_index: u32, ascending: bool) -> Result<String, JsError> {
+        let n = table_id_str.to_string();
+        self.with_wasm_doc(|doc| doc.sort_table_by_column(&n, col_index, ascending))
+    }
+
+    /// Set column widths for a table.
+    pub fn set_table_column_widths(&mut self, table_id_str: &str, widths_csv: &str) -> Result<String, JsError> {
+        let n = table_id_str.to_string();
+        let w = widths_csv.to_string();
+        self.with_wasm_doc(|doc| doc.set_table_column_widths(&n, &w))
     }
 
     /// Insert a table.
@@ -10776,15 +10934,18 @@ impl WasmCollabDocument {
     ) -> Result<String, JsError> {
         let n = after_node_str.to_string();
         let mut table_id = String::new();
-        self.with_wasm_doc(|doc| {
+        let ops_json = self.with_wasm_doc(|doc| {
             table_id = doc.insert_table(&n, rows, cols)?;
             Ok(())
         })?;
-        Ok(table_id)
+        Ok(format!(
+            "{{\"tableId\":\"{}\",\"ops\":{}}}",
+            table_id, ops_json
+        ))
     }
 
     /// Insert horizontal rule.
-    pub fn insert_horizontal_rule(&mut self, after_node_str: &str) -> Result<(), JsError> {
+    pub fn insert_horizontal_rule(&mut self, after_node_str: &str) -> Result<String, JsError> {
         let n = after_node_str.to_string();
         self.with_wasm_doc(|doc| {
             doc.insert_horizontal_rule(&n)?;
@@ -10793,7 +10954,7 @@ impl WasmCollabDocument {
     }
 
     /// Insert page break.
-    pub fn insert_page_break(&mut self, after_node_str: &str) -> Result<(), JsError> {
+    pub fn insert_page_break(&mut self, after_node_str: &str) -> Result<String, JsError> {
         let n = after_node_str.to_string();
         self.with_wasm_doc(|doc| {
             doc.insert_page_break(&n)?;

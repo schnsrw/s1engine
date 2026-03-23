@@ -191,14 +191,15 @@ async fn main() {
             headers.insert(
                 axum::http::header::HeaderName::from_static("content-security-policy"),
                 axum::http::header::HeaderValue::from_static(
-                    "default-src 'self'; \
-                     script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; \
-                     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
-                     font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; \
-                     img-src 'self' data: blob:; \
-                     connect-src 'self' ws: wss: http: https:; \
-                     worker-src 'self' blob:"
+                   "default-src 'self'; \
+                    script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; \
+                    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; \
+                    font-src 'self' https://cdn.jsdelivr.net; \
+                    img-src 'self' data: blob:; \
+                    connect-src 'self' ws: wss: http: https:; \
+                    worker-src 'self' blob:"
                 ),
+
             );
             response
         }))

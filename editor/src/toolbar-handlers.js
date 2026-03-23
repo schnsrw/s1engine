@@ -14,7 +14,7 @@ export { exitFormatPainter, applyFormatPainter } from './features/document/toolb
 export { enterHeaderFooterEditMode, exitHeaderFooterEditMode } from './features/document/toolbar/header-footer.js';
 export { getAutoCorrectMap, isAutoCorrectEnabled } from './features/document/toolbar/autocorrect.js';
 export { setZoomLevel } from './features/document/toolbar/zoom.js';
-import { renderDocument, renderNodeById, syncParagraphText, syncAllText, applyPageDimensions, isCanvasMode, setCanvasMode, initCanvasRenderer, markLayoutDirty } from './render.js';
+import { renderDocument, renderNodeById, renderSmart, syncParagraphText, syncAllText, applyPageDimensions, isCanvasMode, setCanvasMode, initCanvasRenderer, markLayoutDirty } from './render.js';
 import { getSelectionInfo, setCursorAtOffset, setSelectionRange, getActiveNodeId, saveSelection } from './selection.js';
 import { insertImage } from './images.js';
 import { updatePageBreaks } from './pagination.js';
@@ -320,8 +320,10 @@ export function initToolbar() {
         state.doc.set_line_spacing(nodeId, e.target.value);
         broadcastOp({ action: 'setLineSpacing', nodeId, value: e.target.value });
       });
-      renderDocument();
+      if (paraIds.length === 1) renderSmart(paraIds[0]);
+      else renderDocument();
       updateUndoRedo();
+
     } catch (err) { console.error('line spacing:', err); }
   });
 
@@ -1293,7 +1295,8 @@ function applyAlignment(align) {
       state.doc.set_alignment(nodeId, align);
       broadcastOp({ action: 'setAlignment', nodeId, alignment: align });
     });
-    renderDocument();
+    if (paraIds.length === 1) renderSmart(paraIds[0]);
+    else renderDocument();
     updateToolbarState();
     updateUndoRedo();
     announce('Alignment: ' + align);
@@ -1322,7 +1325,8 @@ function toggleList(format) {
       state.doc.set_list_format(nodeId, applyFormat, 0);
       broadcastOp({ action: 'setListFormat', nodeId, format: applyFormat, level: 0 });
     });
-    renderDocument();
+    if (paraIds.length === 1) renderSmart(paraIds[0]);
+    else renderDocument();
     // Restore cursor position
     const page = $('pageContainer');
     if (page) {
@@ -1377,7 +1381,8 @@ function applyIndent(delta) {
       state.doc.set_indent(nodeId, 'left', newVal);
       broadcastOp({ action: 'setIndent', nodeId, side: 'left', value: newVal });
     });
-    renderDocument();
+    if (paraIds.length === 1) renderSmart(paraIds[0]);
+    else renderDocument();
     updateUndoRedo();
   } catch (e) { console.error('indent:', e); }
 }
@@ -1850,11 +1855,29 @@ function refreshComments() {
       });
     });
 
-    // Wire up reply buttons
+    // S3-11: Wire up reply buttons
     list.querySelectorAll('.comment-reply-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const parentId = btn.dataset.parentId;
-        showReplyForm(parentId);
+        if (parentId) showReplyForm(parentId);
+      });
+    });
+
+    // S3-11: Wire up edit buttons
+    list.querySelectorAll('.comment-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (id) showEditCommentForm(id);
+      });
+    });
+
+    list.querySelectorAll('.reply-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.replyId;
+        if (id) showEditReplyForm(id);
       });
     });
 
@@ -1958,6 +1981,7 @@ function renderCommentCard(c) {
       <span class="sr-only" role="status">${resolvedStatus}</span>
       <div class="comment-actions">
         <button class="comment-reply-btn" data-parent-id="${escapeAttr(cid)}" title="Reply to this comment">Reply</button>
+        <button class="comment-edit-btn" data-id="${escapeAttr(cid)}" title="Edit this comment">Edit</button>
         <button class="comment-resolve-btn" data-id="${escapeAttr(cid)}" title="${resolveLabel} this comment" aria-pressed="${isResolved}">${resolveLabel}</button>
         <button class="comment-delete" data-id="${escapeAttr(cid)}" title="Delete this comment">Delete</button>
       </div>
@@ -1980,9 +2004,71 @@ function renderReplyCard(r) {
       </div>
       <div class="comment-text">${escapeHtml(r.text)}</div>
       <div class="comment-actions">
+        <button class="reply-edit-btn" data-reply-id="${escapeAttr(r.id)}" title="Edit this reply">Edit</button>
         <button class="reply-delete" data-reply-id="${escapeAttr(r.id)}" title="Delete this reply">Delete</button>
       </div>
     </div>`;
+}
+
+function showEditCommentForm(commentId) {
+  const card = $('commentsList').querySelector(`.comment-card[data-comment-id="${commentId}"]`);
+  if (!card) return;
+  const textDiv = card.querySelector('.comment-text');
+  const oldText = textDiv.textContent;
+  textDiv.innerHTML = `
+    <div class="comment-edit-form">
+      <input class="comment-edit-input" type="text" value="${escapeAttr(oldText)}" autocomplete="off">
+      <div class="comment-edit-form-actions">
+        <button class="comment-edit-save">Save</button>
+        <button class="comment-edit-cancel">Cancel</button>
+      </div>
+    </div>`;
+  const input = textDiv.querySelector('.comment-edit-input');
+  input.focus();
+  input.select();
+  textDiv.querySelector('.comment-edit-save').onclick = () => {
+    const newText = input.value.trim();
+    if (newText && newText !== oldText) {
+      try {
+        state.doc.edit_comment(commentId, newText);
+        broadcastOp({ action: 'editComment', commentId, text: newText });
+        refreshComments();
+      } catch (e) { console.error('edit comment:', e); }
+    } else {
+      textDiv.textContent = oldText;
+    }
+  };
+  textDiv.querySelector('.comment-edit-cancel').onclick = () => { textDiv.textContent = oldText; };
+}
+
+function showEditReplyForm(replyId) {
+  const card = $('commentsList').querySelector(`.comment-reply[data-reply-id="${replyId}"]`);
+  if (!card) return;
+  const textDiv = card.querySelector('.comment-text');
+  const oldText = textDiv.textContent;
+  textDiv.innerHTML = `
+    <div class="comment-edit-form">
+      <input class="comment-edit-input" type="text" value="${escapeAttr(oldText)}" autocomplete="off">
+      <div class="comment-edit-form-actions">
+        <button class="comment-edit-save">Save</button>
+        <button class="comment-edit-cancel">Cancel</button>
+      </div>
+    </div>`;
+  const input = textDiv.querySelector('.comment-edit-input');
+  input.focus();
+  input.select();
+  textDiv.querySelector('.comment-edit-save').onclick = () => {
+    const newText = input.value.trim();
+    if (newText && newText !== oldText) {
+      state.commentReplies = (state.commentReplies || []).map(r => r.id === replyId ? { ...r, text: newText } : r);
+      try { localStorage.setItem('s1_commentReplies', JSON.stringify(state.commentReplies)); } catch(_) {}
+      broadcastOp({ action: 'editCommentReply', replyId, text: newText });
+      refreshComments();
+    } else {
+      textDiv.textContent = oldText;
+    }
+  };
+  textDiv.querySelector('.comment-edit-cancel').onclick = () => { textDiv.textContent = oldText; };
 }
 
 function showReplyForm(parentId) {
@@ -2871,6 +2957,31 @@ function initTableColumnResize() {
   function endColResize(e) {
     if (!_colDrag) return;
     onColResize(e); // Final position
+    
+    // S4-17: Persist final widths to WASM
+    const { table } = _colDrag;
+    const tableId = table.dataset.nodeId;
+    if (tableId && state.doc) {
+      try {
+        const firstRow = table.querySelector('tr');
+        if (firstRow) {
+          const cells = Array.from(firstRow.children);
+          // Convert current CSS widths to points
+          const pxToPt = 0.75;
+          const widthsPt = cells.map(c => (c.getBoundingClientRect().width * pxToPt).toFixed(1) + 'pt');
+          const widthsCsv = widthsPt.join(',');
+          
+          if (state.collabDoc) {
+            const crdtRes = state.collabDoc.set_table_column_widths(tableId, widthsCsv);
+            broadcastOp({ action: 'setTableColumnWidths', tableId, widths: widthsCsv }, crdtRes);
+          } else {
+            state.doc.set_table_column_widths(tableId, widthsCsv);
+          }
+          markDirty();
+        }
+      } catch (err) { console.error('Failed to persist table widths:', err); }
+    }
+
     _colDrag = null;
     document.removeEventListener('mousemove', onColResize);
     document.removeEventListener('mouseup', endColResize);

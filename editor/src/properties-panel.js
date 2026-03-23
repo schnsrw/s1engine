@@ -1,7 +1,7 @@
 // Properties Panel — contextual right sidebar for element formatting
 // Shows paragraph, image, table, or section properties based on selection context
 import { state, $ } from './state.js';
-import { renderDocument, syncAllText } from './render.js';
+import { renderDocument, renderSmart, syncAllText } from './render.js';
 import { updateUndoRedo } from './toolbar.js';
 import { getActiveNodeId } from './selection.js';
 import { broadcastOp } from './collab.js';
@@ -371,7 +371,7 @@ function applyParagraphAlignment(align) {
   try {
     state.doc.set_alignment(nodeId, align);
     broadcastOp({ action: 'setAlignment', nodeId, alignment: align });
-    renderDocument();
+    renderSmart(nodeId);
     updateUndoRedo();
     populateParagraphProps();
   } catch (e) { console.error('props panel: alignment', e); }
@@ -394,7 +394,7 @@ function applyParagraphIndent(inputId, value) {
   try {
     state.doc.set_indent(nodeId, indentType, pts);
     broadcastOp({ action: 'setIndent', nodeId, side: indentType, value: pts });
-    renderDocument();
+    renderSmart(nodeId);
     updateUndoRedo();
   } catch (e) { console.error('props panel: indent', e); }
 }
@@ -411,7 +411,7 @@ function applyParagraphSpacing(inputId, value) {
   try {
     state.doc.set_paragraph_spacing(nodeId, spacingType, value);
     broadcastOp({ action: 'setParagraphSpacing', nodeId, spacingType, value });
-    renderDocument();
+    renderSmart(nodeId);
     updateUndoRedo();
   } catch (e) {
     console.error('props panel: spacing', e);
@@ -427,7 +427,7 @@ function applyLineSpacing(value) {
   try {
     state.doc.set_line_spacing(nodeId, value);
     broadcastOp({ action: 'setLineSpacing', nodeId, value });
-    renderDocument();
+    renderSmart(nodeId);
     updateUndoRedo();
     populateParagraphProps();
   } catch (e) { console.error('props panel: line spacing', e); }
@@ -441,7 +441,7 @@ function applyParagraphKeep(keepType, enabled) {
   try {
     state.doc.set_paragraph_keep(nodeId, keepType, enabled);
     broadcastOp({ action: 'setParagraphKeep', nodeId, keepType, enabled });
-    renderDocument();
+    renderSmart(nodeId);
     updateUndoRedo();
   } catch (e) {
     console.debug('props panel: keep option error', e);

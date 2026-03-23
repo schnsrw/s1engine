@@ -487,6 +487,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
 
     // Broadcast → this peer (filter out own messages) + periodic ping
     let my_peer_id = peer_id.clone();
+    let (private_tx, mut private_rx) = mpsc::unbounded_channel::<String>();
     let mut send_task = tokio::spawn(async move {
         let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         loop {
@@ -505,6 +506,15 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                         Err(_) => break,
                     }
                 }
+                msg = private_rx.recv() => {
+                    if let Some(msg) = msg {
+                        if sender.send(Message::Text(msg.into())).await.is_err() {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
                 _ = ping_interval.tick() => {
                     // Send ping to detect dead connections
                     if sender.send(Message::Ping(vec![].into())).await.is_err() {
@@ -519,6 +529,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
     let rooms = state.rooms.clone();
     let sessions_for_recv = state.sessions.clone();
     let tx_clone = tx.clone();
+    let private_tx_clone = private_tx.clone();
     let file_id_recv = file_id.clone();
     let sender_peer_id = peer_id.clone();
     let mut recv_task = tokio::spawn(async move {
@@ -609,7 +620,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                                     "serverVersion": version,
                                     "_target": sender_peer_id,
                                 });
-                                let _ = tx_clone.send(catchup.to_string());
+                                let _ = private_tx_clone.send(catchup.to_string());
                             }
                             continue;
                         }

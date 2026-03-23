@@ -12,6 +12,8 @@
 //   - delete_selection  → broadcastOp
 import { state, $ } from './state.js';
 import { renderDocument, renderNodeById } from './render.js';
+import { countCharsToPoint, setCursorAtOffset } from './selection.js';
+import { refreshComments } from './toolbar-handlers.js';
 
 // ─── Configuration ────────────────────────────────────
 
@@ -72,6 +74,7 @@ let lastSyncedVersion = 0; // Version of last applied fullSync
 let serverVersion = 0; // Tracks the latest version seen from the server/relay
 let _pendingImmediateSync = false; // Bug C8: throttle immediate fullSync on node ID mismatch
 let _fullSyncTimeout = null; // Timeout for fullSync response (Bug C3)
+let _snapshotTimer = null; // S2-09: Periodic snapshot refresh timer
 let missedPongs = 0; // Bug C6: count missed heartbeat responses
 let _roomFullRetries = 0; // C11: exponential backoff retry when room is full
 // X18: Deferred remote ops — queued during undo/redo execution to prevent race conditions
@@ -118,6 +121,16 @@ export function startCollab(room, name, relayUrl) {
 
   connect(relayUrl || DEFAULT_RELAY_URL);
   startCursorBroadcast();
+
+  // S2-09: Periodic snapshot refresh to ensure new joiners see fresh content
+  if (_snapshotTimer) clearInterval(_snapshotTimer);
+  _snapshotTimer = setInterval(() => {
+    if (connected && ws && ws.readyState === 1) {
+      tracing('Periodic snapshot refresh...');
+      sendFullSync();
+    }
+  }, 60000); // Every 60 seconds
+
   updateCollabUI();
 }
 
@@ -137,6 +150,7 @@ export function stopCollab() {
   peerId = null;
   offlineBuffer = [];
   clearInterval(cursorTimer);
+  clearInterval(_snapshotTimer);
   clearTimeout(reconnectTimer);
   clearTimeout(_fullSyncTimer);
   clearTimeout(_fullSyncTimeout); // Bug C3
@@ -185,13 +199,21 @@ export function broadcastOp(opData) {
   if (!roomId || applyingRemote) return;
 
   // Keep collabDoc in sync with structural ops when CRDT is active.
-  // This prevents the collabDoc from drifting from state.doc between
-  // fullSync cycles, reducing the need for coarse snapshot replacement.
   if (state.collabDoc) {
-    try {
-      _applyCrdtStructuralOp(opData);
-    } catch (e) {
-      tracing('collabDoc structural sync failed (non-fatal):', e.message);
+    const crdtRes = _applyCrdtStructuralOp(opData);
+    if (crdtRes) {
+      if (typeof crdtRes === 'string') {
+        if (crdtRes.startsWith('{')) {
+          // Complex result (e.g. split_paragraph return {newId, ops})
+          try {
+            const parsed = JSON.parse(crdtRes);
+            if (parsed.ops) opData.crdtOps = JSON.stringify(parsed.ops);
+          } catch (_) {}
+        } else if (crdtRes.startsWith('[')) {
+          // Simple ops list
+          opData.crdtOps = crdtRes;
+        }
+      }
     }
   }
 
@@ -201,7 +223,6 @@ export function broadcastOp(opData) {
     sendOp(opData);
     localVersion = pendingVersion;
   } catch (e) {
-    // Don't increment — operation wasn't sent
     console.warn('broadcastOp send failed:', e);
   }
   // In CRDT mode, use longer debounce since text convergence is already
@@ -215,25 +236,28 @@ export function broadcastOp(opData) {
  */
 function _applyCrdtStructuralOp(opData) {
   const cd = state.collabDoc;
-  if (!cd) return;
-  switch (opData.action) {
-    case 'splitParagraph': cd.split_paragraph(opData.nodeId, opData.offset); break;
-    case 'mergeParagraphs': cd.merge_paragraphs(opData.nodeId1, opData.nodeId2); break;
-    case 'setHeading': cd.set_heading_level(opData.nodeId, opData.level); break;
-    case 'setAlignment': cd.set_alignment(opData.nodeId, opData.alignment); break;
-    case 'setListFormat': cd.set_list_format(opData.nodeId, opData.format, opData.level || 0); break;
-    case 'setIndent': cd.set_indent(opData.nodeId, opData.side, opData.value); break;
-    case 'setLineSpacing': cd.set_line_spacing(opData.nodeId, opData.value); break;
-    case 'insertParagraph': cd.insert_paragraph_after(opData.afterNodeId, opData.text || ''); break;
-    case 'deleteNode': cd.delete_node(opData.nodeId); break;
-    case 'insertTable': cd.insert_table(opData.afterNodeId, opData.rows, opData.cols); break;
-    case 'insertHR': cd.insert_horizontal_rule(opData.afterNodeId); break;
-    case 'insertPageBreak': cd.insert_page_break(opData.afterNodeId); break;
-    case 'formatSelection': cd.format_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset, opData.key, opData.value); break;
-    case 'deleteSelection': cd.delete_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset); break;
-    // Ops without collabDoc equivalents are silently skipped —
-    // fullSync will handle convergence for these.
+  if (!cd) return null;
+  try {
+    switch (opData.action) {
+      case 'splitParagraph': return cd.split_paragraph(opData.nodeId, opData.offset);
+      case 'mergeParagraphs': return cd.merge_paragraphs(opData.nodeId1, opData.nodeId2);
+      case 'setHeading': return cd.set_heading_level(opData.nodeId, opData.level);
+      case 'setAlignment': return cd.set_alignment(opData.nodeId, opData.alignment);
+      case 'setListFormat': return cd.set_list_format(opData.nodeId, opData.format, opData.level || 0);
+      case 'setIndent': return cd.set_indent(opData.nodeId, opData.side, opData.value);
+      case 'setLineSpacing': return cd.set_line_spacing(opData.nodeId, opData.value);
+      case 'insertParagraph': return cd.insert_paragraph_after(opData.afterNodeId, opData.text || '');
+      case 'deleteNode': return cd.delete_node(opData.nodeId);
+      case 'insertTable': return cd.insert_table(opData.afterNodeId, opData.rows, opData.cols);
+      case 'insertHR': return cd.insert_horizontal_rule(opData.afterNodeId);
+      case 'insertPageBreak': return cd.insert_page_break(opData.afterNodeId);
+      case 'formatSelection': return cd.format_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset, opData.key, opData.value);
+      case 'deleteSelection': return cd.delete_selection(opData.startNode, opData.startOffset, opData.endNode, opData.endOffset);
+    }
+  } catch (e) {
+    tracing('collabDoc structural sync failed:', e.message);
   }
+  return null;
 }
 
 /**
@@ -394,13 +418,6 @@ function connect(url) {
         }
         sessionStorage.removeItem('rudra_collab_offline_buffer');
       }
-    } catch (_) {}
-
-    // Bug C7: Request server catchup before flushing local buffer
-    // This ensures we apply any ops we missed while disconnected before replaying ours
-    try {
-      ws.send(JSON.stringify({ type: 'requestCatchup', room: roomId, fromVersion: serverVersion }));
-      tracing('Requested server catchup on reconnect (fromVersion:', serverVersion, ')');
     } catch (_) {}
 
     // Flush offline buffer with send verification (Bug C7)
@@ -675,8 +692,15 @@ function handleMessage(msg) {
       // Version check on reconnect
       if (msg.serverVersion && msg.serverVersion > serverVersion) {
         tracing('Behind server version:', serverVersion, '\u2192', msg.serverVersion);
+        // Bug C7: Request server catchup before continuing
+        // This ensures we apply any ops we missed while disconnected
+        try {
+          ws.send(JSON.stringify({ type: 'requestCatchup', room: roomId, fromVersion: serverVersion }));
+          tracing('Requested server catchup (fromVersion:', serverVersion, ')');
+        } catch (_) {}
       }
       serverVersion = msg.serverVersion || serverVersion;
+
       tracing('Joined room, peerId:', peerId, 'peers:', (msg.peers || []).length);
       // Enforce access level from server (view/comment/edit)
       if (msg.access === 'view' || msg.access === 'comment') {
@@ -998,6 +1022,30 @@ function normalizeRemoteOp(op) {
   return normalized;
 }
 
+/**
+ * Apply remote CRDT operations and sync the local engine document.
+ * Returns true if ops were applied and synced.
+ */
+function _applyRemoteCrdtOps(crdtOpsJson) {
+  if (!state.collabDoc || !crdtOpsJson) return false;
+  try {
+    const opsList = JSON.parse(crdtOpsJson);
+    const list = Array.isArray(opsList) ? opsList : [opsList];
+    for (const singleOp of list) {
+      state.collabDoc.apply_remote_ops(JSON.stringify(singleOp));
+    }
+    // Sync the non-collab doc model for rendering
+    if (state.doc) {
+      const bytes = state.collabDoc.export('docx');
+      state.doc = state.engine.open(new Uint8Array(bytes));
+    }
+    return true;
+  } catch (e) {
+    console.error('[collab] Failed to apply structural CRDT ops:', e);
+    return false;
+  }
+}
+
 function applyRemoteOp(dataStr, fromPeerId) {
   if (!state.doc || !dataStr) return;
 
@@ -1006,6 +1054,9 @@ function applyRemoteOp(dataStr, fromPeerId) {
     _deferredRemoteOps.push({ dataStr, fromPeerId });
     return;
   }
+
+  // Save local cursor and scroll position before applying remote op
+  const editCtx = _saveEditingContext();
 
   try {
     const op = normalizeRemoteOp(JSON.parse(dataStr));
@@ -1016,6 +1067,21 @@ function applyRemoteOp(dataStr, fromPeerId) {
     }
 
     applyingRemote = true;
+
+    // Adjust local cursor offset if remote op happened before it in the same paragraph
+    if (editCtx.nodeId && editCtx.nodeId === (op.nodeId || op.targetId)) {
+      const opOffset = op.offset ?? op.startOffset ?? 0;
+      if (opOffset <= editCtx.offset) {
+        if (op.action === 'insertText' || op.action === 'replaceText') {
+          const insertLen = [...(op.text || op.replacement || '')].length;
+          const deleteLen = op.action === 'replaceText' ? (op.length || 0) : 0;
+          editCtx.offset = Math.max(opOffset, editCtx.offset - deleteLen + insertLen);
+        } else if (op.action === 'deleteText' || op.action === 'deleteTextRange') {
+          const deleteLen = op.action === 'deleteTextRange' ? (op.endOffset - op.startOffset) : (op.length || 0);
+          editCtx.offset = Math.max(opOffset, editCtx.offset - deleteLen);
+        }
+      }
+    }
 
     // Track peer typing activity for presence indicator
     if (fromPeerId && fromPeerId !== peerId) {
@@ -1089,14 +1155,16 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'splitParagraph': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
-          const newId = state.doc.split_paragraph(op.nodeId, op.offset);
+          state.doc.split_paragraph(op.nodeId, op.offset);
           renderDocument();
         } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):split:', e); }
         break;
       }
 
       case 'mergeParagraphs': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.merge_paragraphs(op.nodeId1, op.nodeId2);
           renderDocument();
@@ -1105,6 +1173,11 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'formatSelection': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) {
+          renderNodeById(op.startNode);
+          if (op.endNode !== op.startNode) renderNodeById(op.endNode);
+          break;
+        }
         try {
           state.doc.format_selection(
             op.startNode, op.startOffset,
@@ -1118,6 +1191,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'deleteSelection': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.delete_selection(op.startNode, op.startOffset, op.endNode, op.endOffset);
           renderDocument();
@@ -1126,6 +1200,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setHeading': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_heading_level(op.nodeId, op.level);
           renderNodeById(op.nodeId);
@@ -1134,6 +1209,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setAlignment': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_alignment(op.nodeId, op.alignment);
           renderNodeById(op.nodeId);
@@ -1142,6 +1218,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertParagraph': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_paragraph_after(op.afterNodeId, op.text || '');
           renderDocument();
@@ -1150,6 +1227,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'deleteNode': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.delete_node(op.nodeId);
           renderDocument();
@@ -1158,6 +1236,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setListFormat': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.set_list_format(op.nodeId, op.format, op.level || 0);
           renderDocument();
@@ -1166,6 +1245,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setIndent': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_indent(op.nodeId, op.side, op.value);
           renderNodeById(op.nodeId);
@@ -1174,6 +1254,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setLineSpacing': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_line_spacing(op.nodeId, op.value);
           renderNodeById(op.nodeId);
@@ -1182,6 +1263,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertTable': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_table(op.afterNodeId, op.rows, op.cols);
           renderDocument();
@@ -1190,6 +1272,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertTableRow': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_table_row(op.tableId, op.index);
           renderDocument();
@@ -1198,6 +1281,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'deleteTableRow': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.delete_table_row(op.tableId, op.index);
           renderDocument();
@@ -1206,6 +1290,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertTableColumn': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_table_column(op.tableId, op.index);
           renderDocument();
@@ -1214,6 +1299,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'deleteTableColumn': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.delete_table_column(op.tableId, op.index);
           renderDocument();
@@ -1222,6 +1308,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertColumnBreak': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_column_break(op.nodeId);
           renderDocument();
@@ -1230,6 +1317,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertHR': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_horizontal_rule(op.afterNodeId);
           renderDocument();
@@ -1238,6 +1326,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertPageBreak': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_page_break(op.afterNodeId);
           renderDocument();
@@ -1246,6 +1335,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'insertSectionBreak': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.insert_section_break(op.afterNodeId, op.breakType || 'nextPage');
           renderDocument();
@@ -1297,6 +1387,22 @@ function applyRemoteOp(dataStr, fromPeerId) {
           state.doc.insert_comment_reply(op.parentId, op.author, op.text);
           renderDocument();
         } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertCommentReply:', e); }
+        break;
+      }
+
+      case 'editComment': {
+        try {
+          state.doc.edit_comment(op.commentId, op.text);
+          refreshComments();
+        } catch (e) { console.debug('[collab] remote editComment failed:', e); }
+        break;
+      }
+
+      case 'editCommentReply': {
+        try {
+          state.commentReplies = (state.commentReplies || []).map(r => r.id === op.replyId ? { ...r, text: op.text } : r);
+          refreshComments();
+        } catch (e) { console.debug('[collab] remote editCommentReply failed:', e); }
         break;
       }
 
@@ -1449,6 +1555,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setParagraphSpacing': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_paragraph_spacing(op.nodeId, op.spacingType, op.value);
           renderNodeById(op.nodeId);
@@ -1457,6 +1564,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setParagraphKeep': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderNodeById(op.nodeId); break; }
         try {
           state.doc.set_paragraph_keep(op.nodeId, op.keepType, op.enabled);
           renderNodeById(op.nodeId);
@@ -1465,6 +1573,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setPageSetup': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.set_page_setup(JSON.stringify(op.setup));
           renderDocument();
@@ -1473,10 +1582,29 @@ function applyRemoteOp(dataStr, fromPeerId) {
       }
 
       case 'setSectionColumns': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
         try {
           state.doc.set_section_columns(op.sectionIndex || 0, op.columns, op.spacingPt);
           renderDocument();
         } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setSectionColumns:', e); }
+        break;
+      }
+
+      case 'setTableColumnWidths': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
+        try {
+          state.doc.set_table_column_widths(op.tableId, op.widths);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setTableWidths:', e); }
+        break;
+      }
+
+      case 'sortTable': {
+        if (op.crdtOps && _applyRemoteCrdtOps(op.crdtOps)) { renderDocument(); break; }
+        try {
+          state.doc.sort_table_by_column(op.tableId, op.colIndex, op.ascending);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):sortTable:', e); }
         break;
       }
 
@@ -1618,6 +1746,9 @@ function applyRemoteOp(dataStr, fromPeerId) {
         console.warn('Unknown remote op:', op.action);
         requestImmediateFullSync();
     }
+
+    // Restore local cursor and scroll position after re-render
+    _restoreEditingContext(editCtx);
 
     applyingRemote = false;
   } catch (e) {
@@ -1937,6 +2068,18 @@ function renderPeerCursor(cursor) {
     page.appendChild(cursorEl);
   }
 
+  // S2-07: Add 'peer-editing' indicator to the paragraph
+  // Clear previous paragraph's editing state if it changed
+  if (prev && prev.nodeId && prev.nodeId !== cursor.nodeId) {
+    const prevPara = page.querySelector(`[data-node-id="${CSS.escape(prev.nodeId)}"]`);
+    if (prevPara) {
+      prevPara.classList.remove('peer-editing');
+      prevPara.style.removeProperty('--peer-color');
+    }
+  }
+  paraEl.classList.add('peer-editing');
+  paraEl.style.setProperty('--peer-color', cursor.userColor || '#999');
+
   cursorEl.style.borderLeftColor = cursor.userColor || '#999';
   const label = cursorEl.querySelector('.peer-cursor-label');
   if (label) {
@@ -1958,6 +2101,7 @@ function renderPeerCursor(cursor) {
   peerCursorState.set(cursor.peerId, {
     posKey,
     selKey,
+    nodeId: cursor.nodeId,
     userName: cursor.userName || 'Peer',
     userColor: cursor.userColor || '#999',
   });
@@ -1968,6 +2112,16 @@ function renderPeerCursor(cursor) {
  * Called only on peer-leave — cursors persist as long as the peer is connected.
  */
 function removePeerCursor(pid) {
+  const prev = peerCursorState.get(pid);
+  if (prev && prev.nodeId) {
+    const page = $('pageContainer');
+    const paraEl = page?.querySelector(`[data-node-id="${CSS.escape(prev.nodeId)}"]`);
+    if (paraEl) {
+      paraEl.classList.remove('peer-editing');
+      paraEl.style.removeProperty('--peer-color');
+    }
+  }
+
   const el = document.getElementById(`peer-cursor-${pid}`);
   if (el) el.remove();
   clearPeerSelection(pid);

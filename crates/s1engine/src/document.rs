@@ -15,6 +15,8 @@ use crate::format::Format;
 pub struct Document {
     model: DocumentModel,
     history: History,
+    /// Captured last transaction for synchronization helpers.
+    pub last_txn: Option<Transaction>,
 }
 
 impl Document {
@@ -23,6 +25,7 @@ impl Document {
         Self {
             model: DocumentModel::new(),
             history: History::new(),
+            last_txn: None,
         }
     }
 
@@ -31,6 +34,7 @@ impl Document {
         Self {
             model,
             history: History::new(),
+            last_txn: None,
         }
     }
 
@@ -174,6 +178,7 @@ impl Document {
     /// On failure, all operations are rolled back.
     pub fn apply_transaction(&mut self, txn: &Transaction) -> Result<(), Error> {
         self.history.apply(&mut self.model, txn)?;
+        self.last_txn = Some(txn.clone());
         Ok(())
     }
 
