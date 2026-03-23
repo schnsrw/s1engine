@@ -7,6 +7,11 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    fs: {
+      allow: [
+        resolve(__dirname, '..'),
+      ],
+    },
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
@@ -24,7 +29,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           // Keep WASM bindings in their own chunk
-          if (id.includes('wasm-pkg')) {
+          if (id.includes('wasm-pkg') || id.includes('packages/wasm/dist')) {
             return 'wasm';
           }
           // Vendor chunk for node_modules (KaTeX, pdfjs-dist, etc.)
