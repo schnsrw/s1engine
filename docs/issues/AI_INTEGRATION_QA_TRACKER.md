@@ -144,3 +144,19 @@
 | **Fix Rate** | 100% | 96% | 100%* | 99% |
 
 *Round 3: 13/13 actionable bugs fixed. 5 enhancements deferred to backlog.
+
+---
+
+## Audit Round 4 — 3 issues found, 3 fixed
+
+### UX / Integration (3/3 Fixed)
+
+| # | Issue | File(s) | Status |
+|---|-------|---------|--------|
+| 91 | AI task selector renders empty because no mode options are ever populated | ai-panel.js, index.html | FIXED — added explicit mode option bootstrap for writer, grammar, summarize, translate, formula, and data analysis |
+| 92 | AI welcome state includes an `#aiSuggestions` container but never renders suggestion chips, leaving the panel feeling unfinished | ai-panel.js, styles.css, index.html | FIXED — added context-aware prompt suggestions for documents, selections, and spreadsheets |
+| 93 | AI panel resize handle is declared in HTML and inserted again in JS, creating duplicate drag targets | ai-panel.js, index.html | FIXED — reuse existing handle when present and only inject one if missing |
+
+### Notes
+
+- The main remaining usability gap from this audit pass is operational rather than code-specific: the editor build still depends on a generated `editor/wasm-pkg/s1engine_wasm.js` artifact, so a clean `vite build` cannot complete until the WASM package is produced first.
