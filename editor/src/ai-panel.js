@@ -17,6 +17,15 @@ let _lastHealthCheck = 0;     // timestamp of last health check (Bug 32)
 let _lastHealthResult = false; // cached health check result (Bug 32)
 let _savedSelectionRange = null; // saved selection range for Replace action (Bug 60)
 
+const AI_MODE_OPTIONS = [
+  { value: 'writer', label: 'Write & rewrite' },
+  { value: 'grammar', label: 'Grammar & clarity' },
+  { value: 'summarize', label: 'Summarize' },
+  { value: 'translate', label: 'Translate' },
+  { value: 'formula', label: 'Spreadsheet formula' },
+  { value: 'data_analysis', label: 'Data analysis' },
+];
+
 // ── Context Detection (exported for ai-inline.js) ────
 
 /** Detect what the user is currently working on */
@@ -361,6 +370,81 @@ function dismissHint() {
   }
 }
 
+function getWelcomeMarkup() {
+  return '<div class="ai-welcome">' +
+    '<p>How can I help with your document?</p>' +
+    '<p class="ai-welcome-hint">Pick a prompt below or type your own request.</p>' +
+    '<p class="ai-access-note">AI works best on selected text. It sends your selection plus limited local context, not the entire document by default.</p>' +
+    '<div class="ai-suggestions" id="aiSuggestions"></div>' +
+    '</div>';
+}
+
+function getSuggestedPrompts() {
+  const context = detectContext();
+  const hasSelection = !!getSelectedText();
+
+  if (context.mode === 'spreadsheet') {
+    return [
+      { label: 'Explain this formula', mode: 'formula', prompt: 'Explain this formula step by step and suggest a simpler version if possible.' },
+      { label: 'Write a formula', mode: 'formula', prompt: 'Write a formula that:' },
+      { label: 'Analyze selected data', mode: 'data_analysis', prompt: 'Analyze the selected data and call out trends, outliers, and totals.' },
+    ];
+  }
+
+  if (hasSelection) {
+    return [
+      { label: 'Improve selected text', mode: 'writer', prompt: 'Improve this text for clarity and flow.' },
+      { label: 'Fix grammar', mode: 'grammar', prompt: '' },
+      { label: 'Summarize selection', mode: 'summarize', prompt: '' },
+    ];
+  }
+
+  return [
+    { label: 'Draft an introduction', mode: 'writer', prompt: 'Draft a concise introduction for this document.' },
+    { label: 'Create an outline', mode: 'writer', prompt: 'Create a clear outline for this document.' },
+    { label: 'Summarize the document', mode: 'summarize', prompt: '' },
+  ];
+}
+
+function renderPromptSuggestions() {
+  const container = $('aiSuggestions');
+  if (!container) return;
+
+  const suggestions = getSuggestedPrompts();
+  container.innerHTML = '';
+
+  suggestions.forEach(({ label, mode, prompt }) => {
+    const button = document.createElement('button');
+    button.className = 'ai-suggestion-btn';
+    button.type = 'button';
+    button.textContent = label;
+    button.title = label;
+    button.addEventListener('click', () => {
+      if (_modeSelect) _modeSelect.value = mode;
+      if (_input) {
+        _input.value = prompt;
+        _input.focus();
+        _input.dispatchEvent(new Event('input'));
+      }
+      if (prompt) {
+        sendMessage();
+      }
+    });
+    container.appendChild(button);
+  });
+}
+
+function populateModeOptions() {
+  if (!_modeSelect || _modeSelect.options.length) return;
+
+  AI_MODE_OPTIONS.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    _modeSelect.appendChild(option);
+  });
+}
+
 function checkForHints() {
   if (!state.aiAvailable || state.aiPanelOpen) return;
 
@@ -703,6 +787,7 @@ export function toggleAIPanel() {
     hideFloatingBar();
     dismissHint();
     updateContextIndicator();
+    renderPromptSuggestions();
 
     // One-time warning for external AI endpoints (Bug 66)
     const aiUrl = window.S1_CONFIG?.aiUrl || '';
@@ -754,6 +839,8 @@ function updateContextIndicator() {
       _modeSelect.value = 'writer';
     }
   }
+
+  renderPromptSuggestions();
 }
 
 // ── Initialization ─────────────────────────────────
@@ -788,10 +875,14 @@ export function initAIPanel() {
   if (!_panel) return;
 
   // Drag-to-resize handle (Enhancement 86)
-  const resizeHandle = document.createElement('div');
-  resizeHandle.className = 'ai-panel-resize-handle';
-  resizeHandle.title = 'Drag to resize';
-  _panel.insertBefore(resizeHandle, _panel.firstChild);
+  populateModeOptions();
+
+  const resizeHandle = _panel.querySelector('.ai-panel-resize-handle') || document.createElement('div');
+  if (!resizeHandle.parentNode) {
+    resizeHandle.className = 'ai-panel-resize-handle';
+    resizeHandle.title = 'Drag to resize';
+    _panel.insertBefore(resizeHandle, _panel.firstChild);
+  }
 
   let _resizing = false;
   let _startX = 0;
@@ -828,6 +919,11 @@ export function initAIPanel() {
     if (saved) state.aiConversation = JSON.parse(saved);
   } catch (_) {}
 
+  if (_messages && !_messages.children.length) {
+    _messages.innerHTML = getWelcomeMarkup();
+  }
+  renderPromptSuggestions();
+
   // Close
   $('aiPanelClose')?.addEventListener('click', toggleAIPanel);
 
@@ -859,9 +955,10 @@ export function initAIPanel() {
 
   // Clear conversation
   $('aiClearBtn')?.addEventListener('click', () => {
-    _messages.innerHTML = '<div class="ai-welcome"><p>Select text in your document, then ask AI to help.</p><p class="ai-welcome-hint">Or type a question below.</p></div>';
+    _messages.innerHTML = getWelcomeMarkup();
     state.aiConversation = [];
     sessionStorage.removeItem('rudra_ai_conversation');
+    renderPromptSuggestions();
   });
 
   // Menu item

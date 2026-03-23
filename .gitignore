@@ -6,6 +6,7 @@ target/
 .vscode/
 *.swp
 *.swo
+*.iml
 
 # OS
 .DS_Store
@@ -19,6 +20,8 @@ Thumbs.db
 editor/dist/
 editor/node_modules/
 editor/.vite/
+editor/pkg/
+editor/wasm-pkg/
 
 # Relay server data (persisted room state)
 data/

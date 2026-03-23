@@ -847,7 +847,34 @@ export function syncParagraphText(el) {
   }
   if (syncedTextCache.get(nodeId) === newText) return;
   try {
-    doc.set_paragraph_text(nodeId, newText);
+    const previousText = syncedTextCache.get(nodeId);
+    if (typeof previousText === 'string' && typeof doc.replace_text === 'function') {
+      const oldChars = Array.from(previousText);
+      const newChars = Array.from(newText);
+      let prefixLen = 0;
+      while (
+        prefixLen < oldChars.length &&
+        prefixLen < newChars.length &&
+        oldChars[prefixLen] === newChars[prefixLen]
+      ) {
+        prefixLen++;
+      }
+      let suffixLen = 0;
+      while (
+        suffixLen < (oldChars.length - prefixLen) &&
+        suffixLen < (newChars.length - prefixLen) &&
+        oldChars[oldChars.length - 1 - suffixLen] === newChars[newChars.length - 1 - suffixLen]
+      ) {
+        suffixLen++;
+      }
+      const deleteCount = oldChars.length - prefixLen - suffixLen;
+      const replacement = newChars.slice(prefixLen, newChars.length - suffixLen).join('');
+      if (deleteCount > 0 || replacement) {
+        doc.replace_text(nodeId, prefixLen, deleteCount, replacement);
+      }
+    } else {
+      doc.set_paragraph_text(nodeId, newText);
+    }
     syncedTextCache.set(nodeId, newText);
     markDirty();
     clearFindHighlights();

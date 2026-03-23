@@ -243,6 +243,9 @@ function _applyCrdtStructuralOp(opData) {
 export function broadcastCrdtOp(crdtOpJson) {
   if (!roomId || applyingRemote || !crdtOpJson || crdtOpJson === '[]' || crdtOpJson === 'null') return;
   sendOp({ action: 'crdtOp', ops: crdtOpJson });
+  // Keep the server/session snapshot reasonably fresh even during pure CRDT
+  // text activity so reconnect and fresh-join flows converge to recent data.
+  scheduleDebouncedFullSync(true);
 }
 
 // ─── Debounced Full Sync ─────────────────────────────
@@ -341,7 +344,7 @@ function connect(url) {
     }
     // Add user info as query params for the server
     const sep = wsUrl.includes('?') ? '&' : '?';
-    wsUrl += `${sep}user=${encodeURIComponent(userName)}&uid=${encodeURIComponent(peerId || 'u-' + Math.random().toString(36).slice(2,8))}&access=${encodeURIComponent(accessLevel)}`;
+    wsUrl += `${sep}user=${encodeURIComponent(userName)}&uid=${encodeURIComponent(peerId || 'u-' + Math.random().toString(36).slice(2,8))}&access=${encodeURIComponent(accessLevel)}&mode=${encodeURIComponent(accessLevel)}`;
   }
 
   try {
@@ -396,7 +399,7 @@ function connect(url) {
     // Bug C7: Request server catchup before flushing local buffer
     // This ensures we apply any ops we missed while disconnected before replaying ours
     try {
-      ws.send(JSON.stringify({ type: 'sync-req', room: roomId, stateVector: null }));
+      ws.send(JSON.stringify({ type: 'requestCatchup', room: roomId, fromVersion: serverVersion }));
       tracing('Requested server catchup on reconnect (fromVersion:', serverVersion, ')');
     } catch (_) {}
 
@@ -951,6 +954,50 @@ function _trackOpId(opId) {
   return false;
 }
 
+function normalizeRemoteOp(op) {
+  if (!op || typeof op !== 'object') return op;
+  const normalized = { ...op };
+
+  if (normalized.action === 'removeNode') {
+    normalized.action = 'deleteNode';
+  }
+
+  if (
+    ['insertTableRow', 'deleteTableRow', 'insertTableColumn', 'deleteTableColumn'].includes(normalized.action)
+  ) {
+    normalized.tableId = normalized.tableId || normalized.tableNodeId;
+    if (typeof normalized.index !== 'number') {
+      normalized.index = normalized.rowIndex ?? normalized.colIndex ?? normalized.index;
+    }
+  }
+
+  if (normalized.action === 'setCellBackground') {
+    normalized.cellId = normalized.cellId || normalized.nodeId;
+    normalized.color = normalized.color || normalized.hex;
+    if (typeof normalized.color === 'string' && normalized.color && !normalized.color.startsWith('#')) {
+      normalized.color = `#${normalized.color}`;
+    }
+  }
+
+  if (normalized.action === 'replaceAll' && typeof normalized.caseInsensitive !== 'boolean') {
+    if (typeof normalized.caseSensitive === 'boolean') {
+      normalized.caseInsensitive = !normalized.caseSensitive;
+    } else {
+      normalized.caseInsensitive = false;
+    }
+  }
+
+  if (normalized.action === 'insertColumnBreak') {
+    normalized.nodeId = normalized.nodeId || normalized.paraNodeId;
+  }
+
+  if (normalized.action === 'setSectionColumns') {
+    normalized.spacingPt = normalized.spacingPt ?? normalized.spacing ?? 36;
+  }
+
+  return normalized;
+}
+
 function applyRemoteOp(dataStr, fromPeerId) {
   if (!state.doc || !dataStr) return;
 
@@ -961,7 +1008,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
   }
 
   try {
-    const op = JSON.parse(dataStr);
+    const op = normalizeRemoteOp(JSON.parse(dataStr));
 
     // Bug C14: Deduplicate ops using _opId to prevent double application on retry
     if (op._opId && _trackOpId(op._opId)) {
@@ -1174,6 +1221,14 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      case 'insertColumnBreak': {
+        try {
+          state.doc.insert_column_break(op.nodeId);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertColumnBreak:', e); }
+        break;
+      }
+
       case 'insertHR': {
         try {
           state.doc.insert_horizontal_rule(op.afterNodeId);
@@ -1237,11 +1292,27 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      case 'insertCommentReply': {
+        try {
+          state.doc.insert_comment_reply(op.parentId, op.author, op.text);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertCommentReply:', e); }
+        break;
+      }
+
       case 'setImageAltText': {
         try {
           state.doc.set_image_alt_text(op.nodeId, op.alt);
           renderDocument();
         } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):altText:', e); }
+        break;
+      }
+
+      case 'setImageWrapMode': {
+        try {
+          state.doc.set_image_wrap_mode(op.nodeId, op.mode);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setImageWrapMode:', e); }
         break;
       }
 
@@ -1293,6 +1364,22 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      case 'insertFootnote': {
+        try {
+          state.doc.insert_footnote(op.nodeId, op.text || '');
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertFootnote:', e); }
+        break;
+      }
+
+      case 'insertEndnote': {
+        try {
+          state.doc.insert_endnote(op.nodeId, op.text || '');
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertEndnote:', e); }
+        break;
+      }
+
       case 'insertComment': {
         try {
           state.doc.insert_comment(op.startNodeId, op.endNodeId, op.author, op.text);
@@ -1341,6 +1428,82 @@ function applyRemoteOp(dataStr, fromPeerId) {
         break;
       }
 
+      case 'mergeCells': {
+        try {
+          state.doc.merge_cells(op.tableId, op.startRow, op.startCol, op.endRow, op.endCol);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):mergeCells:', e); }
+        break;
+      }
+
+      case 'splitCell': {
+        try {
+          if (typeof state.doc.split_merged_cell === 'function') {
+            state.doc.split_merged_cell(op.tableId, op.row, op.col);
+          } else {
+            state.doc.merge_cells(op.tableId, op.row, op.col, op.row, op.col);
+          }
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):splitCell:', e); }
+        break;
+      }
+
+      case 'setParagraphSpacing': {
+        try {
+          state.doc.set_paragraph_spacing(op.nodeId, op.spacingType, op.value);
+          renderNodeById(op.nodeId);
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setParagraphSpacing:', e); }
+        break;
+      }
+
+      case 'setParagraphKeep': {
+        try {
+          state.doc.set_paragraph_keep(op.nodeId, op.keepType, op.enabled);
+          renderNodeById(op.nodeId);
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setParagraphKeep:', e); }
+        break;
+      }
+
+      case 'setPageSetup': {
+        try {
+          state.doc.set_page_setup(JSON.stringify(op.setup));
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setPageSetup:', e); }
+        break;
+      }
+
+      case 'setSectionColumns': {
+        try {
+          state.doc.set_section_columns(op.sectionIndex || 0, op.columns, op.spacingPt);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setSectionColumns:', e); }
+        break;
+      }
+
+      case 'setTabStops': {
+        try {
+          state.doc.set_tab_stops(op.nodeId, op.tabs);
+          renderNodeById(op.nodeId);
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):setTabStops:', e); }
+        break;
+      }
+
+      case 'insertEquation': {
+        try {
+          state.doc.insert_equation(op.afterNodeId, op.latex);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertEquation:', e); }
+        break;
+      }
+
+      case 'insertBookmark': {
+        try {
+          state.doc.insert_bookmark(op.paraId, op.name);
+          renderDocument();
+        } catch (e) { requestImmediateFullSync(); console.debug('[collab] remote op skipped (node ID mismatch, fullSync will correct):insertBookmark:', e); }
+        break;
+      }
+
       case 'requestFullSync': {
         // Another peer is behind — send our full state if we're ahead
         if (op.myVersion < serverVersion) {
@@ -1385,9 +1548,10 @@ function applyRemoteOp(dataStr, fromPeerId) {
         // Only apply if the incoming version is newer than what we last synced.
         try {
           const incomingVersion = op.version || 0;
-          // Reject stale fullSync (Bug C4) — check both lastSyncedVersion and serverVersion
-          if (incomingVersion > 0 && incomingVersion <= serverVersion) {
-            console.warn(`[collab] Ignoring stale fullSync (v${incomingVersion} <= current server v${serverVersion})`);
+          // Reject only truly older fullSync payloads. The current message may
+          // already have advanced serverVersion before we reach this handler.
+          if (incomingVersion > 0 && incomingVersion < serverVersion) {
+            console.warn(`[collab] Ignoring stale fullSync (v${incomingVersion} < current server v${serverVersion})`);
             break;
           }
           if (incomingVersion > 0 && incomingVersion <= lastSyncedVersion) {
@@ -1452,6 +1616,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
 
       default:
         console.warn('Unknown remote op:', op.action);
+        requestImmediateFullSync();
     }
 
     applyingRemote = false;
@@ -1460,7 +1625,7 @@ function applyRemoteOp(dataStr, fromPeerId) {
     console.warn('[collab] Remote op failed, requesting full sync:', e.message);
     // Request full document sync to converge instead of silently diverging
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'requestFullSync', room: state.collabRoom }));
+      ws.send(JSON.stringify({ type: 'requestFullSync', room: roomId }));
     }
   }
 }
@@ -1590,9 +1755,20 @@ function applyRemoteAwareness(dataStr, fromPeerId) {
     const cursor = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
     // Never render our own cursor as a peer cursor
     if (cursor.peerId === peerId) return;
-    // Bug C12: Track last seen time for ghost cursor cleanup
-    const peer = peers.get(cursor.peerId);
-    if (peer) peer.lastSeen = Date.now();
+    // Awareness messages can arrive before peer-join or be heartbeat-only.
+    // Keep presence state hydrated so peer counts, avatars, and ghost-cursor
+    // cleanup stay accurate even for view-only or reconnecting collaborators.
+    let peer = peers.get(cursor.peerId);
+    if (!peer) {
+      addPeer(cursor.peerId, cursor.userName, cursor.userColor);
+      peer = peers.get(cursor.peerId);
+    }
+    if (peer) {
+      peer.userName = cursor.userName || peer.userName;
+      peer.userColor = cursor.userColor || peer.userColor;
+      peer.lastSeen = Date.now();
+    }
+    if (cursor.heartbeat) return;
     renderPeerCursor(cursor);
   } catch (_) {}
 }
@@ -1697,7 +1873,18 @@ function renderPeerCursor(cursor) {
   // Check if cursor position actually changed
   const prev = peerCursorState.get(cursor.peerId);
   const posKey = `${cursor.nodeId}:${cursor.offset}`;
-  if (prev && prev.posKey === posKey) return;
+  const selKey = cursor.selStartNodeId
+    ? `${cursor.selStartNodeId}:${cursor.selStartOffset}-${cursor.selEndNodeId}:${cursor.selEndOffset}`
+    : '';
+  if (
+    prev &&
+    prev.posKey === posKey &&
+    prev.selKey === selKey &&
+    prev.userName === (cursor.userName || 'Peer') &&
+    prev.userColor === (cursor.userColor || '#999')
+  ) {
+    return;
+  }
 
   // Compute position relative to pageContainer (not paragraph)
   // This avoids putting elements inside contenteditable paragraphs
@@ -1740,12 +1927,9 @@ function renderPeerCursor(cursor) {
     cursorEl = document.createElement('div');
     cursorEl.className = 'peer-cursor';
     cursorEl.id = `peer-cursor-${cursor.peerId}`;
-    cursorEl.style.borderLeftColor = cursor.userColor || '#999';
 
     const label = document.createElement('span');
     label.className = 'peer-cursor-label';
-    label.textContent = cursor.userName || 'Peer';
-    label.style.backgroundColor = cursor.userColor || '#999';
     cursorEl.appendChild(label);
 
     // Append to pageContainer (NOT inside contenteditable paragraph)
@@ -1753,14 +1937,17 @@ function renderPeerCursor(cursor) {
     page.appendChild(cursorEl);
   }
 
+  cursorEl.style.borderLeftColor = cursor.userColor || '#999';
+  const label = cursorEl.querySelector('.peer-cursor-label');
+  if (label) {
+    label.textContent = cursor.userName || 'Peer';
+    label.style.backgroundColor = cursor.userColor || '#999';
+  }
   cursorEl.style.left = leftPx + 'px';
   cursorEl.style.top = topPx + 'px';
   cursorEl.style.height = height + 'px';
 
   // Update selection highlights
-  const selKey = cursor.selStartNodeId
-    ? `${cursor.selStartNodeId}:${cursor.selStartOffset}-${cursor.selEndNodeId}:${cursor.selEndOffset}`
-    : '';
   if (!prev || prev.selKey !== selKey) {
     clearPeerSelection(cursor.peerId);
     if (cursor.selStartNodeId && cursor.selEndNodeId) {
@@ -1768,7 +1955,12 @@ function renderPeerCursor(cursor) {
     }
   }
 
-  peerCursorState.set(cursor.peerId, { posKey, selKey });
+  peerCursorState.set(cursor.peerId, {
+    posKey,
+    selKey,
+    userName: cursor.userName || 'Peer',
+    userColor: cursor.userColor || '#999',
+  });
 }
 
 /**
@@ -1793,30 +1985,65 @@ function renderPeerSelection(cursor) {
   const color = cursor.userColor || '#999';
   // Parse hex color to rgba at 20% opacity
   const rgba = hexToRgba(color, 0.2);
+  const startEl = page.querySelector(`[data-node-id="${cursor.selStartNodeId}"]`);
+  const endEl = page.querySelector(`[data-node-id="${cursor.selEndNodeId}"]`);
+  if (!startEl || !endEl) return;
 
-  // Collect all paragraph elements between start and end node (inclusive)
-  const allParas = Array.from(page.querySelectorAll('[data-node-id]'));
-  const startIdx = allParas.findIndex(el => el.dataset.nodeId === cursor.selStartNodeId);
-  const endIdx = allParas.findIndex(el => el.dataset.nodeId === cursor.selEndNodeId);
-  if (startIdx < 0 || endIdx < 0) return;
+  const startPos = resolveTextPosition(startEl, cursor.selStartOffset || 0);
+  const endPos = resolveTextPosition(endEl, cursor.selEndOffset || 0);
+  if (!startPos || !endPos) return;
 
-  const lo = Math.min(startIdx, endIdx);
-  const hi = Math.max(startIdx, endIdx);
+  const range = document.createRange();
+  try {
+    range.setStart(startPos.node, startPos.offset);
+    range.setEnd(endPos.node, endPos.offset);
+  } catch (_) {
+    return;
+  }
 
-  for (let i = lo; i <= hi; i++) {
-    const paraEl = allParas[i];
-    paraEl.style.position = 'relative';
+  const pageRect = page.getBoundingClientRect();
+  const rects = Array.from(range.getClientRects());
 
+  for (const rect of rects) {
+    if (!rect.width && !rect.height) continue;
     const overlay = document.createElement('div');
     overlay.className = 'peer-selection-highlight';
     overlay.dataset.peerId = cursor.peerId;
     overlay.style.cssText = `
-      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-      background: ${rgba}; pointer-events: none; z-index: 1;
+      position: absolute;
+      left: ${rect.left - pageRect.left + page.scrollLeft}px;
+      top: ${rect.top - pageRect.top + page.scrollTop}px;
+      width: ${Math.max(rect.width, 2)}px;
+      height: ${Math.max(rect.height, 14)}px;
+      background: ${rgba};
+      pointer-events: none;
+      z-index: 1;
       border-radius: 2px;
     `;
-    paraEl.appendChild(overlay);
+    page.appendChild(overlay);
   }
+}
+
+function resolveTextPosition(rootEl, targetOffset) {
+  const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null);
+  let remaining = Math.max(0, targetOffset || 0);
+  let textNode = null;
+
+  while ((textNode = walker.nextNode())) {
+    if (textNode.parentElement?.closest('.peer-cursor')) continue;
+    const len = textNode.textContent?.length || 0;
+    if (remaining <= len) {
+      return { node: textNode, offset: remaining };
+    }
+    remaining -= len;
+  }
+
+  const fallbackNode = rootEl.lastChild;
+  if (fallbackNode?.nodeType === Node.TEXT_NODE) {
+    return { node: fallbackNode, offset: fallbackNode.textContent?.length || 0 };
+  }
+
+  return null;
 }
 
 /**

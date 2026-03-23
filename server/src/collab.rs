@@ -176,6 +176,7 @@ impl RoomManager {
                         | "awareness"
                         | "awareness-batch"
                         | "sync"
+                        | "sync-req"
                         | "fullSync"
                         | "requestFullSync"
                         | "requestCatchup"
@@ -360,6 +361,18 @@ fn rand_id() -> String {
     uuid::Uuid::new_v4().to_string()[..8].to_string()
 }
 
+fn should_deliver_to_peer(msg: &str, my_peer_id: &str) -> bool {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(msg) {
+        if parsed.get("_sender").and_then(|s| s.as_str()) == Some(my_peer_id) {
+            return false;
+        }
+        if let Some(target) = parsed.get("_target").and_then(|s| s.as_str()) {
+            return target == my_peer_id;
+        }
+    }
+    true
+}
+
 /// WebSocket upgrade handler.
 ///
 /// Route: `GET /ws/edit/{file_id}?user=Alice&uid=u123&mode=edit`
@@ -377,8 +390,13 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
     let has_session = state.sessions.exists(&file_id).await;
     let peer_id = params.uid.clone();
     let user_name = params.user.clone();
+    let effective_access = if params.access == "edit" && params.mode != "edit" {
+        params.mode.clone()
+    } else {
+        params.access.clone()
+    };
 
-    if params.access == "view" {
+    if effective_access == "view" {
         tracing::info!(
             "Viewer {} connected to {} (read-only)",
             params.user,
@@ -401,7 +419,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
     if has_session {
         state
             .sessions
-            .editor_join(&file_id, &peer_id, &user_name, &params.mode)
+            .editor_join(&file_id, &peer_id, &user_name, &effective_access)
             .await;
     }
 
@@ -427,24 +445,14 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         "peerId": peer_id,
         "room": file_id,
         "peers": peer_list,
-        "access": params.access,
+        "access": effective_access,
         "serverVersion": current_room_version,
     });
     let _ = sender
         .send(Message::Text(joined_msg.to_string().into()))
         .await;
 
-    // 2. Broadcast "peer-join" to all existing peers (with _sender so echo is filtered)
-    let peer_join_msg = serde_json::json!({
-        "type": "peer-join",
-        "peerId": peer_id,
-        "userName": user_name,
-        "userColor": "",
-        "_sender": peer_id,
-    });
-    let _ = tx.send(peer_join_msg.to_string());
-
-    // 3. Send document snapshot if session has data
+    // 2. Send document snapshot if session has data
     if has_session {
         if let Some(data) = state.sessions.get_data(&file_id).await {
             use base64::Engine as _;
@@ -460,7 +468,7 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
         }
     }
 
-    // 4. Send catch-up ops (with server version)
+    // 3. Send catch-up ops (with server version)
     for (version, op) in &catch_up_ops {
         let msg = serde_json::json!({
             "type": "op",
@@ -487,10 +495,8 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                     match msg {
                         Ok(msg) => {
                             // Don't echo messages back to the sender
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg) {
-                                if parsed.get("_sender").and_then(|s| s.as_str()) == Some(my_peer_id.as_str()) {
-                                    continue;
-                                }
+                            if !should_deliver_to_peer(&msg, &my_peer_id) {
+                                continue;
                             }
                             if sender.send(Message::Text(msg.into())).await.is_err() {
                                 break;
@@ -577,24 +583,33 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
                                 rooms
                                     .update_peer_color(&file_id_recv, &sender_peer_id, color)
                                     .await;
+                                let peer_join_msg = serde_json::json!({
+                                    "type": "peer-join",
+                                    "peerId": sender_peer_id,
+                                    "userName": parsed.get("userName").and_then(|u| u.as_str()).unwrap_or("Anonymous"),
+                                    "userColor": color,
+                                    "_sender": sender_peer_id,
+                                });
+                                let _ = tx_clone.send(peer_join_msg.to_string());
                             }
                             continue;
                         }
-                        "requestCatchup" => {
+                        "requestCatchup" | "sync-req" => {
                             // Client is behind — send all ops since their version
-                            if let Some(from_version) =
-                                parsed.get("fromVersion").and_then(|v| v.as_u64())
-                            {
-                                let ops = rooms.get_ops_since(&file_id_recv, from_version).await;
-                                for (version, op_data) in ops {
-                                    let catchup = serde_json::json!({
-                                        "type": "op",
-                                        "peerId": "server",
-                                        "data": op_data,
-                                        "serverVersion": version,
-                                    });
-                                    let _ = tx_clone.send(catchup.to_string());
-                                }
+                            let from_version = parsed
+                                .get("fromVersion")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            let ops = rooms.get_ops_since(&file_id_recv, from_version).await;
+                            for (version, op_data) in ops {
+                                let catchup = serde_json::json!({
+                                    "type": "op",
+                                    "peerId": "server",
+                                    "data": op_data,
+                                    "serverVersion": version,
+                                    "_target": sender_peer_id,
+                                });
+                                let _ = tx_clone.send(catchup.to_string());
                             }
                             continue;
                         }
@@ -696,4 +711,33 @@ async fn handle_socket(socket: WebSocket, file_id: String, params: WsParams, sta
             "still active"
         }
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_deliver_to_peer, RoomManager};
+
+    #[test]
+    fn validate_op_accepts_reconnect_alias_and_request_catchup() {
+        assert!(RoomManager::validate_op(
+            r#"{"type":"requestCatchup","room":"doc-1","fromVersion":12}"#
+        ));
+        assert!(RoomManager::validate_op(
+            r#"{"type":"sync-req","room":"doc-1","stateVector":null}"#
+        ));
+    }
+
+    #[test]
+    fn targeted_messages_only_reach_the_requested_peer() {
+        let targeted = r#"{"type":"op","_target":"peer-b","data":"{}"}"#;
+        assert!(!should_deliver_to_peer(targeted, "peer-a"));
+        assert!(should_deliver_to_peer(targeted, "peer-b"));
+    }
+
+    #[test]
+    fn sender_echoes_are_filtered_even_without_targeting() {
+        let echoed = r#"{"type":"op","_sender":"peer-a","data":"{}"}"#;
+        assert!(!should_deliver_to_peer(echoed, "peer-a"));
+        assert!(should_deliver_to_peer(echoed, "peer-b"));
+    }
 }
