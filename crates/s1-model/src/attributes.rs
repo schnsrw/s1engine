@@ -9,6 +9,7 @@ use std::collections::HashMap;
 // ─── Supporting Types ───────────────────────────────────────────────────────
 
 /// An RGBA color.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Color {
     pub r: u8,
@@ -70,6 +71,7 @@ impl Color {
 }
 
 /// Text alignment.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Alignment {
@@ -80,6 +82,7 @@ pub enum Alignment {
 }
 
 /// Underline style.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum UnderlineStyle {
@@ -93,6 +96,7 @@ pub enum UnderlineStyle {
 }
 
 /// Line spacing configuration.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum LineSpacing {
@@ -108,6 +112,7 @@ pub enum LineSpacing {
 }
 
 /// Page orientation.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PageOrientation {
@@ -116,6 +121,7 @@ pub enum PageOrientation {
 }
 
 /// Table or cell width specification.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum TableWidth {
@@ -127,6 +133,7 @@ pub enum TableWidth {
 }
 
 /// Vertical alignment within a cell.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum VerticalAlignment {
@@ -136,6 +143,7 @@ pub enum VerticalAlignment {
 }
 
 /// A tab stop definition.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabStop {
     /// Position in points from the left margin.
@@ -147,6 +155,7 @@ pub struct TabStop {
 }
 
 /// Tab stop alignment.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TabAlignment {
@@ -157,6 +166,7 @@ pub enum TabAlignment {
 }
 
 /// Tab leader character.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TabLeader {
@@ -167,6 +177,7 @@ pub enum TabLeader {
 }
 
 /// List/numbering information for a paragraph.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListInfo {
     /// Nesting depth (0-8).
@@ -180,6 +191,7 @@ pub struct ListInfo {
 }
 
 /// List numbering format.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ListFormat {
@@ -194,9 +206,98 @@ pub enum ListFormat {
     LowerRoman,
     /// I, II, III, ...
     UpperRoman,
+    /// No visible marker.
+    None,
+    /// 01, 02, 03, ... (zero-padded)
+    DecimalZero,
+}
+
+/// Table layout algorithm.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TableLayoutMode {
+    /// Column widths determined by content.
+    AutoFit,
+    /// Column widths are fixed.
+    Fixed,
+}
+
+/// Text capitalization transform.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TextTransform {
+    /// No transform.
+    None,
+    /// UPPERCASE.
+    Uppercase,
+    /// lowercase.
+    Lowercase,
+    /// Capitalize First Letter Of Each Word.
+    Capitalize,
+    /// sMALL cAPS (display only).
+    SmallCaps,
+    /// ALL CAPS (display only).
+    AllCaps,
+}
+
+/// Box margins (top, bottom, left, right) in points.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Margins {
+    pub top: f64,
+    pub bottom: f64,
+    pub left: f64,
+    pub right: f64,
+}
+
+impl Margins {
+    pub const ZERO: Margins = Margins {
+        top: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+        right: 0.0,
+    };
+
+    pub const fn new(top: f64, bottom: f64, left: f64, right: f64) -> Self {
+        Self {
+            top,
+            bottom,
+            left,
+            right,
+        }
+    }
+
+    pub fn uniform(val: f64) -> Self {
+        Self {
+            top: val,
+            bottom: val,
+            left: val,
+            right: val,
+        }
+    }
+}
+
+/// Writing mode / text direction.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WritingMode {
+    /// Left-to-right, top-to-bottom (default Western).
+    LrTb,
+    /// Right-to-left, top-to-bottom (Arabic, Hebrew).
+    RlTb,
+    /// Top-to-bottom, right-to-left (CJK vertical).
+    TbRl,
+    /// Top-to-bottom, left-to-right (Mongolian).
+    TbLr,
+    /// Bottom-to-top, left-to-right (rare, used in some rotated contexts).
+    BtLr,
 }
 
 /// Border configuration for a box (paragraph, cell, table).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Borders {
     pub top: Option<BorderSide>,
@@ -206,6 +307,7 @@ pub struct Borders {
 }
 
 /// A single border side.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BorderSide {
     pub style: BorderStyle,
@@ -215,6 +317,7 @@ pub struct BorderSide {
 }
 
 /// Border line style.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BorderStyle {
@@ -227,10 +330,12 @@ pub enum BorderStyle {
 }
 
 /// Unique identifier for embedded media.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MediaId(pub u64);
 
 /// Type of dynamic field.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FieldType {
@@ -241,28 +346,70 @@ pub enum FieldType {
     FileName,
     Author,
     TableOfContents,
+    /// HYPERLINK field — URL stored in FieldCode.
+    Hyperlink,
+    /// REF or PAGEREF cross-reference field.
+    CrossReference,
+    /// SEQ field — sequential numbering (figures, tables).
+    Sequence,
+    /// MERGEFIELD — mail merge field.
+    MergeField,
+    /// IF conditional field.
+    Conditional,
+    /// STYLEREF field.
+    StyleRef,
+    /// Any unrecognized field type. Instruction stored in FieldCode.
     Custom,
 }
 
 // ─── Attribute Key/Value System ─────────────────────────────────────────────
 
 /// Typed attribute keys.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AttributeKey {
     // Run attributes
     FontFamily,
+    /// East Asian font family (w:rFonts/@eastAsia).
+    FontFamilyEastAsia,
+    /// Complex-script font family (w:rFonts/@cs).
+    FontFamilyCS,
     FontSize,
+    /// Complex-script font size in points (w:szCs).
+    FontSizeCS,
     Bold,
+    /// Complex-script bold (w:bCs).
+    BoldCS,
     Italic,
+    /// Complex-script italic (w:iCs).
+    ItalicCS,
     Underline,
     Strikethrough,
+    /// Double strikethrough (w:dstrike).
+    DoubleStrikethrough,
     Color,
     HighlightColor,
     Superscript,
     Subscript,
     FontSpacing,
+    /// Baseline shift in half-points (w:position).
+    BaselineShift,
     Language,
+    /// All caps display (w:caps).
+    Caps,
+    /// Small caps display (w:smallCaps).
+    SmallCaps,
+    /// Hidden text (w:vanish).
+    Hidden,
+    /// Text transform (ODF fo:text-transform).
+    TextTransformStyle,
+    /// Theme color reference (w:themeColor attribute on w:color).
+    /// Stored alongside resolved Color for round-trip preservation.
+    /// Values: "accent1"-"accent6", "dark1", "dark2", "light1", "light2", etc.
+    ThemeColor,
+    /// Theme tint/shade value (w:themeTint or w:themeShade, 0-255 hex string).
+    ThemeTintShade,
 
     // Paragraph attributes
     Alignment,
@@ -281,6 +428,13 @@ pub enum AttributeKey {
     StyleId,
     ListInfo,
 
+    /// Paragraph writing mode / text direction (w:textDirection, style:writing-mode).
+    ParagraphWritingMode,
+    /// Widow control — prevent single line at top of page (w:widowControl).
+    WidowControl,
+    /// Outline level 0-9 (w:outlineLvl). Used for TOC generation.
+    OutlineLevel,
+
     // Section attributes
     /// Index into DocumentModel.sections() for the section ending at this paragraph.
     SectionIndex,
@@ -295,6 +449,14 @@ pub enum AttributeKey {
     Orientation,
     HeaderDistance,
     FooterDistance,
+    /// Page borders (w:pgBorders in sectPr).
+    PageBorders,
+    /// Document grid type (w:docGrid/@type): "default", "lines", "linesAndChars", "snapToChars".
+    DocGridType,
+    /// Document grid line pitch in points (w:docGrid/@linePitch).
+    DocGridLinePitch,
+    /// Line numbering configuration (w:lnNumType) — stored as "start,countBy,restart,distance".
+    LineNumbering,
 
     // Table attributes
     TableWidth,
@@ -302,9 +464,22 @@ pub enum AttributeKey {
     TableBorders,
     CellMargins,
 
+    /// Table layout mode: fixed or autofit (w:tblLayout).
+    TableLayout,
+    /// Default cell margins for the table (w:tblCellMar) in points.
+    TableDefaultCellMargins,
+    /// Table indent from leading margin in points (w:tblInd).
+    TableIndent,
+
     // Table row attributes
     /// Marks a table row as a header row that should repeat on continuation pages.
     TableHeaderRow,
+    /// Explicit row height in points (w:trHeight).
+    RowHeight,
+    /// Row height rule: "atLeast" or "exact" (w:trHeight/@hRule).
+    RowHeightRule,
+    /// Row cannot split across pages (w:cantSplit).
+    RowNoSplit,
 
     // Cell attributes
     CellWidth,
@@ -313,6 +488,13 @@ pub enum AttributeKey {
     CellBackground,
     ColSpan,
     RowSpan,
+
+    /// Per-cell margins (top, bottom, left, right) in points (w:tcMar).
+    CellPadding,
+    /// Cell text direction / writing mode (w:textDirection).
+    CellTextDirection,
+    /// Cell no-wrap flag (w:noWrap).
+    CellNoWrap,
 
     // Image attributes
     ImageMediaId,
@@ -432,12 +614,16 @@ pub enum AttributeKey {
     TextReflection,
 
     // Form control attributes (DOCX SDT)
-    /// Form control type: "checkbox", "dropdown", or "text".
+    /// Form control type: "checkbox", "dropdown", "text", or "date".
     FormType,
     /// Comma-separated list of options for dropdown form controls.
     FormOptions,
     /// Whether a checkbox form control is checked.
     FormChecked,
+    /// SDT alias / display name (w:alias).
+    FormAlias,
+    /// SDT tag / custom property (w:tag).
+    FormTag,
 
     // Change tracking metadata
     /// JSON string containing parsed change tracking info (regions with id,
@@ -451,6 +637,7 @@ pub enum AttributeKey {
 }
 
 /// Typed attribute values.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum AttributeValue {
@@ -470,11 +657,16 @@ pub enum AttributeValue {
     VerticalAlignment(VerticalAlignment),
     MediaId(MediaId),
     FieldType(FieldType),
+    TableLayoutMode(TableLayoutMode),
+    TextTransform(TextTransform),
+    Margins(Margins),
+    WritingMode(WritingMode),
 }
 
 // ─── AttributeMap ───────────────────────────────────────────────────────────
 
 /// A map of typed attributes. Used on every node for formatting properties.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AttributeMap {
     inner: HashMap<AttributeKey, AttributeValue>,
@@ -637,6 +829,22 @@ impl AttributeMap {
     pub fn get_field_type(&self, key: &AttributeKey) -> Option<FieldType> {
         match self.get(key) {
             Some(AttributeValue::FieldType(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get a table layout mode from the map.
+    pub fn get_table_layout(&self, key: &AttributeKey) -> Option<TableLayoutMode> {
+        match self.get(key) {
+            Some(AttributeValue::TableLayoutMode(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get margins from the map.
+    pub fn get_margins(&self, key: &AttributeKey) -> Option<&Margins> {
+        match self.get(key) {
+            Some(AttributeValue::Margins(v)) => Some(v),
             _ => None,
         }
     }

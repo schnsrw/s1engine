@@ -4,6 +4,7 @@ use crate::attributes::MediaId;
 use std::collections::HashMap;
 
 /// An embedded media item (image, etc.).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct MediaItem {
     pub id: MediaId,
@@ -17,6 +18,7 @@ pub struct MediaItem {
 
 /// Storage for embedded media, keyed by [`MediaId`].
 /// Deduplicates content by hash.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
 pub struct MediaStore {
     items: HashMap<MediaId, MediaItem>,

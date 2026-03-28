@@ -10,8 +10,15 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+# Optional serde support. Zero-dep by default; enable with `features = ["serde"]`.
+serde = ["dep:serde"]
+
 [dependencies]
-# Zero external dependencies — this is intentional and must never change.
+# Zero external dependencies by default — this is intentional.
+# serde is optional and only pulled in when the "serde" feature is enabled.
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -85,6 +85,42 @@ pub fn write_section_properties(props: &SectionProperties, hf_rels: &[HfRelEntry
         xml.push_str("<w:evenAndOddHeaders/>");
     }
 
+    // Page borders
+    if let Some(ref borders) = props.page_borders {
+        xml.push_str("<w:pgBorders>");
+        crate::content_writer::write_borders_public(borders, &mut xml);
+        xml.push_str("</w:pgBorders>");
+    }
+
+    // Line numbering
+    if let Some(start) = props.line_numbering_start {
+        let mut ln_attrs = format!(r#" w:start="{start}""#);
+        if let Some(cb) = props.line_numbering_count_by {
+            ln_attrs.push_str(&format!(r#" w:countBy="{cb}""#));
+        }
+        if let Some(ref restart) = props.line_numbering_restart {
+            ln_attrs.push_str(&format!(r#" w:restart="{restart}""#));
+        }
+        xml.push_str(&format!("<w:lnNumType{ln_attrs}/>"));
+    }
+
+    // Document grid
+    if props.doc_grid_type.is_some() || props.doc_grid_line_pitch.is_some() {
+        let mut grid_attrs = String::new();
+        if let Some(ref gt) = props.doc_grid_type {
+            grid_attrs.push_str(&format!(r#" w:type="{gt}""#));
+        }
+        if let Some(pitch) = props.doc_grid_line_pitch {
+            grid_attrs.push_str(&format!(r#" w:linePitch="{}""#, points_to_twips(pitch)));
+        }
+        xml.push_str(&format!("<w:docGrid{grid_attrs}/>"));
+    }
+
+    // Even and odd headers flag
+    if props.even_and_odd_headers {
+        xml.push_str("<w:evenAndOddHeaders/>");
+    }
+
     // Title page flag
     if props.title_page {
         xml.push_str("<w:titlePg/>");

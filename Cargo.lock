@@ -2142,6 +2142,7 @@ version = "1.0.1"
 dependencies = [
  "pretty_assertions",
  "proptest",
+ "serde",
 ]
 
 [[package]]
@@ -2151,6 +2152,8 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "s1-model",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

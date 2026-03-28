@@ -3,7 +3,7 @@
 use quick_xml::events::BytesStart;
 use s1_model::{
     Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders, Color,
-    LineSpacing, TabAlignment, TabLeader, TabStop, UnderlineStyle,
+    LineSpacing, TabAlignment, TabLeader, TabStop, TextTransform, UnderlineStyle,
 };
 
 use quick_xml::events::Event;
@@ -109,6 +109,36 @@ pub fn parse_text_properties(e: &BytesStart<'_>) -> AttributeMap {
         }
     }
 
+    // Text transform: fo:text-transform="uppercase"
+    if let Some(tt) = get_attr(e, b"text-transform") {
+        let transform = match tt.as_str() {
+            "uppercase" => TextTransform::Uppercase,
+            "lowercase" => TextTransform::Lowercase,
+            "capitalize" => TextTransform::Capitalize,
+            "none" => TextTransform::None,
+            _ => TextTransform::None,
+        };
+        attrs.set(
+            AttributeKey::TextTransformStyle,
+            AttributeValue::TextTransform(transform),
+        );
+    }
+
+    // Complex-script font family: style:font-name-complex
+    if let Some(ff_cs) = get_attr(e, b"font-name-complex") {
+        let ff_cs = ff_cs.trim_matches('\'').trim_matches('"').to_string();
+        attrs.set(AttributeKey::FontFamilyCS, AttributeValue::String(ff_cs));
+    }
+
+    // Complex-script font size: fo:font-size-complex or style:font-size-asian
+    if let Some(sz_cs) = get_attr(e, b"font-size-complex")
+        .or_else(|| get_attr(e, b"font-size-asian"))
+    {
+        if let Some(pts) = parse_font_size(&sz_cs) {
+            attrs.set(AttributeKey::FontSizeCS, AttributeValue::Float(pts));
+        }
+    }
+
     attrs
 }
 
@@ -196,6 +226,27 @@ pub fn parse_paragraph_properties(e: &BytesStart<'_>) -> AttributeMap {
     if let Some(kt) = get_attr(e, b"keep-together") {
         if kt == "always" {
             attrs.set(AttributeKey::KeepLinesTogether, AttributeValue::Bool(true));
+        }
+    }
+
+    // Widow control: fo:widows="2" → enable, "0" → disable
+    // ODF has separate widows/orphans but OOXML merges them into one flag.
+    // We treat either being > 0 as WidowControl(true).
+    if let Some(w) = get_attr(e, b"widows") {
+        if let Ok(val) = w.parse::<u32>() {
+            attrs.set(
+                AttributeKey::WidowControl,
+                AttributeValue::Bool(val > 0),
+            );
+        }
+    }
+    // fo:orphans — same treatment; if widows already set this, orphans can override.
+    if let Some(o) = get_attr(e, b"orphans") {
+        if let Ok(val) = o.parse::<u32>() {
+            attrs.set(
+                AttributeKey::WidowControl,
+                AttributeValue::Bool(val > 0),
+            );
         }
     }
 
@@ -349,6 +400,28 @@ fn parse_font_size(s: &str) -> Option<f64> {
     parse_length(s)
 }
 
+/// Parse `<style:graphic-properties>` attributes (image wrap, etc.).
+pub fn parse_graphic_properties(e: &BytesStart<'_>) -> AttributeMap {
+    let mut attrs = AttributeMap::new();
+
+    // style:wrap → ImageWrapType
+    if let Some(wrap) = get_attr(e, b"wrap") {
+        let wrap_type = match wrap.as_str() {
+            "none" => "none",
+            "left" | "right" | "parallel" => "square",
+            "dynamic" => "tight",
+            "run-through" => "behind",
+            _ => "none",
+        };
+        attrs.set(
+            AttributeKey::ImageWrapType,
+            AttributeValue::String(wrap_type.to_string()),
+        );
+    }
+
+    attrs
+}
+
 /// Parse `<style:table-cell-properties>` attributes.
 #[allow(dead_code)]
 pub fn parse_table_cell_properties(e: &BytesStart<'_>) -> AttributeMap {
@@ -375,6 +448,34 @@ pub fn parse_table_cell_properties(e: &BytesStart<'_>) -> AttributeMap {
                 attrs.set(AttributeKey::CellBackground, AttributeValue::Color(color));
             }
         }
+    }
+
+    // Cell borders: fo:border-top, fo:border-bottom, fo:border-left, fo:border-right
+    // Also fo:border (shorthand for all sides)
+    let top = get_attr(e, b"border-top").and_then(|v| parse_border_value(&v));
+    let bottom = get_attr(e, b"border-bottom").and_then(|v| parse_border_value(&v));
+    let left = get_attr(e, b"border-left").and_then(|v| parse_border_value(&v));
+    let right = get_attr(e, b"border-right").and_then(|v| parse_border_value(&v));
+
+    // Shorthand: fo:border applies to all sides
+    let all = get_attr(e, b"border").and_then(|v| parse_border_value(&v));
+
+    let borders = Borders {
+        top: top.or_else(|| all.clone()),
+        bottom: bottom.or_else(|| all.clone()),
+        left: left.or_else(|| all.clone()),
+        right: right.or(all),
+    };
+
+    if borders.top.is_some()
+        || borders.bottom.is_some()
+        || borders.left.is_some()
+        || borders.right.is_some()
+    {
+        attrs.set(
+            AttributeKey::CellBorders,
+            AttributeValue::Borders(borders),
+        );
     }
 
     attrs

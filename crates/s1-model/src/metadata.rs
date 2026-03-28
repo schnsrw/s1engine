@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 /// Document-level metadata. Maps to Dublin Core properties in DOCX/ODT.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DocumentMetadata {
     pub title: Option<String>,

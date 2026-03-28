@@ -162,6 +162,16 @@ fn write_sdt_form(
     xml.push_str("<w:sdt>");
     xml.push_str("<w:sdtPr>");
 
+    // SDT alias
+    if let Some(alias) = para.attributes.get_string(&AttributeKey::FormAlias) {
+        xml.push_str(&format!(r#"<w:alias w:val="{}"/>"#, escape_xml(alias)));
+    }
+
+    // SDT tag
+    if let Some(tag) = para.attributes.get_string(&AttributeKey::FormTag) {
+        xml.push_str(&format!(r#"<w:tag w:val="{}"/>"#, escape_xml(tag)));
+    }
+
     match form_type {
         "checkbox" => {
             let checked = para
@@ -187,6 +197,9 @@ fn write_sdt_form(
         }
         "text" => {
             xml.push_str("<w:text/>");
+        }
+        "date" => {
+            xml.push_str("<w:date/>");
         }
         _ => {}
     }
@@ -627,12 +640,44 @@ fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
         tpr.push_str("</w:tblBorders>");
     }
 
+    // Table layout
+    if let Some(mode) = attrs.get_table_layout(&AttributeKey::TableLayout) {
+        let val = match mode {
+            s1_model::TableLayoutMode::Fixed => "fixed",
+            s1_model::TableLayoutMode::AutoFit => "autofit",
+            _ => "autofit",
+        };
+        tpr.push_str(&format!(r#"<w:tblLayout w:type="{val}"/>"#));
+    }
+
+    // Table indent
+    if let Some(pts) = attrs.get_f64(&AttributeKey::TableIndent) {
+        let twips = points_to_twips(pts);
+        tpr.push_str(&format!(r#"<w:tblInd w:w="{twips}" w:type="dxa"/>"#));
+    }
+
+    // Default cell margins
+    if let Some(margins) = attrs.get_margins(&AttributeKey::TableDefaultCellMargins) {
+        tpr.push_str("<w:tblCellMar>");
+        write_margin_side("top", margins.top, &mut tpr);
+        write_margin_side("left", margins.left, &mut tpr);
+        write_margin_side("bottom", margins.bottom, &mut tpr);
+        write_margin_side("right", margins.right, &mut tpr);
+        tpr.push_str("</w:tblCellMar>");
+    }
+
     // Table property change tracking (tblPrChange)
     if attrs.get_string(&AttributeKey::RevisionType) == Some("PropertyChange") {
         write_property_change_element("tblPrChange", "tblPr", attrs, &mut tpr);
     }
 
     tpr
+}
+
+/// Write a single margin side element (e.g. `<w:top w:w="40" w:type="dxa"/>`).
+fn write_margin_side(name: &str, pts: f64, xml: &mut String) {
+    let twips = points_to_twips(pts);
+    xml.push_str(&format!(r#"<w:{name} w:w="{twips}" w:type="dxa"/>"#));
 }
 
 /// Write a `<w:tr>` element.
@@ -792,6 +837,26 @@ fn write_cell_properties(attrs: &s1_model::AttributeMap) -> String {
         tcp.push_str("</w:tcBorders>");
     }
 
+    // Cell margins
+    if let Some(margins) = attrs.get_margins(&AttributeKey::CellPadding) {
+        tcp.push_str("<w:tcMar>");
+        write_margin_side("top", margins.top, &mut tcp);
+        write_margin_side("left", margins.left, &mut tcp);
+        write_margin_side("bottom", margins.bottom, &mut tcp);
+        write_margin_side("right", margins.right, &mut tcp);
+        tcp.push_str("</w:tcMar>");
+    }
+
+    // Cell text direction
+    if let Some(dir) = attrs.get_string(&AttributeKey::CellTextDirection) {
+        tcp.push_str(&format!(r#"<w:textDirection w:val="{}"/>"#, escape_xml(dir)));
+    }
+
+    // Cell no-wrap
+    if attrs.get_bool(&AttributeKey::CellNoWrap) == Some(true) {
+        tcp.push_str("<w:noWrap/>");
+    }
+
     // Cell property change tracking (tcPrChange)
     if attrs.get_string(&AttributeKey::RevisionType) == Some("PropertyChange") {
         write_property_change_element("tcPrChange", "tcPr", attrs, &mut tcp);
@@ -804,6 +869,22 @@ fn write_cell_properties(attrs: &s1_model::AttributeMap) -> String {
 fn write_row_properties(attrs: &s1_model::AttributeMap) -> String {
     let mut trp = String::new();
 
+    // Row cannot split across pages
+    if attrs.get_bool(&AttributeKey::RowNoSplit) == Some(true) {
+        trp.push_str("<w:cantSplit/>");
+    }
+
+    // Row height
+    if let Some(pts) = attrs.get_f64(&AttributeKey::RowHeight) {
+        let twips = points_to_twips(pts);
+        let rule = attrs
+            .get_string(&AttributeKey::RowHeightRule)
+            .unwrap_or("atLeast");
+        trp.push_str(&format!(
+            r#"<w:trHeight w:val="{twips}" w:hRule="{rule}"/>"#
+        ));
+    }
+
     // Header row
     if attrs.get_bool(&AttributeKey::TableHeaderRow) == Some(true) {
         trp.push_str("<w:tblHeader/>");
@@ -815,6 +896,11 @@ fn write_row_properties(attrs: &s1_model::AttributeMap) -> String {
     }
 
     trp
+}
+
+/// Public wrapper for write_borders (used by section_writer for page borders).
+pub fn write_borders_public(borders: &Borders, xml: &mut String) {
+    write_borders(borders, xml);
 }
 
 /// Write border sides (top, bottom, left, right) shared between table and cell borders.
@@ -1098,7 +1184,12 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
             ind_attrs.push_str(&format!(r#" w:right="{}""#, points_to_twips(pts)));
         }
         if let Some(pts) = first_line {
-            ind_attrs.push_str(&format!(r#" w:firstLine="{}""#, points_to_twips(pts)));
+            if pts < 0.0 {
+                // Negative first-line indent = hanging indent
+                ind_attrs.push_str(&format!(r#" w:hanging="{}""#, points_to_twips(-pts)));
+            } else {
+                ind_attrs.push_str(&format!(r#" w:firstLine="{}""#, points_to_twips(pts)));
+            }
         }
         ppr.push_str(&format!("<w:ind{ind_attrs}/>"));
     }
@@ -1171,6 +1262,36 @@ pub fn write_paragraph_properties_from_attrs(attrs: &s1_model::AttributeMap) -> 
             r#"<w:shd w:val="clear" w:fill="{}"/>"#,
             color.to_hex()
         ));
+    }
+
+    // Widow control
+    if let Some(wc) = attrs.get_bool(&AttributeKey::WidowControl) {
+        if !wc {
+            ppr.push_str(r#"<w:widowControl w:val="false"/>"#);
+        }
+        // widowControl=true is the default, but write explicitly if set
+        // to preserve round-trip
+        if wc {
+            ppr.push_str("<w:widowControl/>");
+        }
+    }
+
+    // Outline level
+    if let Some(level) = attrs.get_i64(&AttributeKey::OutlineLevel) {
+        ppr.push_str(&format!(r#"<w:outlineLvl w:val="{level}"/>"#));
+    }
+
+    // Paragraph text direction / writing mode
+    if let Some(AttributeValue::WritingMode(wm)) = attrs.get(&AttributeKey::ParagraphWritingMode) {
+        let val = match wm {
+            s1_model::WritingMode::LrTb => "lrTb",
+            s1_model::WritingMode::RlTb => "rlTb",
+            s1_model::WritingMode::TbRl => "tbRl",
+            s1_model::WritingMode::TbLr => "tbLr",
+            s1_model::WritingMode::BtLr => "btLr",
+            _ => "lrTb",
+        };
+        ppr.push_str(&format!(r#"<w:textDirection w:val="{val}"/>"#));
     }
 
     // Paragraph property change tracking (pPrChange)
@@ -1341,11 +1462,24 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
     }
 
     // Font family
-    if let Some(font) = attrs.get_string(&AttributeKey::FontFamily) {
-        let escaped = escape_xml(font);
-        rpr.push_str(&format!(
-            r#"<w:rFonts w:ascii="{escaped}" w:hAnsi="{escaped}"/>"#
-        ));
+    {
+        let ascii = attrs.get_string(&AttributeKey::FontFamily);
+        let ea = attrs.get_string(&AttributeKey::FontFamilyEastAsia);
+        let cs = attrs.get_string(&AttributeKey::FontFamilyCS);
+        if ascii.is_some() || ea.is_some() || cs.is_some() {
+            let mut font_attrs = String::new();
+            if let Some(f) = ascii {
+                let esc = escape_xml(f);
+                font_attrs.push_str(&format!(r#" w:ascii="{esc}" w:hAnsi="{esc}""#));
+            }
+            if let Some(f) = ea {
+                font_attrs.push_str(&format!(r#" w:eastAsia="{}""#, escape_xml(f)));
+            }
+            if let Some(f) = cs {
+                font_attrs.push_str(&format!(r#" w:cs="{}""#, escape_xml(f)));
+            }
+            rpr.push_str(&format!("<w:rFonts{font_attrs}/>"));
+        }
     }
 
     // Bold
@@ -1392,9 +1526,20 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         rpr.push_str(&format!(r#"<w:sz w:val="{half_pts}"/>"#));
     }
 
-    // Text color
+    // Text color (with optional theme color reference)
     if let Some(color) = attrs.get_color(&AttributeKey::Color) {
-        rpr.push_str(&format!(r#"<w:color w:val="{}"/>"#, color.to_hex()));
+        let mut color_attrs = format!(r#" w:val="{}""#, color.to_hex());
+        if let Some(tc) = attrs.get_string(&AttributeKey::ThemeColor) {
+            color_attrs.push_str(&format!(r#" w:themeColor="{}""#, escape_xml(tc)));
+        }
+        if let Some(tts) = attrs.get_string(&AttributeKey::ThemeTintShade) {
+            if let Some(val) = tts.strip_prefix("tint:") {
+                color_attrs.push_str(&format!(r#" w:themeTint="{}""#, escape_xml(val)));
+            } else if let Some(val) = tts.strip_prefix("shade:") {
+                color_attrs.push_str(&format!(r#" w:themeShade="{}""#, escape_xml(val)));
+            }
+        }
+        rpr.push_str(&format!("<w:color{color_attrs}/>"));
     }
 
     // Highlight color — use w:highlight for standard colors, w:shd for arbitrary
@@ -1425,6 +1570,26 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
         rpr.push_str(&format!(r#"<w:spacing w:val="{twips}"/>"#));
     }
 
+    // Caps
+    if attrs.get_bool(&AttributeKey::Caps) == Some(true) {
+        rpr.push_str("<w:caps/>");
+    }
+
+    // Small caps
+    if attrs.get_bool(&AttributeKey::SmallCaps) == Some(true) {
+        rpr.push_str("<w:smallCaps/>");
+    }
+
+    // Double strikethrough
+    if attrs.get_bool(&AttributeKey::DoubleStrikethrough) == Some(true) {
+        rpr.push_str("<w:dstrike/>");
+    }
+
+    // Hidden text
+    if attrs.get_bool(&AttributeKey::Hidden) == Some(true) {
+        rpr.push_str("<w:vanish/>");
+    }
+
     // Text shadow
     if attrs.get_bool(&AttributeKey::TextShadow) == Some(true) {
         rpr.push_str("<w:shadow/>");
@@ -1433,6 +1598,28 @@ pub fn write_run_properties_from_attrs(attrs: &s1_model::AttributeMap) -> String
     // Text outline
     if attrs.get_bool(&AttributeKey::TextOutline) == Some(true) {
         rpr.push_str("<w:outline/>");
+    }
+
+    // Complex-script font size (points -> half-points)
+    if let Some(pts) = attrs.get_f64(&AttributeKey::FontSizeCS) {
+        let half_pts = (pts * 2.0) as i64;
+        rpr.push_str(&format!(r#"<w:szCs w:val="{half_pts}"/>"#));
+    }
+
+    // Complex-script bold
+    if let Some(true) = attrs.get_bool(&AttributeKey::BoldCS) {
+        rpr.push_str("<w:bCs/>");
+    }
+
+    // Complex-script italic
+    if let Some(true) = attrs.get_bool(&AttributeKey::ItalicCS) {
+        rpr.push_str("<w:iCs/>");
+    }
+
+    // Baseline shift (points -> half-points)
+    if let Some(pts) = attrs.get_f64(&AttributeKey::BaselineShift) {
+        let half_pts = (pts * 2.0) as i64;
+        rpr.push_str(&format!(r#"<w:position w:val="{half_pts}"/>"#));
     }
 
     // Language
@@ -1484,7 +1671,13 @@ fn write_field_node(doc: &DocumentModel, field_id: NodeId, xml: &mut String) {
         _ => return,
     };
 
-    let instr = crate::header_footer_writer::field_type_to_instruction(field_type);
+    // Prefer the original FieldCode for round-trip fidelity; fall back to type-derived instruction
+    let instr = field
+        .attributes
+        .get_string(&AttributeKey::FieldCode)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::header_footer_writer::field_type_to_instruction(field_type));
+
     let placeholder = match field_type {
         FieldType::PageNumber => "1",
         FieldType::PageCount => "1",

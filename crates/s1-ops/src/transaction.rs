@@ -9,6 +9,7 @@ use crate::operation::{apply, Operation, OperationError};
 use s1_model::DocumentModel;
 
 /// A transaction groups multiple operations so they are applied/undone together.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transaction {
     /// Human-readable label for the transaction (e.g., "Bold text").

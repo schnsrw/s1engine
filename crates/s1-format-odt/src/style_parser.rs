@@ -8,7 +8,8 @@ use s1_model::{AttributeMap, DocumentModel, Style, StyleType};
 
 use crate::error::OdtError;
 use crate::property_parser::{
-    parse_paragraph_properties, parse_paragraph_properties_children, parse_text_properties,
+    parse_graphic_properties, parse_paragraph_properties, parse_paragraph_properties_children,
+    parse_text_properties,
 };
 use crate::xml_util::{get_attr, parse_length};
 
@@ -84,6 +85,9 @@ pub fn parse_styles_xml(
                     if let Some(style) = parse_style_element(&mut reader, &e)? {
                         doc.set_style(style);
                     }
+                }
+                b"default-style" => {
+                    parse_default_style_element(&mut reader, &e, doc)?;
                 }
                 b"page-layout" => {
                     let name = get_attr(&e, b"name").unwrap_or_default();
@@ -177,6 +181,10 @@ pub fn parse_automatic_styles(
                                     }
                                     skip_to_end(reader, b"table-column-properties")?;
                                 }
+                                b"graphic-properties" => {
+                                    attrs.merge(&parse_graphic_properties(pe));
+                                    skip_to_end(reader, b"graphic-properties")?;
+                                }
                                 _ => {}
                             }
                         }
@@ -199,6 +207,9 @@ pub fn parse_automatic_styles(
                                             s1_model::AttributeValue::Float(w),
                                         );
                                     }
+                                }
+                                b"graphic-properties" => {
+                                    attrs.merge(&parse_graphic_properties(pe));
                                 }
                                 _ => {}
                             }
@@ -245,6 +256,100 @@ pub fn parse_automatic_styles(
     }
 
     Ok(auto_styles)
+}
+
+/// Parse a `<style:default-style>` element to extract document defaults.
+///
+/// ODF uses `<style:default-style style:family="paragraph">` (and `"text"`) to define
+/// base formatting that applies when no explicit style is set. We map paragraph-family
+/// defaults to `DocumentDefaults`.
+fn parse_default_style_element(
+    reader: &mut Reader<&[u8]>,
+    e: &quick_xml::events::BytesStart<'_>,
+    doc: &mut DocumentModel,
+) -> Result<(), OdtError> {
+    let family = get_attr(e, b"family").unwrap_or_default();
+
+    let mut text_attrs = s1_model::AttributeMap::new();
+    let mut para_attrs = s1_model::AttributeMap::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref pe)) => {
+                let local = pe.local_name();
+                match local.as_ref() {
+                    b"text-properties" => {
+                        text_attrs.merge(&parse_text_properties(pe));
+                        skip_to_end(reader, b"text-properties")?;
+                    }
+                    b"paragraph-properties" => {
+                        let mut pa = parse_paragraph_properties(pe);
+                        parse_paragraph_properties_children(reader, &mut pa);
+                        para_attrs.merge(&pa);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref pe)) => {
+                let local = pe.local_name();
+                match local.as_ref() {
+                    b"text-properties" => text_attrs.merge(&parse_text_properties(pe)),
+                    b"paragraph-properties" => para_attrs.merge(&parse_paragraph_properties(pe)),
+                    _ => {}
+                }
+            }
+            Ok(Event::End(ref ee)) if ee.local_name().as_ref() == b"default-style" => break,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(OdtError::Xml(e.to_string())),
+            _ => {}
+        }
+    }
+
+    // Map paragraph-family defaults into DocumentDefaults
+    if family == "paragraph" || family == "text" {
+        let defaults = doc.doc_defaults_mut();
+
+        // Font family from text-properties
+        if let Some(ff) = text_attrs.get_string(&s1_model::AttributeKey::FontFamily) {
+            if defaults.font_family.is_none() {
+                defaults.font_family = Some(ff.to_string());
+            }
+        }
+
+        // Font size from text-properties
+        if let Some(fs) = text_attrs.get_f64(&s1_model::AttributeKey::FontSize) {
+            if defaults.font_size.is_none() {
+                defaults.font_size = Some(fs);
+            }
+        }
+
+        // Space after from paragraph-properties (fo:margin-bottom)
+        if let Some(sa) = para_attrs.get_f64(&s1_model::AttributeKey::SpacingAfter) {
+            if defaults.space_after.is_none() {
+                defaults.space_after = Some(sa);
+            }
+        }
+
+        // Space before from paragraph-properties (fo:margin-top)
+        if let Some(sb) = para_attrs.get_f64(&s1_model::AttributeKey::SpacingBefore) {
+            if defaults.space_before.is_none() {
+                defaults.space_before = Some(sb);
+            }
+        }
+
+        // Line spacing from paragraph-properties (fo:line-height)
+        if let Some(s1_model::AttributeValue::LineSpacing(ls)) =
+            para_attrs.get(&s1_model::AttributeKey::LineSpacing)
+        {
+            if defaults.line_spacing_multiple.is_none() {
+                if let s1_model::LineSpacing::Multiple(m) = ls {
+                    defaults.line_spacing_multiple = Some(*m);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse a `<style:style>` element (non-empty) into a `Style`.

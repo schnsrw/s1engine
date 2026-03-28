@@ -83,19 +83,11 @@ pub fn parse_section_properties(
                         }
                         skip_element(reader)?;
                     }
+                    b"pgBorders" => {
+                        props.page_borders =
+                            Some(crate::property_parser::parse_borders(reader, b"pgBorders")?);
+                    }
                     _ => {
-                        #[cfg(debug_assertions)]
-                        {
-                            let tag = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-                            if matches!(
-                                tag.as_str(),
-                                "pgBorders" | "lnNumType" | "docGrid" | "vAlign"
-                            ) {
-                                eprintln!(
-                                    "[s1-format-docx] Note: section property <w:{tag}> skipped (not yet modeled)"
-                                );
-                            }
-                        }
                         skip_element(reader)?;
                     }
                 }
@@ -165,6 +157,33 @@ pub fn parse_section_properties(
                     }
                     b"evenAndOddHeaders" => {
                         props.even_and_odd_headers = true;
+                    }
+                    b"docGrid" => {
+                        if let Some(grid_type) = get_attr(&e, b"type") {
+                            props.doc_grid_type = Some(grid_type);
+                        }
+                        if let Some(pitch) = get_attr(&e, b"linePitch") {
+                            if let Ok(v) = pitch.parse::<f64>() {
+                                // linePitch is in twips
+                                props.doc_grid_line_pitch = Some(v / 20.0);
+                            }
+                        }
+                    }
+                    b"lnNumType" => {
+                        // Line numbering — even with no attrs, its presence enables it
+                        props.line_numbering_start = Some(
+                            get_attr(&e, b"start")
+                                .and_then(|v| v.parse::<u32>().ok())
+                                .unwrap_or(1),
+                        );
+                        if let Some(cb) = get_attr(&e, b"countBy") {
+                            if let Ok(v) = cb.parse::<u32>() {
+                                props.line_numbering_count_by = Some(v);
+                            }
+                        }
+                        if let Some(restart) = get_attr(&e, b"restart") {
+                            props.line_numbering_restart = Some(restart);
+                        }
                     }
                     _ => {}
                 }

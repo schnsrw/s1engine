@@ -213,11 +213,14 @@ fn parse_num_format(val: &str) -> ListFormat {
     match val {
         "bullet" => ListFormat::Bullet,
         "decimal" => ListFormat::Decimal,
+        "decimalZero" => ListFormat::DecimalZero,
         "lowerLetter" => ListFormat::LowerAlpha,
         "upperLetter" => ListFormat::UpperAlpha,
         "lowerRoman" => ListFormat::LowerRoman,
         "upperRoman" => ListFormat::UpperRoman,
-        _ => ListFormat::Decimal, // lenient: unknown → decimal
+        "none" => ListFormat::None,
+        // Lenient: treat unknown formats as Decimal rather than failing
+        _ => ListFormat::Decimal,
     }
 }
 
@@ -226,10 +229,12 @@ pub fn list_format_to_ooxml(fmt: ListFormat) -> &'static str {
     match fmt {
         ListFormat::Bullet => "bullet",
         ListFormat::Decimal => "decimal",
+        ListFormat::DecimalZero => "decimalZero",
         ListFormat::LowerAlpha => "lowerLetter",
         ListFormat::UpperAlpha => "upperLetter",
         ListFormat::LowerRoman => "lowerRoman",
         ListFormat::UpperRoman => "upperRoman",
+        ListFormat::None => "none",
         _ => "decimal",
     }
 }

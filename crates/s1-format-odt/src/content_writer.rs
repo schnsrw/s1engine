@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use s1_model::{AttributeKey, AttributeMap, AttributeValue, DocumentModel, FieldType, NodeType};
+use s1_model::{
+    AttributeKey, AttributeMap, AttributeValue, DocumentModel, FieldType, ListFormat, NodeType,
+};
 
 use crate::property_writer::{
     write_paragraph_properties, write_table_cell_properties, write_text_properties,
@@ -31,9 +33,18 @@ pub fn write_content_xml(doc: &DocumentModel) -> (String, Vec<ImageEntry>) {
     let mut auto_styles: HashMap<AutoStyleKey, String> = HashMap::new();
     let mut auto_counter = 0u32;
     let mut images: Vec<ImageEntry> = Vec::new();
+    let mut needs_bullet_list_style = false;
+    let mut needs_number_list_style = false;
 
     // First pass: collect body XML and auto-styles
-    let body_xml = write_body(doc, &mut auto_styles, &mut auto_counter, &mut images);
+    let body_xml = write_body(
+        doc,
+        &mut auto_styles,
+        &mut auto_counter,
+        &mut images,
+        &mut needs_bullet_list_style,
+        &mut needs_number_list_style,
+    );
 
     // Build the full content.xml
     let mut xml = String::from(
@@ -41,8 +52,10 @@ pub fn write_content_xml(doc: &DocumentModel) -> (String, Vec<ImageEntry>) {
 <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" office:version="1.2">"#,
     );
 
-    // Write automatic styles
-    if !auto_styles.is_empty() {
+    // Write automatic styles (including list styles)
+    let has_auto_styles =
+        !auto_styles.is_empty() || needs_bullet_list_style || needs_number_list_style;
+    if has_auto_styles {
         xml.push_str("<office:automatic-styles>");
         // Sort for deterministic output
         let mut sorted: Vec<_> = auto_styles.iter().collect();
@@ -65,6 +78,30 @@ pub fn write_content_xml(doc: &DocumentModel) -> (String, Vec<ImageEntry>) {
             }
             xml.push_str("</style:style>");
         }
+        // Write bullet list style definition
+        if needs_bullet_list_style {
+            xml.push_str(r#"<text:list-style style:name="S1BulletList">"#);
+            for level in 1..=10 {
+                xml.push_str(&format!(
+                    r#"<text:list-level-style-bullet text:level="{}" text:bullet-char="&#x2022;"><style:list-level-properties text:list-level-position-and-space-mode="label-alignment"><style:list-level-label-alignment text:label-followed-by="listtab" fo:margin-left="{}cm" fo:text-indent="-0.635cm"/></style:list-level-properties></text:list-level-style-bullet>"#,
+                    level,
+                    level as f64 * 0.635
+                ));
+            }
+            xml.push_str("</text:list-style>");
+        }
+        // Write ordered list style definition
+        if needs_number_list_style {
+            xml.push_str(r#"<text:list-style style:name="S1NumberList">"#);
+            for level in 1..=10 {
+                xml.push_str(&format!(
+                    r#"<text:list-level-style-number text:level="{}" style:num-format="1" text:start-value="1"><style:list-level-properties text:list-level-position-and-space-mode="label-alignment"><style:list-level-label-alignment text:label-followed-by="listtab" fo:margin-left="{}cm" fo:text-indent="-0.635cm"/></style:list-level-properties></text:list-level-style-number>"#,
+                    level,
+                    level as f64 * 0.635
+                ));
+            }
+            xml.push_str("</text:list-style>");
+        }
         xml.push_str("</office:automatic-styles>");
     }
 
@@ -81,6 +118,8 @@ fn write_body(
     auto_styles: &mut HashMap<AutoStyleKey, String>,
     counter: &mut u32,
     images: &mut Vec<ImageEntry>,
+    needs_bullet_list_style: &mut bool,
+    needs_number_list_style: &mut bool,
 ) -> String {
     let mut xml = String::new();
 
@@ -144,12 +183,30 @@ fn write_body(
                         }
                     }
 
+                    // Determine if this list item is ordered
+                    let is_ordered = is_ordered_format(info.num_format);
+
                     // If we need to go deeper, open nested lists
                     while list_depth < target_depth {
                         // For deeper levels, we need the parent list-item to remain open.
                         // If we are at depth 0, open the top-level list. Otherwise open
                         // a nested <text:list> inside the current (still-open) list-item.
-                        xml.push_str("<text:list>");
+                        if list_depth == 0 {
+                            // Top-level list: set style name and track format
+                            if is_ordered {
+                                *needs_number_list_style = true;
+                                xml.push_str(
+                                    r#"<text:list text:style-name="S1NumberList">"#,
+                                );
+                            } else {
+                                *needs_bullet_list_style = true;
+                                xml.push_str(
+                                    r#"<text:list text:style-name="S1BulletList">"#,
+                                );
+                            }
+                        } else {
+                            xml.push_str("<text:list>");
+                        }
                         list_depth += 1;
                         list_item_open.push(false);
                     }
@@ -250,6 +307,18 @@ fn close_list_stack(depth: &mut usize, item_open: &mut Vec<bool>, xml: &mut Stri
         item_open.pop();
         *depth -= 1;
     }
+}
+
+/// Return `true` if the list format represents an ordered (numbered) list.
+fn is_ordered_format(fmt: ListFormat) -> bool {
+    matches!(
+        fmt,
+        ListFormat::Decimal
+            | ListFormat::LowerAlpha
+            | ListFormat::UpperAlpha
+            | ListFormat::LowerRoman
+            | ListFormat::UpperRoman
+    )
 }
 
 /// Write a paragraph as `<text:p>`.
@@ -725,12 +794,54 @@ fn write_run(
 /// Write a field node.
 fn write_field(node: &s1_model::Node, xml: &mut String) {
     if let Some(AttributeValue::FieldType(ft)) = node.attributes.get(&AttributeKey::FieldType) {
+        // Get optional display value from FieldCode
+        let display_val = node
+            .attributes
+            .get_string(&AttributeKey::FieldCode)
+            .unwrap_or_default();
+
         match ft {
             FieldType::PageNumber => {
-                xml.push_str(r#"<text:page-number text:select-page="current"/>"#)
+                xml.push_str(r#"<text:page-number text:select-page="current"/>"#);
             }
             FieldType::PageCount => {
-                xml.push_str(r#"<text:page-count text:select-page="current"/>"#)
+                xml.push_str(r#"<text:page-count text:select-page="current"/>"#);
+            }
+            FieldType::Date => {
+                if display_val.is_empty() {
+                    xml.push_str("<text:date/>");
+                } else {
+                    xml.push_str("<text:date>");
+                    xml.push_str(&escape_xml(display_val));
+                    xml.push_str("</text:date>");
+                }
+            }
+            FieldType::Time => {
+                if display_val.is_empty() {
+                    xml.push_str("<text:time/>");
+                } else {
+                    xml.push_str("<text:time>");
+                    xml.push_str(&escape_xml(display_val));
+                    xml.push_str("</text:time>");
+                }
+            }
+            FieldType::Author => {
+                if display_val.is_empty() {
+                    xml.push_str("<text:author-name/>");
+                } else {
+                    xml.push_str("<text:author-name>");
+                    xml.push_str(&escape_xml(display_val));
+                    xml.push_str("</text:author-name>");
+                }
+            }
+            FieldType::FileName => {
+                if display_val.is_empty() {
+                    xml.push_str("<text:file-name/>");
+                } else {
+                    xml.push_str("<text:file-name>");
+                    xml.push_str(&escape_xml(display_val));
+                    xml.push_str("</text:file-name>");
+                }
             }
             _ => {}
         }

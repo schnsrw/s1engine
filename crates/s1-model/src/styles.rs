@@ -9,6 +9,7 @@
 use crate::attributes::AttributeMap;
 
 /// A named style definition.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Style {
     /// Unique identifier (e.g., "Heading1", "Normal").
@@ -61,6 +62,7 @@ impl Style {
 }
 
 /// The type of a style.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum StyleType {

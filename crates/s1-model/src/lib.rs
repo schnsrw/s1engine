@@ -40,8 +40,9 @@ pub mod tree;
 // Re-export primary types at crate root for convenience.
 pub use attributes::{
     Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders, Color,
-    FieldType, LineSpacing, ListFormat, ListInfo, MediaId, PageOrientation, TabAlignment,
-    TabLeader, TabStop, TableWidth, UnderlineStyle, VerticalAlignment,
+    FieldType, LineSpacing, ListFormat, ListInfo, Margins, MediaId, PageOrientation, TabAlignment,
+    TabLeader, TabStop, TableLayoutMode, TableWidth, TextTransform, UnderlineStyle,
+    VerticalAlignment, WritingMode,
 };
 pub use id::{IdGenerator, NodeId};
 pub use media::{MediaItem, MediaStore};

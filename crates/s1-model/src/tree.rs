@@ -19,6 +19,7 @@ use crate::styles::{resolve_style_chain, Style};
 ///
 /// These values are used as the base defaults for style resolution when
 /// no explicit formatting is specified on a node or in its style chain.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default)]
 pub struct DocumentDefaults {
     /// Default font family (from `rPrDefault`).
@@ -35,6 +36,7 @@ pub struct DocumentDefaults {
 }
 
 /// Error type for document model operations.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ModelError {
@@ -99,6 +101,7 @@ impl std::error::Error for ModelError {}
 ///
 /// Stores all nodes in a flat map with tree relationships via [`NodeId`] references.
 /// Provides tree query and mutation methods.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct DocumentModel {
     nodes: HashMap<NodeId, Node>,

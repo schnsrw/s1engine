@@ -7,6 +7,7 @@
 use crate::id::NodeId;
 
 /// Type of section break.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SectionBreakType {
@@ -21,6 +22,7 @@ pub enum SectionBreakType {
 }
 
 /// Type of header/footer reference.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum HeaderFooterType {
@@ -33,6 +35,7 @@ pub enum HeaderFooterType {
 }
 
 /// A reference to a header or footer stored as a node in the document model.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeaderFooterRef {
     /// The type (default, first, even).
@@ -44,6 +47,7 @@ pub struct HeaderFooterRef {
 /// Section properties — maps to `w:sectPr` in OOXML.
 ///
 /// Each section defines page layout and references to headers/footers.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SectionProperties {
     /// Page width in points (default: 612.0 = 8.5 inches).
@@ -84,6 +88,18 @@ pub struct SectionProperties {
     /// and odd pages use the `Default` type. This maps to the `w:evenAndOddHeaders`
     /// element in OOXML settings or section properties.
     pub even_and_odd_headers: bool,
+    /// Page borders (`w:pgBorders`).
+    pub page_borders: Option<crate::attributes::Borders>,
+    /// Document grid type (`w:docGrid/@type`): "default", "lines", "linesAndChars", "snapToChars".
+    pub doc_grid_type: Option<String>,
+    /// Document grid line pitch in points (`w:docGrid/@linePitch`).
+    pub doc_grid_line_pitch: Option<f64>,
+    /// Line numbering start value (`w:lnNumType/@start`). None = no line numbering.
+    pub line_numbering_start: Option<u32>,
+    /// Line numbering count-by increment (`w:lnNumType/@countBy`).
+    pub line_numbering_count_by: Option<u32>,
+    /// Line numbering restart mode: "newPage", "newSection", "continuous".
+    pub line_numbering_restart: Option<String>,
 }
 
 impl Default for SectionProperties {
@@ -107,6 +123,12 @@ impl Default for SectionProperties {
             footers: Vec::new(),
             title_page: false,
             even_and_odd_headers: false,
+            page_borders: None,
+            doc_grid_type: None,
+            doc_grid_line_pitch: None,
+            line_numbering_start: None,
+            line_numbering_count_by: None,
+            line_numbering_restart: None,
         }
     }
 }

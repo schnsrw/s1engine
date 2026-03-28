@@ -6,6 +6,7 @@
 use s1_model::{DocumentModel, NodeId, NodeType};
 
 /// A position in the document — a specific point within a text node.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {
     /// The text node containing the cursor.
@@ -49,6 +50,7 @@ impl Position {
 /// A selection range in the document.
 ///
 /// When `anchor == focus`, this is a collapsed selection (a simple cursor).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Selection {
     /// The anchor (start) of the selection.

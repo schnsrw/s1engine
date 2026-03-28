@@ -10,6 +10,7 @@ use std::fmt;
 ///
 /// Composed of a replica (site) ID and a monotonically increasing counter.
 /// This design is compatible with Yjs, Automerge, and Diamond Types CRDT schemes.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId {
     /// Replica/site identifier. `0` for single-user mode.
@@ -44,6 +45,7 @@ impl fmt::Display for NodeId {
 }
 
 /// Generates unique [`NodeId`]s for a given replica.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct IdGenerator {
     replica: u64,

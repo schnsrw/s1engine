@@ -150,6 +150,12 @@ pub fn field_type_to_instruction(ft: FieldType) -> String {
         FieldType::FileName => "FILENAME".to_string(),
         FieldType::Author => "AUTHOR".to_string(),
         FieldType::TableOfContents => "TOC".to_string(),
+        FieldType::Hyperlink => "HYPERLINK".to_string(),
+        FieldType::CrossReference => "REF".to_string(),
+        FieldType::Sequence => "SEQ".to_string(),
+        FieldType::MergeField => "MERGEFIELD".to_string(),
+        FieldType::Conditional => "IF".to_string(),
+        FieldType::StyleRef => "STYLEREF".to_string(),
         FieldType::Custom => "CUSTOM".to_string(),
         _ => "CUSTOM".to_string(),
     }

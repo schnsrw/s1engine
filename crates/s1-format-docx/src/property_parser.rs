@@ -4,7 +4,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use s1_model::{
     Alignment, AttributeKey, AttributeMap, AttributeValue, BorderSide, BorderStyle, Borders, Color,
-    LineSpacing, ListFormat, ListInfo, TabAlignment, TabLeader, TabStop, TableWidth,
+    LineSpacing, ListFormat, ListInfo, Margins, TabAlignment, TabLeader, TabStop, TableWidth,
     UnderlineStyle, VerticalAlignment,
 };
 
@@ -28,9 +28,18 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                         // Font family: prefer w:ascii, then w:hAnsi
                         if let Some(font) = get_attr(&e, b"ascii")
                             .or_else(|| get_attr(&e, b"hAnsi"))
-                            .or_else(|| get_attr(&e, b"cs"))
                         {
                             attrs.set(AttributeKey::FontFamily, AttributeValue::String(font));
+                        }
+                        if let Some(ea) = get_attr(&e, b"eastAsia") {
+                            attrs.set(AttributeKey::FontFamilyEastAsia, AttributeValue::String(ea));
+                        }
+                        if let Some(cs) = get_attr(&e, b"cs") {
+                            attrs.set(AttributeKey::FontFamilyCS, AttributeValue::String(cs.clone()));
+                            // Fallback: if no ascii/hAnsi, use cs
+                            if !attrs.contains(&AttributeKey::FontFamily) {
+                                attrs.set(AttributeKey::FontFamily, AttributeValue::String(cs));
+                            }
                         }
                         skip_to_end(reader)?;
                     }
@@ -118,6 +127,24 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                                 }
                             }
                         }
+                        // Preserve theme color reference for round-trip
+                        if let Some(tc) = get_attr(&e, b"themeColor") {
+                            attrs.set(
+                                AttributeKey::ThemeColor,
+                                AttributeValue::String(tc),
+                            );
+                        }
+                        if let Some(tint) = get_attr(&e, b"themeTint") {
+                            attrs.set(
+                                AttributeKey::ThemeTintShade,
+                                AttributeValue::String(format!("tint:{tint}")),
+                            );
+                        } else if let Some(shade) = get_attr(&e, b"themeShade") {
+                            attrs.set(
+                                AttributeKey::ThemeTintShade,
+                                AttributeValue::String(format!("shade:{shade}")),
+                            );
+                        }
                     }
                     b"highlight" => {
                         if let Some(color_name) = get_val(&e) {
@@ -145,9 +172,17 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                     b"rFonts" => {
                         if let Some(font) = get_attr(&e, b"ascii")
                             .or_else(|| get_attr(&e, b"hAnsi"))
-                            .or_else(|| get_attr(&e, b"cs"))
                         {
                             attrs.set(AttributeKey::FontFamily, AttributeValue::String(font));
+                        }
+                        if let Some(ea) = get_attr(&e, b"eastAsia") {
+                            attrs.set(AttributeKey::FontFamilyEastAsia, AttributeValue::String(ea));
+                        }
+                        if let Some(cs) = get_attr(&e, b"cs") {
+                            attrs.set(AttributeKey::FontFamilyCS, AttributeValue::String(cs.clone()));
+                            if !attrs.contains(&AttributeKey::FontFamily) {
+                                attrs.set(AttributeKey::FontFamily, AttributeValue::String(cs));
+                            }
                         }
                     }
                     b"vertAlign" => match get_val(&e).as_deref() {
@@ -187,6 +222,44 @@ fn parse_rpr_inner(reader: &mut Reader<&[u8]>, attrs: &mut AttributeMap) -> Resu
                             AttributeKey::TextOutline,
                             AttributeValue::Bool(is_toggle_on(&e)),
                         );
+                    }
+                    b"caps" => {
+                        attrs.set(AttributeKey::Caps, AttributeValue::Bool(is_toggle_on(&e)));
+                    }
+                    b"smallCaps" => {
+                        attrs.set(AttributeKey::SmallCaps, AttributeValue::Bool(is_toggle_on(&e)));
+                    }
+                    b"vanish" => {
+                        attrs.set(AttributeKey::Hidden, AttributeValue::Bool(is_toggle_on(&e)));
+                    }
+                    b"dstrike" => {
+                        attrs.set(
+                            AttributeKey::DoubleStrikethrough,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"szCs" => {
+                        if let Some(val) = get_val(&e) {
+                            if let Some(pts) = half_points_to_points(&val) {
+                                attrs.set(AttributeKey::FontSizeCS, AttributeValue::Float(pts));
+                            }
+                        }
+                    }
+                    b"bCs" => {
+                        attrs.set(AttributeKey::BoldCS, AttributeValue::Bool(is_toggle_on(&e)));
+                    }
+                    b"iCs" => {
+                        attrs.set(AttributeKey::ItalicCS, AttributeValue::Bool(is_toggle_on(&e)));
+                    }
+                    b"position" => {
+                        if let Some(val) = get_val(&e) {
+                            if let Ok(half_pts) = val.parse::<f64>() {
+                                attrs.set(
+                                    AttributeKey::BaselineShift,
+                                    AttributeValue::Float(half_pts / 2.0),
+                                );
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -345,6 +418,15 @@ pub fn parse_paragraph_properties(reader: &mut Reader<&[u8]>) -> Result<Attribut
                                     .set(AttributeKey::IndentFirstLine, AttributeValue::Float(pts));
                             }
                         }
+                        // Hanging indent: stored as negative first-line indent
+                        if let Some(hanging) = get_attr(&e, b"hanging") {
+                            if let Some(pts) = twips_to_points(&hanging) {
+                                attrs.set(
+                                    AttributeKey::IndentFirstLine,
+                                    AttributeValue::Float(-pts),
+                                );
+                            }
+                        }
                     }
                     b"keepNext" => {
                         attrs.set(
@@ -399,6 +481,37 @@ pub fn parse_paragraph_properties(reader: &mut Reader<&[u8]>) -> Result<Attribut
                             }
                         }
                     }
+                    b"widowControl" => {
+                        // widowControl with no val or val="true" means enabled;
+                        // explicit val="false"/val="0" means disabled
+                        attrs.set(
+                            AttributeKey::WidowControl,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    b"textDirection" => {
+                        if let Some(val) = get_val(&e) {
+                            let wm = match val.as_str() {
+                                "lrTb" | "lrTbV" => s1_model::WritingMode::LrTb,
+                                "rlTb" => s1_model::WritingMode::RlTb,
+                                "tbRl" | "tbRlV" => s1_model::WritingMode::TbRl,
+                                "tbLr" | "tbLrV" => s1_model::WritingMode::TbLr,
+                                "btLr" => s1_model::WritingMode::BtLr,
+                                _ => s1_model::WritingMode::LrTb,
+                            };
+                            attrs.set(
+                                AttributeKey::ParagraphWritingMode,
+                                AttributeValue::WritingMode(wm),
+                            );
+                        }
+                    }
+                    b"outlineLvl" => {
+                        if let Some(val) = get_val(&e) {
+                            if let Ok(level) = val.parse::<i64>() {
+                                attrs.set(AttributeKey::OutlineLevel, AttributeValue::Int(level));
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -424,6 +537,13 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                     b"tblBorders" => {
                         let borders = parse_borders(reader, b"tblBorders")?;
                         attrs.set(AttributeKey::TableBorders, AttributeValue::Borders(borders));
+                    }
+                    b"tblCellMar" => {
+                        let margins = parse_cell_margins(reader, b"tblCellMar")?;
+                        attrs.set(
+                            AttributeKey::TableDefaultCellMargins,
+                            AttributeValue::Margins(margins),
+                        );
                     }
                     b"tblPrChange" => {
                         // Track changes — table property change revision
@@ -480,6 +600,23 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                             attrs.set(AttributeKey::TableAlignment, AttributeValue::Alignment(a));
                         }
                     }
+                    b"tblLayout" => {
+                        let mode = match get_attr(&e, b"type").as_deref() {
+                            Some("fixed") => s1_model::TableLayoutMode::Fixed,
+                            _ => s1_model::TableLayoutMode::AutoFit,
+                        };
+                        attrs.set(
+                            AttributeKey::TableLayout,
+                            AttributeValue::TableLayoutMode(mode),
+                        );
+                    }
+                    b"tblInd" => {
+                        if let Some(w) = get_attr(&e, b"w") {
+                            if let Some(pts) = twips_to_points(&w) {
+                                attrs.set(AttributeKey::TableIndent, AttributeValue::Float(pts));
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -505,6 +642,13 @@ pub fn parse_cell_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap,
                     b"tcBorders" => {
                         let borders = parse_borders(reader, b"tcBorders")?;
                         attrs.set(AttributeKey::CellBorders, AttributeValue::Borders(borders));
+                    }
+                    b"tcMar" => {
+                        let margins = parse_cell_margins(reader, b"tcMar")?;
+                        attrs.set(
+                            AttributeKey::CellPadding,
+                            AttributeValue::Margins(margins),
+                        );
                     }
                     b"vMerge" => {
                         // vMerge as non-self-closing element (with val attr)
@@ -604,6 +748,20 @@ pub fn parse_cell_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap,
                             }
                         }
                     }
+                    b"textDirection" => {
+                        if let Some(val) = get_val(&e) {
+                            attrs.set(
+                                AttributeKey::CellTextDirection,
+                                AttributeValue::String(val),
+                            );
+                        }
+                    }
+                    b"noWrap" => {
+                        attrs.set(
+                            AttributeKey::CellNoWrap,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -658,9 +816,31 @@ pub fn parse_row_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap, 
                 }
             }
             Ok(Event::Empty(e)) => {
-                if e.local_name().as_ref() == b"tblHeader" {
-                    // Row is a table header row
-                    attrs.set(AttributeKey::TableHeaderRow, AttributeValue::Bool(true));
+                let name = e.local_name().as_ref().to_vec();
+                match name.as_slice() {
+                    b"tblHeader" => {
+                        attrs.set(AttributeKey::TableHeaderRow, AttributeValue::Bool(true));
+                    }
+                    b"trHeight" => {
+                        if let Some(val) = get_val(&e) {
+                            if let Some(pts) = twips_to_points(&val) {
+                                attrs.set(AttributeKey::RowHeight, AttributeValue::Float(pts));
+                            }
+                        }
+                        if let Some(rule) = get_attr(&e, b"hRule") {
+                            attrs.set(
+                                AttributeKey::RowHeightRule,
+                                AttributeValue::String(rule),
+                            );
+                        }
+                    }
+                    b"cantSplit" => {
+                        attrs.set(
+                            AttributeKey::RowNoSplit,
+                            AttributeValue::Bool(is_toggle_on(&e)),
+                        );
+                    }
+                    _ => {}
                 }
             }
             Ok(Event::End(e)) if e.local_name().as_ref() == b"trPr" => break,
@@ -727,6 +907,15 @@ pub fn parse_indent_attrs(e: &quick_xml::events::BytesStart<'_>, attrs: &mut Att
     if let Some(first_line) = get_attr(e, b"firstLine") {
         if let Some(pts) = twips_to_points(&first_line) {
             attrs.set(AttributeKey::IndentFirstLine, AttributeValue::Float(pts));
+        }
+    }
+    // Hanging indent: stored as negative first-line indent
+    if let Some(hanging) = get_attr(e, b"hanging") {
+        if let Some(pts) = twips_to_points(&hanging) {
+            attrs.set(
+                AttributeKey::IndentFirstLine,
+                AttributeValue::Float(-pts),
+            );
         }
     }
 }
@@ -841,6 +1030,50 @@ fn parse_width(e: &quick_xml::events::BytesStart<'_>) -> Option<TableWidth> {
         }
         _ => Some(TableWidth::Auto),
     }
+}
+
+/// Parse a cell margins element (`<w:tblCellMar>` or `<w:tcMar>`).
+/// Each child (top/bottom/start/left/end/right) has `w:w` in twips and `w:type`.
+fn parse_cell_margins(reader: &mut Reader<&[u8]>, end_tag: &[u8]) -> Result<Margins, DocxError> {
+    let mut margins = Margins::ZERO;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Empty(e)) => {
+                let name = e.local_name().as_ref().to_vec();
+                let pts = get_attr(&e, b"w")
+                    .and_then(|s| twips_to_points(&s))
+                    .unwrap_or(0.0);
+                match name.as_slice() {
+                    b"top" => margins.top = pts,
+                    b"bottom" => margins.bottom = pts,
+                    b"left" | b"start" => margins.left = pts,
+                    b"right" | b"end" => margins.right = pts,
+                    _ => {}
+                }
+            }
+            Ok(Event::Start(e)) => {
+                let name = e.local_name().as_ref().to_vec();
+                let pts = get_attr(&e, b"w")
+                    .and_then(|s| twips_to_points(&s))
+                    .unwrap_or(0.0);
+                match name.as_slice() {
+                    b"top" => margins.top = pts,
+                    b"bottom" => margins.bottom = pts,
+                    b"left" | b"start" => margins.left = pts,
+                    b"right" | b"end" => margins.right = pts,
+                    _ => {}
+                }
+                skip_to_end(reader)?;
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == end_tag => break,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+
+    Ok(margins)
 }
 
 /// Parse a borders element (`<w:tblBorders>` or `<w:tcBorders>`).

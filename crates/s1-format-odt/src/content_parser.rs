@@ -69,7 +69,8 @@ pub fn parse_content_body(
                         body_child_index += 1;
                     }
                     b"list" => {
-                        let count = parse_list(reader, doc, ctx, body_id, body_child_index, 0)?;
+                        let count =
+                            parse_list(reader, doc, e, ctx, body_id, body_child_index, 0)?;
                         body_child_index += count;
                     }
                     b"table" => {
@@ -250,6 +251,41 @@ fn parse_paragraph_into(
                             }
                         }
                     }
+                    b"date" | b"time" | b"author-name" | b"initial-creator" | b"file-name"
+                    | b"chapter" => {
+                        let ft = match local.as_ref() {
+                            b"date" => FieldType::Date,
+                            b"time" => FieldType::Time,
+                            b"author-name" | b"initial-creator" => FieldType::Author,
+                            b"file-name" => FieldType::FileName,
+                            _ => FieldType::Custom,
+                        };
+                        // Read display text (consume element content)
+                        let display_text = reader
+                            .read_text(e.to_end().name())
+                            .map(|t| t.to_string())
+                            .unwrap_or_default();
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node
+                            .attributes
+                            .set(AttributeKey::FieldType, AttributeValue::FieldType(ft));
+                        if local.as_ref() == b"chapter" {
+                            field_node.attributes.set(
+                                AttributeKey::FieldCode,
+                                AttributeValue::String("CHAPTER".to_string()),
+                            );
+                        }
+                        if !display_text.is_empty() {
+                            field_node.attributes.set(
+                                AttributeKey::FieldCode,
+                                AttributeValue::String(display_text),
+                            );
+                        }
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        child_index += 1;
+                    }
                     _ => {}
                 }
             }
@@ -301,6 +337,65 @@ fn parse_paragraph_into(
                         field_node.attributes.set(
                             AttributeKey::FieldType,
                             AttributeValue::FieldType(FieldType::PageCount),
+                        );
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        child_index += 1;
+                    }
+                    b"date" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Date),
+                        );
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        child_index += 1;
+                    }
+                    b"time" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Time),
+                        );
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        child_index += 1;
+                    }
+                    b"author-name" | b"initial-creator" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Author),
+                        );
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        child_index += 1;
+                    }
+                    b"file-name" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::FileName),
+                        );
+                        doc.insert_node(para_id, child_index, field_node)
+                            .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
+                        child_index += 1;
+                    }
+                    b"chapter" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Custom),
+                        );
+                        field_node.attributes.set(
+                            AttributeKey::FieldCode,
+                            AttributeValue::String("CHAPTER".to_string()),
                         );
                         doc.insert_node(para_id, child_index, field_node)
                             .map_err(|e| OdtError::InvalidStructure(format!("{e:?}")))?;
@@ -434,26 +529,67 @@ fn parse_span_into(
             }
             Ok(Event::Start(ref e)) => {
                 let local = e.local_name();
-                if local.as_ref() == b"database-display" {
-                    // Q13: Preserve displayed text from database field as a run
-                    if let Ok(text) = reader.read_text(e.to_end().name()) {
-                        let displayed = text.to_string();
-                        if !displayed.is_empty() {
-                            let run_id = doc.next_id();
-                            let mut run_node = Node::new(run_id, NodeType::Run);
-                            run_node.attributes.merge(&run_attrs);
-                            run_node.attributes.set(
-                                AttributeKey::FieldType,
-                                AttributeValue::FieldType(FieldType::Custom),
-                            );
-                            doc.insert_node(parent_id, start_index + count, run_node)
-                                .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
-                            let text_id = doc.next_id();
-                            doc.insert_node(run_id, 0, Node::text(text_id, displayed))
-                                .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
-                            count += 1;
+                match local.as_ref() {
+                    b"database-display" => {
+                        // Q13: Preserve displayed text from database field as a run
+                        if let Ok(text) = reader.read_text(e.to_end().name()) {
+                            let displayed = text.to_string();
+                            if !displayed.is_empty() {
+                                let run_id = doc.next_id();
+                                let mut run_node = Node::new(run_id, NodeType::Run);
+                                run_node.attributes.merge(&run_attrs);
+                                run_node.attributes.set(
+                                    AttributeKey::FieldType,
+                                    AttributeValue::FieldType(FieldType::Custom),
+                                );
+                                doc.insert_node(parent_id, start_index + count, run_node)
+                                    .map_err(|er| {
+                                        OdtError::InvalidStructure(format!("{er:?}"))
+                                    })?;
+                                let text_id = doc.next_id();
+                                doc.insert_node(run_id, 0, Node::text(text_id, displayed))
+                                    .map_err(|er| {
+                                        OdtError::InvalidStructure(format!("{er:?}"))
+                                    })?;
+                                count += 1;
+                            }
                         }
                     }
+                    b"date" | b"time" | b"author-name" | b"initial-creator" | b"file-name"
+                    | b"chapter" => {
+                        let ft = match local.as_ref() {
+                            b"date" => FieldType::Date,
+                            b"time" => FieldType::Time,
+                            b"author-name" | b"initial-creator" => FieldType::Author,
+                            b"file-name" => FieldType::FileName,
+                            _ => FieldType::Custom,
+                        };
+                        let display_text = reader
+                            .read_text(e.to_end().name())
+                            .map(|t| t.to_string())
+                            .unwrap_or_default();
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node
+                            .attributes
+                            .set(AttributeKey::FieldType, AttributeValue::FieldType(ft));
+                        if local.as_ref() == b"chapter" {
+                            field_node.attributes.set(
+                                AttributeKey::FieldCode,
+                                AttributeValue::String("CHAPTER".to_string()),
+                            );
+                        }
+                        if !display_text.is_empty() {
+                            field_node.attributes.set(
+                                AttributeKey::FieldCode,
+                                AttributeValue::String(display_text),
+                            );
+                        }
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    _ => {}
                 }
             }
             Ok(Event::Empty(ref e)) => {
@@ -510,6 +646,65 @@ fn parse_span_into(
                         field_node.attributes.set(
                             AttributeKey::FieldType,
                             AttributeValue::FieldType(FieldType::PageCount),
+                        );
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    b"date" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Date),
+                        );
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    b"time" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Time),
+                        );
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    b"author-name" | b"initial-creator" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Author),
+                        );
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    b"file-name" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::FileName),
+                        );
+                        doc.insert_node(parent_id, start_index + count, field_node)
+                            .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
+                        count += 1;
+                    }
+                    b"chapter" => {
+                        let field_id = doc.next_id();
+                        let mut field_node = Node::new(field_id, NodeType::Field);
+                        field_node.attributes.set(
+                            AttributeKey::FieldType,
+                            AttributeValue::FieldType(FieldType::Custom),
+                        );
+                        field_node.attributes.set(
+                            AttributeKey::FieldCode,
+                            AttributeValue::String("CHAPTER".to_string()),
                         );
                         doc.insert_node(parent_id, start_index + count, field_node)
                             .map_err(|er| OdtError::InvalidStructure(format!("{er:?}")))?;
@@ -782,6 +977,12 @@ fn parse_frame_into(
     let width = get_attr(start, b"width").and_then(|v| crate::xml_util::parse_length(&v));
     let height = get_attr(start, b"height").and_then(|v| crate::xml_util::parse_length(&v));
 
+    // Parse text:anchor-type for image position
+    let anchor_type = get_attr(start, b"anchor-type");
+
+    // Resolve draw:style-name for graphic properties (e.g., wrap type)
+    let frame_style_name = get_attr(start, b"style-name");
+
     let mut href: Option<String> = None;
 
     loop {
@@ -842,6 +1043,30 @@ fn parse_frame_into(
         img_node
             .attributes
             .set(AttributeKey::ImageAltText, AttributeValue::String(alt_text));
+    }
+
+    // Map text:anchor-type to ImagePositionType
+    if let Some(ref at) = anchor_type {
+        let pos_type = match at.as_str() {
+            "as-char" => "inline",
+            "paragraph" | "page" | "char" => "anchor",
+            _ => "inline",
+        };
+        img_node.attributes.set(
+            AttributeKey::ImagePositionType,
+            AttributeValue::String(pos_type.to_string()),
+        );
+    }
+
+    // Apply wrap type from graphic auto-style (style:graphic-properties → style:wrap)
+    if let Some(ref sn) = frame_style_name {
+        if let Some(auto_attrs) = ctx.auto_styles.get(sn) {
+            if let Some(wrap_val) = auto_attrs.get(&AttributeKey::ImageWrapType) {
+                img_node
+                    .attributes
+                    .set(AttributeKey::ImageWrapType, wrap_val.clone());
+            }
+        }
     }
 
     doc.insert_node(parent_id, index, img_node)
@@ -1015,18 +1240,47 @@ fn parse_note_into(
 fn parse_list(
     reader: &mut Reader<&[u8]>,
     doc: &mut DocumentModel,
+    list_start: &quick_xml::events::BytesStart<'_>,
     ctx: &ParseContext,
     parent_id: s1_model::NodeId,
     start_index: usize,
     level: u8,
 ) -> Result<usize, OdtError> {
+    // Determine list format from the <text:list> element.
+    // Check text:continue-numbering="true" as a hint for ordered lists.
+    let continue_num = get_attr(list_start, b"continue-numbering")
+        .is_some_and(|v| v == "true");
+    // Default format: Bullet (unordered). If continue-numbering is true,
+    // this is likely an ordered list.
+    let list_format = if continue_num {
+        ListFormat::Decimal
+    } else {
+        ListFormat::Bullet
+    };
+
     let mut count = 0;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"list-item" => {
-                let item_count =
-                    parse_list_item(reader, doc, ctx, parent_id, start_index + count, level)?;
+                // Check text:start-value on the list-item as a hint for ordered lists.
+                let start_value = get_attr(e, b"start-value")
+                    .and_then(|v| v.parse::<u32>().ok());
+                let item_format = if start_value.is_some() {
+                    ListFormat::Decimal
+                } else {
+                    list_format
+                };
+                let item_count = parse_list_item(
+                    reader,
+                    doc,
+                    ctx,
+                    parent_id,
+                    start_index + count,
+                    level,
+                    item_format,
+                    start_value,
+                )?;
                 count += item_count;
             }
             Ok(Event::End(ref e)) if e.local_name().as_ref() == b"list" => break,
@@ -1050,6 +1304,7 @@ fn parse_list(
 /// paragraphs at the same level. Nested `<text:list>` elements are handled by
 /// incrementing the level counter. This is by design and would require a
 /// fundamental model change to support true multi-paragraph list items.
+#[allow(clippy::too_many_arguments)]
 fn parse_list_item(
     reader: &mut Reader<&[u8]>,
     doc: &mut DocumentModel,
@@ -1057,6 +1312,8 @@ fn parse_list_item(
     parent_id: s1_model::NodeId,
     start_index: usize,
     level: u8,
+    list_format: ListFormat,
+    start_value: Option<u32>,
 ) -> Result<usize, OdtError> {
     let mut count = 0;
 
@@ -1088,9 +1345,9 @@ fn parse_list_item(
                                 AttributeKey::ListInfo,
                                 AttributeValue::ListInfo(ListInfo {
                                     level,
-                                    num_format: ListFormat::Bullet,
+                                    num_format: list_format,
                                     num_id: 0,
-                                    start: None,
+                                    start: start_value,
                                 }),
                             );
                         }
@@ -1116,6 +1373,7 @@ fn parse_list_item(
                         let nested = parse_list(
                             reader,
                             doc,
+                            e,
                             ctx,
                             parent_id,
                             start_index + count,

@@ -49,6 +49,7 @@ s1-format-xlsx = { version = "1.0.1", path = "crates/s1-format-xlsx" }
 s1engine = { version = "1.0.1", path = "crates/s1engine" }
 
 # External dependencies
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 quick-xml = "0.37"
 zip = { version = "2", default-features = false, features = ["deflate"] }

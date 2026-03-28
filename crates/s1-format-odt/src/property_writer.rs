@@ -2,7 +2,7 @@
 
 use s1_model::{
     Alignment, AttributeKey, AttributeMap, AttributeValue, BorderStyle, LineSpacing, TabAlignment,
-    TabLeader, UnderlineStyle, VerticalAlignment,
+    TabLeader, TextTransform, UnderlineStyle, VerticalAlignment,
 };
 
 use crate::xml_util::{escape_xml, points_to_cm};
@@ -59,6 +59,30 @@ pub fn write_text_properties(attrs: &AttributeMap) -> String {
     // Character spacing
     if let Some(pts) = attrs.get_f64(&AttributeKey::FontSpacing) {
         props.push(format!(r#"fo:letter-spacing="{}""#, points_to_cm(pts)));
+    }
+    // Text transform
+    if let Some(AttributeValue::TextTransform(tt)) = attrs.get(&AttributeKey::TextTransformStyle) {
+        let val = match tt {
+            TextTransform::Uppercase => "uppercase",
+            TextTransform::Lowercase => "lowercase",
+            TextTransform::Capitalize => "capitalize",
+            TextTransform::None => "none",
+            _ => "none",
+        };
+        if *tt != TextTransform::None {
+            props.push(format!(r#"fo:text-transform="{val}""#));
+        }
+    }
+    // Complex-script font family
+    if let Some(ff_cs) = attrs.get_string(&AttributeKey::FontFamilyCS) {
+        props.push(format!(
+            r#"style:font-name-complex="{}""#,
+            escape_xml(ff_cs)
+        ));
+    }
+    // Complex-script font size
+    if let Some(sz_cs) = attrs.get_f64(&AttributeKey::FontSizeCS) {
+        props.push(format!(r#"fo:font-size-complex="{sz_cs}pt""#));
     }
 
     if props.is_empty() {
@@ -134,6 +158,16 @@ pub fn write_paragraph_properties(attrs: &AttributeMap) -> String {
     }
     if let Some(true) = attrs.get_bool(&AttributeKey::KeepLinesTogether) {
         props.push(r#"fo:keep-together="always""#.to_string());
+    }
+    // Widow/orphan control
+    if let Some(wc) = attrs.get_bool(&AttributeKey::WidowControl) {
+        if wc {
+            props.push(r#"fo:widows="2""#.to_string());
+            props.push(r#"fo:orphans="2""#.to_string());
+        } else {
+            props.push(r#"fo:widows="0""#.to_string());
+            props.push(r#"fo:orphans="0""#.to_string());
+        }
     }
     if let Some(color) = attrs.get_color(&AttributeKey::Background) {
         props.push(format!("fo:background-color=\"#{}\"", color.to_hex()));
@@ -239,6 +273,25 @@ pub fn write_table_cell_properties(attrs: &AttributeMap) -> String {
     }
     if let Some(color) = attrs.get_color(&AttributeKey::CellBackground) {
         props.push(format!("fo:background-color=\"#{}\"", color.to_hex()));
+    }
+
+    // Cell borders
+    if let Some(AttributeValue::Borders(borders)) = attrs.get(&AttributeKey::CellBorders) {
+        if let Some(ref side) = borders.top {
+            props.push(format!(r#"fo:border-top="{}""#, border_side_to_odf(side)));
+        }
+        if let Some(ref side) = borders.bottom {
+            props.push(format!(
+                r#"fo:border-bottom="{}""#,
+                border_side_to_odf(side)
+            ));
+        }
+        if let Some(ref side) = borders.left {
+            props.push(format!(r#"fo:border-left="{}""#, border_side_to_odf(side)));
+        }
+        if let Some(ref side) = borders.right {
+            props.push(format!(r#"fo:border-right="{}""#, border_side_to_odf(side)));
+        }
     }
 
     if props.is_empty() {

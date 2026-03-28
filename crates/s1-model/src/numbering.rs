@@ -8,6 +8,7 @@
 use crate::attributes::{Alignment, ListFormat};
 
 /// A single level definition within an abstract numbering.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NumberingLevel {
     /// Level index (0-8).
@@ -29,6 +30,7 @@ pub struct NumberingLevel {
 }
 
 /// An abstract numbering definition (the template for a list style).
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct AbstractNumbering {
     /// Unique ID for this abstract numbering.
@@ -41,6 +43,7 @@ pub struct AbstractNumbering {
 
 /// A numbering instance that references an abstract numbering.
 /// Paragraphs point to this via `numId` in `ListInfo`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NumberingInstance {
     /// The numId referenced by paragraphs.
@@ -52,6 +55,7 @@ pub struct NumberingInstance {
 }
 
 /// An override for a specific level in a numbering instance.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LevelOverride {
     /// Level index being overridden.
@@ -63,6 +67,7 @@ pub struct LevelOverride {
 }
 
 /// Container for all numbering definitions in a document.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NumberingDefinitions {
     pub abstract_nums: Vec<AbstractNumbering>,

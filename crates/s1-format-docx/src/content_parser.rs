@@ -736,6 +736,14 @@ fn parse_ppr_child(
                 AttributeValue::Borders(borders),
             );
         }
+        b"pPrChange" => {
+            // Track changes — skip for now, captured in property_parser path
+            skip_element(reader)?;
+        }
+        b"rPr" => {
+            // Default run properties inside pPr — skip
+            skip_element(reader)?;
+        }
         _ => {
             skip_element(reader)?;
         }
@@ -796,6 +804,56 @@ fn parse_ppr_child_empty(e: &quick_xml::events::BytesStart<'_>, attrs: &mut Attr
                     }
                 }
             }
+        }
+        b"widowControl" => {
+            attrs.set(
+                AttributeKey::WidowControl,
+                AttributeValue::Bool(is_toggle_on(e)),
+            );
+        }
+        b"outlineLvl" => {
+            if let Some(val) = get_val(e) {
+                if let Ok(level) = val.parse::<i64>() {
+                    attrs.set(AttributeKey::OutlineLevel, AttributeValue::Int(level));
+                }
+            }
+        }
+        b"textDirection" => {
+            if let Some(val) = get_val(e) {
+                let wm = match val.as_str() {
+                    "lrTb" | "lrTbV" => s1_model::WritingMode::LrTb,
+                    "rlTb" => s1_model::WritingMode::RlTb,
+                    "tbRl" | "tbRlV" => s1_model::WritingMode::TbRl,
+                    "tbLr" | "tbLrV" => s1_model::WritingMode::TbLr,
+                    "btLr" => s1_model::WritingMode::BtLr,
+                    _ => s1_model::WritingMode::LrTb,
+                };
+                attrs.set(
+                    AttributeKey::ParagraphWritingMode,
+                    AttributeValue::WritingMode(wm),
+                );
+            }
+        }
+        b"bidi" => {
+            attrs.set(AttributeKey::Bidi, AttributeValue::Bool(is_toggle_on(e)));
+        }
+        b"suppressAutoHyphens" => {
+            attrs.set(
+                AttributeKey::SuppressAutoHyphens,
+                AttributeValue::Bool(is_toggle_on(e)),
+            );
+        }
+        b"contextualSpacing" => {
+            attrs.set(
+                AttributeKey::ContextualSpacing,
+                AttributeValue::Bool(is_toggle_on(e)),
+            );
+        }
+        b"wordWrap" => {
+            attrs.set(
+                AttributeKey::WordWrap,
+                AttributeValue::Bool(is_toggle_on(e)),
+            );
         }
         _ => {}
     }
@@ -2209,25 +2267,24 @@ fn parse_fld_simple(
 /// Parse a field instruction string to determine the field type.
 fn parse_field_instruction(instr: &str) -> FieldType {
     let trimmed = instr.trim().to_uppercase();
-    if trimmed.starts_with("PAGE") {
-        FieldType::PageNumber
-    } else if trimmed.starts_with("NUMPAGES") || trimmed.starts_with("SECTIONPAGES") {
-        FieldType::PageCount
-    } else if trimmed.starts_with("DATE")
-        || trimmed.starts_with("CREATEDATE")
-        || trimmed.starts_with("SAVEDATE")
-    {
-        FieldType::Date
-    } else if trimmed.starts_with("TIME") {
-        FieldType::Time
-    } else if trimmed.starts_with("FILENAME") {
-        FieldType::FileName
-    } else if trimmed.starts_with("AUTHOR") {
-        FieldType::Author
-    } else if trimmed.starts_with("TOC") {
-        FieldType::TableOfContents
-    } else {
-        FieldType::Custom
+    // Extract the first word (field name) to avoid prefix collisions
+    // (e.g. "PAGEREF" should not match "PAGE")
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    match first_word {
+        "PAGE" => FieldType::PageNumber,
+        "NUMPAGES" | "SECTIONPAGES" => FieldType::PageCount,
+        "DATE" | "CREATEDATE" | "SAVEDATE" | "PRINTDATE" => FieldType::Date,
+        "TIME" | "EDITTIME" => FieldType::Time,
+        "FILENAME" => FieldType::FileName,
+        "AUTHOR" | "LASTSAVEDBY" | "USERNAME" => FieldType::Author,
+        "TOC" => FieldType::TableOfContents,
+        "HYPERLINK" => FieldType::Hyperlink,
+        "REF" | "PAGEREF" | "NOTEREF" => FieldType::CrossReference,
+        "SEQ" => FieldType::Sequence,
+        "MERGEFIELD" | "MERGEREC" | "MERGESEQ" => FieldType::MergeField,
+        "IF" => FieldType::Conditional,
+        "STYLEREF" => FieldType::StyleRef,
+        _ => FieldType::Custom,
     }
 }
 
@@ -2339,10 +2396,12 @@ fn parse_sdt_toc(
     let mut in_field = false; // track fldChar begin/separate/end
 
     // Form control detection state
-    let mut form_type: Option<String> = None; // "checkbox", "dropdown", "text"
+    let mut form_type: Option<String> = None; // "checkbox", "dropdown", "text", "date"
     let mut form_checked = false;
     let mut form_options: Vec<String> = Vec::new();
     let mut form_node_created = false;
+    let mut sdt_alias: Option<String> = None;
+    let mut sdt_tag: Option<String> = None;
 
     loop {
         match reader.read_event() {
@@ -2382,6 +2441,25 @@ fn parse_sdt_toc(
                         form_type = Some("text".to_string());
                         skip_element(reader)?;
                     }
+                    // Form control: w:date inside sdtPr
+                    b"date" if in_sdt_pr => {
+                        form_type = Some("date".to_string());
+                        skip_element(reader)?;
+                    }
+                    // SDT alias (display name)
+                    b"alias" if in_sdt_pr => {
+                        if let Some(val) = crate::xml_util::get_val(&e) {
+                            sdt_alias = Some(val);
+                        }
+                        skip_element(reader)?;
+                    }
+                    // SDT tag (custom property)
+                    b"tag" if in_sdt_pr => {
+                        if let Some(val) = crate::xml_util::get_val(&e) {
+                            sdt_tag = Some(val);
+                        }
+                        skip_element(reader)?;
+                    }
                     b"sdtContent" => {
                         in_sdt_content = true;
                         if is_toc {
@@ -2414,6 +2492,18 @@ fn parse_sdt_toc(
                                 form_node.attributes.set(
                                     AttributeKey::FormOptions,
                                     AttributeValue::String(form_options.join(",")),
+                                );
+                            }
+                            if let Some(ref alias) = sdt_alias {
+                                form_node.attributes.set(
+                                    AttributeKey::FormAlias,
+                                    AttributeValue::String(alias.clone()),
+                                );
+                            }
+                            if let Some(ref tag) = sdt_tag {
+                                form_node.attributes.set(
+                                    AttributeKey::FormTag,
+                                    AttributeValue::String(tag.clone()),
                                 );
                             }
                             doc.insert_node(parent_id, child_index, form_node)
@@ -2496,6 +2586,19 @@ fn parse_sdt_toc(
                 }
                 if ln == b"text" && in_sdt_pr {
                     form_type = Some("text".to_string());
+                }
+                if ln == b"date" && in_sdt_pr {
+                    form_type = Some("date".to_string());
+                }
+                if ln == b"alias" && in_sdt_pr {
+                    if let Some(val) = crate::xml_util::get_val(&e) {
+                        sdt_alias = Some(val);
+                    }
+                }
+                if ln == b"tag" && in_sdt_pr {
+                    if let Some(val) = crate::xml_util::get_val(&e) {
+                        sdt_tag = Some(val);
+                    }
                 }
                 // Self-closing w14:checked inside checkbox
                 if ln == b"checked" && in_sdt_pr {

@@ -8,6 +8,7 @@ use s1_model::{
 };
 
 /// Every possible mutation to the document model.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Operation {

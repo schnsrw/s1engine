@@ -5,6 +5,7 @@ use crate::id::NodeId;
 use std::fmt;
 
 /// The type of a document node. Maps to constructs in both OOXML and ODF.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum NodeType {
@@ -215,6 +216,7 @@ impl fmt::Display for NodeType {
 }
 
 /// A single node in the document tree.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
     /// Globally unique identifier (CRDT-ready).
