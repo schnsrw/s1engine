@@ -212,8 +212,45 @@ fn render_block_with_offset(html: &mut String, block: &LayoutBlock, x_offset: f6
             ..
         } => {
             render_image(html, block, image_data, content_type, x_offset, y_offset);
-        } // Note: all current LayoutBlockKind variants are handled above.
-          // If new variants are added, they will produce a compile error here.
+        }
+        LayoutBlockKind::Shape {
+            shape_type,
+            fill_color,
+            stroke_color,
+            stroke_width,
+            ..
+        } => {
+            render_shape(
+                html,
+                block,
+                shape_type,
+                fill_color.as_ref(),
+                stroke_color.as_ref(),
+                *stroke_width,
+                x_offset,
+                y_offset,
+            );
+        }
+        LayoutBlockKind::TextBox {
+            fill_color,
+            stroke_color,
+            stroke_width,
+            text_margins,
+            blocks,
+            ..
+        } => {
+            render_text_box(
+                html,
+                block,
+                fill_color.as_ref(),
+                stroke_color.as_ref(),
+                *stroke_width,
+                text_margins,
+                blocks,
+                x_offset,
+                y_offset,
+            );
+        }
     }
 }
 
@@ -398,7 +435,8 @@ fn render_glyph_run(html: &mut String, run: &GlyphRun, line_height: f64) {
     }
 
     // Underline and strikethrough
-    match (run.underline, run.strikethrough) {
+    let has_underline = run.underline != "none" && !run.underline.is_empty();
+    match (has_underline, run.strikethrough) {
         (true, true) => {
             style.push_str(";text-decoration:underline line-through");
             classes.push("s1-underline");
@@ -608,6 +646,107 @@ fn render_image(
     }
 }
 
+/// Render a shape block as an HTML div.
+#[allow(clippy::too_many_arguments)]
+fn render_shape(
+    html: &mut String,
+    block: &LayoutBlock,
+    shape_type: &str,
+    fill_color: Option<&Color>,
+    stroke_color: Option<&Color>,
+    stroke_width: f64,
+    x_offset: f64,
+    y_offset: f64,
+) {
+    let b = &block.bounds;
+    let fill = fill_color
+        .map(|c| format!("background:{};", c.to_hex()))
+        .unwrap_or_else(|| "background:transparent;".to_string());
+    let stroke = stroke_color
+        .map(|c| {
+            format!(
+                "border:{sw}pt solid {clr};",
+                sw = fmt_pt(stroke_width),
+                clr = c.to_hex()
+            )
+        })
+        .unwrap_or_else(|| {
+            if stroke_width > 0.0 {
+                format!("border:{}pt solid #000;", fmt_pt(stroke_width))
+            } else {
+                "border:none;".to_string()
+            }
+        });
+    let border_radius = if shape_type == "ellipse" {
+        "border-radius:50%;"
+    } else {
+        ""
+    };
+    html.push_str(&format!(
+        "<div class=\"s1-shape\" data-shape-type=\"{st}\" \
+         style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt;\
+         {fill}{stroke}{border_radius}box-sizing:border-box\"></div>",
+        st = escape_attr(shape_type),
+        x = fmt_pt(b.x - x_offset),
+        y = fmt_pt(b.y - y_offset),
+        w = fmt_pt(b.width),
+        h = fmt_pt(b.height),
+    ));
+}
+
+/// Render a text box block as an HTML div containing inner content blocks.
+#[allow(clippy::too_many_arguments)]
+fn render_text_box(
+    html: &mut String,
+    block: &LayoutBlock,
+    fill_color: Option<&Color>,
+    stroke_color: Option<&Color>,
+    stroke_width: f64,
+    text_margins: &TextBoxMargins,
+    blocks: &[LayoutBlock],
+    x_offset: f64,
+    y_offset: f64,
+) {
+    let b = &block.bounds;
+    let fill = fill_color
+        .map(|c| format!("background:{};", c.to_hex()))
+        .unwrap_or_else(|| "background:transparent;".to_string());
+    let stroke = stroke_color
+        .map(|c| {
+            format!(
+                "border:{sw}pt solid {clr};",
+                sw = fmt_pt(stroke_width),
+                clr = c.to_hex()
+            )
+        })
+        .unwrap_or_else(|| {
+            if stroke_width > 0.0 {
+                format!("border:{}pt solid #000;", fmt_pt(stroke_width))
+            } else {
+                "border:none;".to_string()
+            }
+        });
+    html.push_str(&format!(
+        "<div class=\"s1-textbox\" \
+         style=\"position:absolute;left:{x}pt;top:{y}pt;width:{w}pt;height:{h}pt;\
+         {fill}{stroke}padding:{pt}pt {pr}pt {pb}pt {pl}pt;\
+         box-sizing:border-box;overflow:hidden\">",
+        x = fmt_pt(b.x - x_offset),
+        y = fmt_pt(b.y - y_offset),
+        w = fmt_pt(b.width),
+        h = fmt_pt(b.height),
+        pt = fmt_pt(text_margins.top),
+        pr = fmt_pt(text_margins.right),
+        pb = fmt_pt(text_margins.bottom),
+        pl = fmt_pt(text_margins.left),
+    ));
+    // Render inner blocks relative to the text box's own coordinate space
+    for inner_block in blocks {
+        render_block_with_offset(html, inner_block, b.x, b.y);
+    }
+    html.push_str("</div>");
+}
+
 /// Escape HTML special characters in text content.
 ///
 /// NOTE (L-01): This function is intentionally duplicated in `ffi/wasm/src/lib.rs`.
@@ -700,12 +839,18 @@ mod tests {
             text: text.to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -845,12 +990,18 @@ mod tests {
             text: "Bold Red".to_string(),
             bold: true,
             italic: true,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -946,12 +1097,18 @@ mod tests {
                         text: "Cell 1".to_string(),
                         bold: false,
                         italic: false,
-                        underline: false,
+                        underline: "none".to_string(),
                         strikethrough: false,
+                        double_strikethrough: false,
                         superscript: false,
                         subscript: false,
                         highlight_color: None,
                         character_spacing: 0.0,
+                        baseline_shift: 0.0,
+                        caps: false,
+                        small_caps: false,
+                        hidden: false,
+                        metrics: None,
                         revision_type: None,
                         revision_author: None,
                         inline_image: None,
@@ -1070,12 +1227,18 @@ mod tests {
             text: "Header Text".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1094,12 +1257,18 @@ mod tests {
             text: "Footer Text".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1200,12 +1369,18 @@ mod tests {
             text: "Click here".to_string(),
             bold: false,
             italic: false,
-            underline: true,
+            underline: "single".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1330,12 +1505,18 @@ mod tests {
             text: "2".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: true,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1406,12 +1587,18 @@ mod tests {
             text: "2".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: true,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1482,12 +1669,18 @@ mod tests {
             text: "Highlighted".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: Some(Color::new(255, 255, 0)),
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,
@@ -1558,12 +1751,18 @@ mod tests {
             text: "inserted text".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: Some("insertion".to_string()),
             revision_author: Some("Author A".to_string()),
             inline_image: None,
@@ -1634,12 +1833,18 @@ mod tests {
             text: "deleted text".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: Some("deletion".to_string()),
             revision_author: Some("Author B".to_string()),
             inline_image: None,
@@ -1710,12 +1915,18 @@ mod tests {
             text: "Spaced".to_string(),
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 2.5,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
+            metrics: None,
             revision_type: None,
             revision_author: None,
             inline_image: None,

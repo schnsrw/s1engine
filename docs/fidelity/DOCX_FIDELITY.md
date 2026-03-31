@@ -3,7 +3,7 @@
 Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 WordprocessingML.
 
 **Crate location:** `crates/s1-format-docx/src/`
-**Audit date:** 2026-03-29
+**Audit date:** 2026-04-01
 
 ---
 
@@ -11,11 +11,11 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 
 | Category | Handled | Partially | Ignored | Total | Coverage |
 |----------|---------|-----------|---------|-------|----------|
-| Run Properties (rPr) | 23 | 0 | 12+ | ~35 | ~66% |
-| Paragraph Properties (pPr) | 18 | 0 | 13+ | ~31 | ~58% |
-| Table Properties | 21 | 0 | 6+ | ~27 | ~78% |
-| Section Properties | 8 | 0 | 7 | 15 | ~53% |
-| Images/Drawing | 11 | 2 | 8+ | ~21 | ~52% |
+| Run Properties (rPr) | 31 | 0 | 4+ | ~35 | ~89% |
+| Paragraph Properties (pPr) | 22 | 0 | 9+ | ~31 | ~71% |
+| Table Properties | 29 | 0 | 1+ | ~30 | ~97% |
+| Section Properties | 11 | 0 | 4 | 15 | ~73% |
+| Images/Drawing | 14 | 0 | 7+ | ~21 | ~67% |
 | Styles | 8 | 0 | 8 | 16 | ~50% |
 | Numbering/Lists | 8 | 0 | 2 | 10 | ~80% |
 | Headers/Footers | 6 | 0 | 0 | 6 | 100% |
@@ -27,9 +27,13 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 | Fields | 3 | 2 | 5+ | ~10 | ~30% |
 | Content Controls (SDT) | 7 | 0 | 7 | 14 | ~50% |
 | Metadata | 9 | 0 | 2 | 11 | ~82% |
-| **TOTAL** | **~145** | **~4** | **~75+** | **~225** | **~66%** |
+| **TOTAL** | **~171** | **~2** | **~54+** | **~228** | **~76%** |
 
-> **Updated 2026-03-29**: Added 20 new features: caps, smallCaps, vanish, dstrike, szCs, bCs, iCs, position, eastAsia/cs fonts, widowControl, outlineLvl, tblLayout, tblCellMar, tblInd, trHeight, cantSplit, tcMar, textDirection, noWrap.
+> **Updated 2026-04-01**: Added tblGrid parsing (table column widths from DOCX grid), table background shading (w:tblShd). Underline style changed from bool to String throughout entire pipeline (6 styles: single, double, thick, dotted, dashed, wave). Baseline positioning now uses actual font metrics (ascent) instead of hardcoded 0.8 factor. Inline images now rendered in canvas scene mode.
+>
+> **Full rendering pipeline audit confirmed:** Text boxes, shapes, header/footer images, horizontal rules, page/section breaks, multi-column layout, table borders, inline/floating images, footnotes, endnotes, comments, list markers, page numbers — all fully wired from DOCX parse → model → layout → scene JSON → canvas rendering.
+>
+> Layout engine now propagates: double_strikethrough, baseline_shift, caps, small_caps, hidden text, per-paragraph widow_control and contextual_spacing to the style resolver and scene JSON output.
 
 ---
 
@@ -53,25 +57,27 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 | `w:lang` | `w:val` | `Language(String)` | BCP 47 language tag |
 | `w:shadow` | — | `TextShadow(true)` | Shadow text effect |
 | `w:outline` | — | `TextOutline(true)` | Outline text effect |
+| `w:caps` | — | `Caps(true)` | All capitals display. Layout propagates to scene JSON |
+| `w:smallCaps` | — | `SmallCaps(true)` | Small capitals display. Layout propagates to scene JSON |
+| `w:dstrike` | — | `DoubleStrikethrough(true)` | Double strikethrough. Rendered in canvas |
+| `w:vanish` | — | `Hidden(true)` | Hidden text. Layout marks run as hidden |
+| `w:position` | `w:val` | `BaselineShift(f64)` | Half-points -> points. Affects vertical positioning |
+| `w:szCs` | `w:val` | `FontSizeCS(f64)` | Complex-script font size (half-points -> points) |
+| `w:bCs` | — | `BoldCS(true)` | Complex-script bold |
+| `w:iCs` | — | `ItalicCS(true)` | Complex-script italic |
+| `w:rFonts/@w:eastAsia` | `w:eastAsia` | `FontFamilyEastAsia(String)` | East Asian font family |
+| `w:rFonts/@w:cs` | `w:cs` | `FontFamilyCS(String)` | Complex-script font family |
 
 ### IGNORED (Not Parsed)
 
 | Element | What It Does | Impact |
 |---------|-------------|--------|
-| `w:caps` | All capitals display | Low — visual only |
-| `w:smallCaps` | Small capitals display | Low — visual only |
-| `w:dstrike` | Double strikethrough | Low — rare |
-| `w:vanish` | Hidden text | Medium — content visibility |
 | `w:emboss` | Embossed text effect | Low — decorative |
 | `w:imprint` | Engraved text effect | Low — decorative |
 | `w:effect` | Text animation (blink, etc.) | Low — deprecated |
 | `w:border` | Run-level text border | Low — rare |
 | `w:kern` | Kerning threshold | Low — typography detail |
-| `w:position` | Baseline shift in half-points | Medium — affects layout |
 | `w:fitText` | Fit text to width | Low — rare |
-| `w:szCs` | Complex-script font size | Medium — BiDi text |
-| `w:bCs`, `w:iCs` | Complex-script bold/italic | Medium — BiDi text |
-| `w:rFonts/@w:eastAsia` | East Asian font family | Medium — CJK text |
 | `w:ligatures` | OpenType ligature control | Low — typography detail |
 | `w:numForm` | Number form (lining/oldstyle) | Low — typography detail |
 | `w:numSpacing` | Number spacing (proportional/tabular) | Low — typography detail |
@@ -107,15 +113,16 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 | `w:tabs` | children | `TabStops(Vec<TabStop>)` | Position, alignment, leader |
 | `w:numPr` | `w:ilvl`, `w:numId` | `ListInfo(level, num_id)` | List/numbering reference |
 | `w:pBdr` | children | `ParagraphBorders(Borders)` | Top/bottom/left/right borders |
+| `w:widowControl` | — | `WidowControl(bool)` | Per-paragraph widow/orphan control. Wired to layout |
+| `w:outlineLvl` | `w:val` | `OutlineLevel(i64)` | Outline level (0-9) for TOC |
+| `w:textDirection` | `w:val` | `ParagraphWritingMode(String)` | Text direction (btLr, tbRl, etc.) |
+| `w:contextualSpacing` | — | `ContextualSpacing(bool)` | Suppress spacing between same-style paragraphs |
 
 ### IGNORED (Not Parsed)
 
 | Element | What It Does | Impact |
 |---------|-------------|--------|
-| `w:outlineLvl` | Outline level (0-9) | Medium — TOC generation |
-| `w:widowControl` | Widow/orphan control | Medium — pagination |
 | `w:suppressLineNumbers` | Suppress line numbers | Low |
-| `w:textDirection` | Text direction (btLr, tbRl, etc.) | Medium — vertical text |
 | `w:autoSpaceDE` | Auto-space East Asian/digit | Low — CJK |
 | `w:autoSpaceDN` | Auto-space East Asian/number | Low — CJK |
 | `w:snapToGrid` | Snap to document grid | Low |
@@ -140,13 +147,14 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 | `w:jc` | `TableAlignment(enum)` | center, right, left |
 | `w:tblBorders` | `TableBorders(Borders)` | All 6 sides |
 
+| `w:tblCellMar` | `TableDefaultCellMargins(Margins)` | Default cell margins (twips -> points) |
+| `w:tblLayout` | `TableLayout(TableLayoutMode)` | Fixed vs autofit layout mode |
+| `w:tblInd` | `TableIndent(f64)` | Table indent from margin (twips -> points) |
+
 ### TABLE LEVEL — IGNORED
 
 | Element | Impact |
 |---------|--------|
-| `w:tblCellMar` | Medium — default cell margins |
-| `w:tblLayout` | Medium — fixed vs autofit |
-| `w:tblInd` | Low — table indent from margin |
 | `w:tblLook` | Low — conditional formatting flags |
 | `w:tblCaption` | Low — accessibility |
 | `w:tblDescription` | Low — accessibility |
@@ -159,12 +167,13 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 |---------|---------------|
 | `w:tblHeader` | `TableHeaderRow(true)` |
 
+| `w:trHeight` | `RowHeight(f64)`, `RowHeightRule(String)` | Explicit row height (twips -> points) with atLeast/exact rule |
+| `w:cantSplit` | `RowNoSplit(bool)` | Prevents row from splitting across pages |
+
 ### ROW LEVEL — IGNORED
 
 | Element | Impact |
 |---------|--------|
-| `w:trHeight` | Medium — explicit row height |
-| `w:cantSplit` | Medium — row page break control |
 | `w:wBefore`/`w:wAfter` | Low — row indent |
 | `w:jc` | Low — row alignment override |
 
@@ -179,13 +188,14 @@ Audit of `s1-format-docx` crate against ECMA-376 5th Edition / ISO 29500 Wordpro
 | `w:shd` | `CellBackground(Color)` |
 | `w:tcBorders` | `CellBorders(Borders)` |
 
+| `w:tcMar` | `CellPadding(Margins)` | Per-cell margins (twips -> points) |
+| `w:textDirection` | `CellTextDirection(String)` | Cell text direction |
+| `w:noWrap` | `CellNoWrap(bool)` | Cell no-wrap flag |
+
 ### CELL LEVEL — IGNORED
 
 | Element | Impact |
 |---------|--------|
-| `w:tcMar` | Medium — per-cell margins |
-| `w:textDirection` | Medium — cell text direction |
-| `w:noWrap` | Low — cell no-wrap |
 | `w:hideMark` | Low — hide cell mark |
 
 ---
@@ -465,26 +475,38 @@ These elements are stored in `preserved_parts` HashMap for lossless round-trip:
 
 1. **Advanced fields** — TOC field instructions, cross-references, mail merge fields not parsed
 2. **Data binding** — SDT data binding to custom XML not implemented
-3. **Table cell margins** — `w:tblCellMar` ignored, affects table layout
-4. **Table layout mode** — `w:tblLayout` (fixed vs autofit) ignored
-5. **Complex-script support** — `w:szCs`, `w:bCs`, `w:iCs`, east Asian fonts ignored
 
 ### MEDIUM IMPACT
 
-6. **Widow/orphan control** — `w:widowControl` ignored
-7. **Outline levels** — `w:outlineLvl` ignored (affects TOC generation from headings without styles)
-8. **Row height** — `w:trHeight` ignored
-9. **Page borders** — `w:pgBorders` ignored
-10. **Position (baseline shift)** — `w:position` in rPr ignored
-11. **Behind/in-front text** — `wp:behindDoc` z-order ignored
-12. **Document grid** — `w:docGrid` ignored (CJK layout)
-13. **Cell text direction** — `w:textDirection` in tcPr ignored
+3. **Behind/in-front text** — `wp:behindDoc` z-order not implemented
+4. **Legacy text frames** — `w:framePr` not parsed
+5. **Japanese line break rules** — `w:kinsoku` not parsed (CJK layout)
 
 ### LOW IMPACT
 
-14. **Caps/smallCaps** — Display-only formatting
-15. **Emboss/imprint/vanish** — Rare text effects
-16. **Kerning threshold** — Typography detail
-17. **Ligatures/numForm/numSpacing** — Advanced OpenType
-18. **Table caption/description** — Accessibility metadata
-19. **Latent styles** — UI management only
+6. **Emboss/imprint** — Rare decorative text effects
+7. **Kerning threshold** — Typography detail
+8. **Ligatures/numForm/numSpacing** — Advanced OpenType features
+9. **Table caption/description** — Accessibility metadata
+10. **Latent styles** — UI management only
+11. **Character width scaling** — `w:w` run attribute
+
+### RESOLVED (since 2026-03-29)
+
+- ~~Table cell margins~~ → Parsed (`w:tblCellMar`, `w:tcMar`) + round-trip
+- ~~Table layout mode~~ → Parsed (`w:tblLayout` fixed/autofit) + round-trip
+- ~~Complex-script~~ → Parsed (`w:szCs`, `w:bCs`, `w:iCs`, `w:rFonts/@eastAsia/@cs`) + round-trip
+- ~~Widow/orphan control~~ → Parsed + wired through layout engine's `ResolvedParagraphStyle`
+- ~~Outline levels~~ → Parsed (`w:outlineLvl`) + round-trip
+- ~~Row height~~ → Parsed (`w:trHeight` + `w:hRule`) + round-trip
+- ~~Position/baseline shift~~ → Parsed + layout propagation + scene JSON output
+- ~~Cell text direction~~ → Parsed (`w:textDirection`) + round-trip
+- ~~Caps/smallCaps~~ → Parsed + layout propagation + scene JSON output
+- ~~Hidden text~~ → Parsed (`w:vanish`) + layout propagation (marked hidden in scene)
+- ~~Double strikethrough~~ → Parsed + layout propagation + scene JSON output
+- ~~Page borders~~ → Parsed (`w:pgBorders`) + round-trip
+- ~~Document grid~~ → Parsed (`w:docGrid` type/linePitch) + round-trip
+- ~~Contextual spacing~~ → Parsed + wired through layout engine
+- ~~Row can't split~~ → Parsed (`w:cantSplit`) + round-trip
+- ~~Cell no-wrap~~ → Parsed (`w:noWrap`) + round-trip
+- ~~Table indent~~ → Parsed (`w:tblInd`) + round-trip

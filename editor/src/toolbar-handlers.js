@@ -924,6 +924,30 @@ export function initToolbar() {
     });
   }
 
+  // Canvas mode: update toolbar state when selection changes in canvas editing
+  document.addEventListener('editor:selection-changed', (e) => {
+    if (!isCanvasMode() || !state.doc) return;
+    const { range, collapsed } = e.detail || {};
+    if (!range) return;
+    try {
+      const rangeJson = JSON.stringify(range);
+      const fmtStr = state.doc.selection_formatting(rangeJson);
+      const fmt = JSON.parse(fmtStr);
+      // Update toolbar buttons
+      const btnBold = $('btnBold');
+      const btnItalic = $('btnItalic');
+      const btnUnderline = $('btnUnderline');
+      if (btnBold) btnBold.classList.toggle('active', !!fmt.bold);
+      if (btnItalic) btnItalic.classList.toggle('active', !!fmt.italic);
+      if (btnUnderline) btnUnderline.classList.toggle('active', fmt.underline !== 'none');
+      // Font info
+      const fontSelect = $('fontFamily');
+      const fontSize = $('fontSize');
+      if (fontSelect && fmt.font_family) fontSelect.value = fmt.font_family;
+      if (fontSize && fmt.font_size_pt) fontSize.value = Math.round(fmt.font_size_pt);
+    } catch (_) {}
+  });
+
   // Help menu — keyboard shortcuts dialog (E7.4)
   if ($('menuShortcuts')) $('menuShortcuts').addEventListener('click', () => {
     closeAllMenus();

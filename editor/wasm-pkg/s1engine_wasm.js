@@ -1178,6 +1178,34 @@ export class WasmDocument {
         }
     }
     /**
+     * Begin an IME composition at the given position.
+     *
+     * Stores the anchor position for subsequent composition updates.
+     * Returns JSON `{"status":"composing","anchor":<position>}`.
+     * @param {string} position_json
+     * @returns {string}
+     */
+    begin_composition(position_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_begin_composition(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Get all body-level node IDs with their types as JSON.
      *
      * Returns `[{"id":"0:5","type":"Paragraph"},{"id":"0:12","type":"Table"},...]`
@@ -1240,6 +1268,210 @@ export class WasmDocument {
         return ret[0] !== 0;
     }
     /**
+     * Cancel the IME composition.
+     *
+     * Deletes the preview text and clears composition state.
+     * Returns an EditResult JSON with cursor at the original anchor.
+     * @returns {string}
+     */
+    cancel_composition() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_cancel_composition(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Delete a canvas range (anchor + focus as text-node IDs + UTF-16 offsets).
+     *
+     * Resolves the range to paragraph coordinates, performs the deletion,
+     * and returns an EditResult JSON string with the cursor collapsed at range start.
+     * @param {string} range_json
+     * @returns {string}
+     */
+    canvas_delete_range(range_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_canvas_delete_range(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Insert a paragraph break at a canvas position.
+     *
+     * Splits the paragraph at the resolved char offset.
+     * Returns an EditResult JSON with the cursor at the start of the new paragraph.
+     * @param {string} position_json
+     * @returns {string}
+     */
+    canvas_insert_paragraph_break(position_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_canvas_insert_paragraph_break(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Insert text at a canvas position (text-node ID + UTF-16 offset).
+     *
+     * Resolves the position to paragraph coordinates, performs the insert,
+     * and returns an EditResult JSON string with the new cursor position.
+     * @param {string} position_json
+     * @param {string} text
+     * @returns {string}
+     */
+    canvas_insert_text(position_json, text) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_canvas_insert_text(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Replace a canvas range with new text.
+     *
+     * Deletes the range, then inserts text at the start position.
+     * Returns an EditResult JSON with the cursor after the inserted text.
+     * @param {string} range_json
+     * @param {string} text
+     * @returns {string}
+     */
+    canvas_replace_range(range_json, text) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_canvas_replace_range(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Toggle a formatting mark on a canvas range.
+     *
+     * Checks the current formatting state at the anchor position and
+     * toggles the specified mark. Supported marks: "bold", "italic",
+     * "underline", "strikethrough".
+     *
+     * Returns an EditResult JSON.
+     * @param {string} range_json
+     * @param {string} mark
+     * @returns {string}
+     */
+    canvas_toggle_mark(range_json, mark) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(mark, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_canvas_toggle_mark(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Get the caret rectangle for a model position.
+     *
+     * Returns JSON `RectPt` with page_index, x, y, width (1.0), height.
+     * @param {string} position_json
+     * @returns {string}
+     */
+    caret_rect(position_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_caret_rect(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Clear all undo/redo history.
      */
     clear_history() {
@@ -1255,6 +1487,90 @@ export class WasmDocument {
         wasm.wasmdocument_close(this.__wbg_ptr);
     }
     /**
+     * Commit the IME composition with final text.
+     *
+     * Deletes the preview, inserts the final text, and clears composition state.
+     * Returns an EditResult JSON.
+     * @param {string} text
+     * @returns {string}
+     */
+    commit_composition(text) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_commit_composition(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Copy a canvas range as HTML.
+     *
+     * Resolves the range to paragraph coordinates and delegates to
+     * the existing `export_selection_html` method.
+     * @param {string} range_json
+     * @returns {string}
+     */
+    copy_range_html(range_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_copy_range_html(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Copy a canvas range as plain text.
+     *
+     * Walks text nodes from anchor to focus, joining with newlines
+     * at paragraph boundaries.
+     * @param {string} range_json
+     * @returns {string}
+     */
+    copy_range_plain_text(range_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_copy_range_plain_text(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Delete a comment and its range markers.
      * @param {string} comment_id
      */
@@ -1262,6 +1578,21 @@ export class WasmDocument {
         const ptr0 = passStringToWasm0(comment_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmdocument_delete_comment(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Delete a comment reply by its comment ID.
+     *
+     * Removes the CommentBody node that has the given `reply_id` as its
+     * CommentId attribute. Only deletes replies (nodes with CommentParentId).
+     * @param {string} reply_id
+     */
+    delete_comment_reply(reply_id) {
+        const ptr0 = passStringToWasm0(reply_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmdocument_delete_comment_reply(this.__wbg_ptr, ptr0, len0);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -1352,6 +1683,62 @@ export class WasmDocument {
         const ret = wasm.wasmdocument_delete_text_in_paragraph(this.__wbg_ptr, ptr0, len0, offset, length);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Return a monotonically increasing document revision number.
+     *
+     * Bumps on every model mutation (insert, delete, format change).
+     * Uses undo_count as a proxy for revision tracking.
+     * @returns {number}
+     */
+    document_revision() {
+        const ret = wasm.wasmdocument_document_revision(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Edit a comment's text content.
+     *
+     * Replaces the text in the first paragraph of the CommentBody node
+     * matching `comment_id`.
+     * @param {string} comment_id
+     * @param {string} new_text
+     */
+    edit_comment(comment_id, new_text) {
+        const ptr0 = passStringToWasm0(comment_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(new_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmdocument_edit_comment(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Get the editor capabilities as a JSON object.
+     *
+     * Returns a JSON object indicating which editing features are available.
+     * @returns {string}
+     */
+    editor_capabilities() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_editor_capabilities(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -1535,6 +1922,36 @@ export class WasmDocument {
      */
     free() {
         wasm.wasmdocument_free(this.__wbg_ptr);
+    }
+    /**
+     * Get page indices affected by a node, plus adjacent pages.
+     *
+     * Returns a JSON array of 0-based page indices, e.g. `[1,2,3]`.
+     * Used by the editor to know which pages to re-render after an edit.
+     *
+     * Layout must already be cached (call `get_page_count*` first).
+     * @param {string} node_id_str
+     * @returns {string}
+     */
+    get_affected_pages(node_id_str) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(node_id_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_get_affected_pages(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
     }
     /**
      * Get the node ID of a cell at a given row/column index.
@@ -1827,6 +2244,93 @@ export class WasmDocument {
         let deferred2_1;
         try {
             const ret = wasm.wasmdocument_get_layout_cache_stats(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Get the total number of pages using default (empty) font metrics.
+     *
+     * Lazily computes and caches layout. The cache is invalidated on any
+     * document mutation.
+     * @returns {number}
+     */
+    get_page_count() {
+        const ret = wasm.wasmdocument_get_page_count(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Get the total number of pages using loaded fonts for accurate metrics.
+     *
+     * Lazily computes and caches layout. The cache is invalidated on any
+     * document mutation.
+     * @param {WasmFontDatabase} font_db
+     * @returns {number}
+     */
+    get_page_count_with_fonts(font_db) {
+        _assertClass(font_db, WasmFontDatabase);
+        const ret = wasm.wasmdocument_get_page_count_with_fonts(this.__wbg_ptr, font_db.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Get ready-to-mount HTML for a single page using default font metrics.
+     *
+     * Returns document-model HTML (semantic `<p>`, `<h1>`, `<table>` with
+     * `data-node-id`) filtered to the blocks on `page_index`. Split
+     * paragraphs get `data-split="first"` or `data-split="continuation"`.
+     *
+     * Call `get_page_count()` first to ensure layout is cached.
+     * @param {number} page_index
+     * @returns {string}
+     */
+    get_page_html(page_index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_get_page_html(this.__wbg_ptr, page_index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Get ready-to-mount HTML for a single page using loaded fonts.
+     *
+     * Call `get_page_count_with_fonts()` first to ensure layout is cached,
+     * or this will lazily compute layout.
+     * @param {number} page_index
+     * @param {WasmFontDatabase} font_db
+     * @returns {string}
+     */
+    get_page_html_with_fonts(page_index, font_db) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            _assertClass(font_db, WasmFontDatabase);
+            const ret = wasm.wasmdocument_get_page_html_with_fonts(this.__wbg_ptr, page_index, font_db.__wbg_ptr);
             var ptr1 = ret[0];
             var len1 = ret[1];
             if (ret[3]) {
@@ -2163,6 +2667,33 @@ export class WasmDocument {
         let deferred2_1;
         try {
             const ret = wasm.wasmdocument_get_used_fonts(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Hit-test a point on a page to find the nearest model position.
+     *
+     * Returns JSON `HitTestResult` with position, kind, node_id, and inside flag.
+     * @param {number} page_index
+     * @param {number} x_pt
+     * @param {number} y_pt
+     * @returns {string}
+     */
+    hit_test(page_index, x_pt, y_pt) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_hit_test(this.__wbg_ptr, page_index, x_pt, y_pt);
             var ptr1 = ret[0];
             var len1 = ret[1];
             if (ret[3]) {
@@ -2774,12 +3305,67 @@ export class WasmDocument {
         return ret !== 0;
     }
     /**
+     * Check if track changes mode is currently enabled.
+     * @returns {boolean}
+     */
+    is_track_changes_enabled() {
+        const ret = wasm.wasmdocument_is_track_changes_enabled(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Check if this document handle is still valid.
      * @returns {boolean}
      */
     is_valid() {
         const ret = wasm.wasmdocument_is_valid(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Return a monotonically increasing layout revision number.
+     *
+     * Bumps when pagination output changes (page count, block positions).
+     * @returns {number}
+     */
+    layout_revision() {
+        const ret = wasm.wasmdocument_layout_revision(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Get the line boundary position for "start" or "end" of the line
+     * containing the given position.
+     *
+     * Returns a PositionRef JSON.
+     * @param {string} position_json
+     * @param {string} side
+     * @returns {string}
+     */
+    line_boundary(position_json, side) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(side, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_line_boundary(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
     }
     /**
      * Merge cells in a range by setting ColSpan/RowSpan attributes.
@@ -2902,6 +3488,75 @@ export class WasmDocument {
         }
     }
     /**
+     * Move a position in a direction by a granularity.
+     *
+     * Returns JSON `PositionRef`.
+     * @param {string} position_json
+     * @param {string} direction
+     * @param {string} granularity
+     * @returns {string}
+     */
+    move_position(position_json, direction, granularity) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(direction, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(granularity, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_move_position(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
+     * Move a range in a direction by a granularity.
+     *
+     * If extend is true, moves only the focus while keeping the anchor.
+     * If extend is false, collapses the range and moves.
+     * Returns a RangeRef JSON.
+     * @param {string} range_json
+     * @param {string} direction
+     * @param {string} granularity
+     * @param {boolean} extend
+     * @returns {string}
+     */
+    move_range(range_json, direction, granularity, extend) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(direction, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(granularity, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_move_range(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, extend);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
      * Delete text at multiple cursor positions simultaneously.
      *
      * Takes a JSON array of `[{"nodeId":"0:5","offset":3,"length":1}, ...]`.
@@ -2935,6 +3590,33 @@ export class WasmDocument {
         }
     }
     /**
+     * Get bounds for all pages containing a node.
+     *
+     * Returns JSON array of `RectPt`.
+     * @param {string} node_id_str
+     * @returns {string}
+     */
+    node_bounds(node_id_str) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(node_id_str, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_node_bounds(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Get detailed info about a node as JSON.
      *
      * Returns `{"id":"0:5","type":"Paragraph","text":"Hello","children":[...],...}`
@@ -2959,6 +3641,57 @@ export class WasmDocument {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Return a full scene for a single page.
+     *
+     * Returns JSON with page bounds, content rect, header/footer rects,
+     * and all scene items (text runs, backgrounds, borders, images, shapes, etc.).
+     * @param {number} page_index
+     * @returns {string}
+     */
+    page_scene(page_index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_page_scene(this.__wbg_ptr, page_index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Return page scene using loaded fonts for accurate text shaping.
+     * @param {WasmFontDatabase} font_db
+     * @param {number} page_index
+     * @returns {string}
+     */
+    page_scene_with_fonts(font_db, page_index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            _assertClass(font_db, WasmFontDatabase);
+            const ret = wasm.wasmdocument_page_scene_with_fonts(this.__wbg_ptr, font_db.__wbg_ptr, page_index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**
@@ -3037,6 +3770,37 @@ export class WasmDocument {
         const ret = wasm.wasmdocument_paste_formatted_runs_json(this.__wbg_ptr, ptr0, len0, char_offset, ptr1, len1);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Paste HTML at a canvas position.
+     *
+     * For now, strips HTML tags and inserts as plain text.
+     * Returns an EditResult JSON.
+     * @param {string} position_json
+     * @param {string} html
+     * @returns {string}
+     */
+    paste_html(position_json, html) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(html, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_paste_html(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
         }
     }
     /**
@@ -3268,6 +4032,169 @@ export class WasmDocument {
         const ret = wasm.wasmdocument_resize_image(this.__wbg_ptr, ptr0, len0, width_pt, height_pt);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Set the resolved status of a comment.
+     *
+     * Persists the resolved state as a `CommentResolved` attribute on
+     * the CommentBody node, so it survives save/load and collab sync.
+     * @param {string} comment_id
+     * @param {boolean} resolved
+     */
+    resolve_comment(comment_id, resolved) {
+        const ptr0 = passStringToWasm0(comment_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmdocument_resolve_comment(this.__wbg_ptr, ptr0, len0, resolved);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Return the scene protocol version supported by this build.
+     * @returns {number}
+     */
+    scene_protocol_version() {
+        const ret = wasm.wasmdocument_scene_protocol_version(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Return a lightweight scene summary for viewport boot.
+     *
+     * Returns JSON: `{ "protocol_version": 1, "document_revision": N,
+     * "layout_revision": N, "page_count": N, "default_page_size_pt": {...},
+     * "pages": [...] }`
+     * @param {string} _config_json
+     * @returns {string}
+     */
+    scene_summary(_config_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(_config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_scene_summary(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Return scene summary using loaded fonts for accurate text shaping.
+     * @param {WasmFontDatabase} font_db
+     * @param {string} config_json
+     * @returns {string}
+     */
+    scene_summary_with_fonts(font_db, config_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            _assertClass(font_db, WasmFontDatabase);
+            const ptr0 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_scene_summary_with_fonts(this.__wbg_ptr, font_db.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Search for text matches and return results with page rects.
+     *
+     * Wraps the existing `find_text` and enriches results with layout
+     * position information when available.
+     * @param {string} query
+     * @param {boolean} case_sensitive
+     * @returns {string}
+     */
+    search_matches(query, case_sensitive) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_search_matches(this.__wbg_ptr, ptr0, len0, case_sensitive);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Return formatting state at a selection range for toolbar display.
+     *
+     * Returns JSON `FormattingState` with bold, italic, font info, etc.
+     * @param {string} range_json
+     * @returns {string}
+     */
+    selection_formatting(range_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_selection_formatting(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * Get selection rectangles for a model range.
+     *
+     * Returns JSON array of `RectPt` objects covering the selection.
+     * @param {string} range_json
+     * @returns {string}
+     */
+    selection_rects(range_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(range_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_selection_rects(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -3815,6 +4742,19 @@ export class WasmDocument {
         }
     }
     /**
+     * Enable or disable track changes mode.
+     *
+     * When enabled, subsequent text edits create revision markers.
+     * This stores the state on the document metadata so it persists.
+     * @param {boolean} enabled
+     */
+    set_track_changes_enabled(enabled) {
+        const ret = wasm.wasmdocument_set_track_changes_enabled(this.__wbg_ptr, enabled);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Set underline on a paragraph's first run.
      * @param {string} node_id_str
      * @param {boolean} underline
@@ -4353,6 +5293,35 @@ export class WasmDocument {
         return ret[0] !== 0;
     }
     /**
+     * Update the IME composition preview text.
+     *
+     * If a preview already exists, deletes it first, then inserts
+     * the new preview text at the anchor.
+     * Returns an EditResult JSON.
+     * @param {string} text
+     * @returns {string}
+     */
+    update_composition(text) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_update_composition(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * Update all Table of Contents entries in the document.
      *
      * Rescans headings and regenerates TOC child paragraphs.
@@ -4361,6 +5330,85 @@ export class WasmDocument {
         const ret = wasm.wasmdocument_update_table_of_contents(this.__wbg_ptr);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Return scenes for a range of pages (batch fetch for viewport).
+     *
+     * Returns JSON: `{ "pages": [...] }`
+     * @param {number} start_page
+     * @param {number} end_page
+     * @returns {string}
+     */
+    visible_page_scenes(start_page, end_page) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.wasmdocument_visible_page_scenes(this.__wbg_ptr, start_page, end_page);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Return visible page scenes using loaded fonts for accurate text shaping.
+     * @param {WasmFontDatabase} font_db
+     * @param {number} start_page
+     * @param {number} end_page
+     * @returns {string}
+     */
+    visible_page_scenes_with_fonts(font_db, start_page, end_page) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            _assertClass(font_db, WasmFontDatabase);
+            const ret = wasm.wasmdocument_visible_page_scenes_with_fonts(this.__wbg_ptr, font_db.__wbg_ptr, start_page, end_page);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Get the word boundary around a position.
+     *
+     * Returns JSON `RangeRef` with anchor at word start and focus at word end.
+     * @param {string} position_json
+     * @returns {string}
+     */
+    word_boundary(position_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(position_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.wasmdocument_word_boundary(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
 }

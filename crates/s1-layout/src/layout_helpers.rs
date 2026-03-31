@@ -22,10 +22,12 @@ pub(crate) struct ShapedRunInfo {
     pub(crate) bold: bool,
     /// Italic formatting.
     pub(crate) italic: bool,
-    /// Underline formatting.
-    pub(crate) underline: bool,
+    /// Underline style ("none", "single", "double", "thick", "dotted", "dashed", "wave").
+    pub(crate) underline: String,
     /// Strikethrough formatting.
     pub(crate) strikethrough: bool,
+    /// Double strikethrough formatting.
+    pub(crate) double_strikethrough: bool,
     /// Superscript formatting.
     pub(crate) superscript: bool,
     /// Subscript formatting.
@@ -34,6 +36,14 @@ pub(crate) struct ShapedRunInfo {
     pub(crate) highlight_color: Option<s1_model::Color>,
     /// Character spacing in points.
     pub(crate) character_spacing: f64,
+    /// Baseline shift in points.
+    pub(crate) baseline_shift: f64,
+    /// All caps text transform.
+    pub(crate) caps: bool,
+    /// Small caps text transform.
+    pub(crate) small_caps: bool,
+    /// Hidden text (excluded from rendering).
+    pub(crate) hidden: bool,
     /// Revision type for track changes.
     pub(crate) revision_type: Option<String>,
     /// Revision author for track changes.

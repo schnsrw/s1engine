@@ -48,6 +48,11 @@ pub struct ResolvedParagraphStyle {
     pub bidi: bool,
     /// Default font size from the paragraph's run properties (for empty paragraph height).
     pub default_font_size: Option<f64>,
+    /// Per-paragraph widow/orphan control. When false, the paragraph opts out of
+    /// widow/orphan splitting. Defaults to true (enabled).
+    pub widow_control: bool,
+    /// Contextual spacing — suppress space between paragraphs of the same style.
+    pub contextual_spacing: bool,
 }
 
 impl Default for ResolvedParagraphStyle {
@@ -65,6 +70,8 @@ impl Default for ResolvedParagraphStyle {
             page_break_before: false,
             bidi: false,
             default_font_size: None,
+            widow_control: true,
+            contextual_spacing: false,
         }
     }
 }
@@ -82,10 +89,12 @@ pub struct ResolvedRunStyle {
     pub bold: bool,
     /// Italic.
     pub italic: bool,
-    /// Underline.
-    pub underline: bool,
+    /// Underline style ("none", "single", "double", "thick", "dotted", "dashed", "wave").
+    pub underline: String,
     /// Strikethrough.
     pub strikethrough: bool,
+    /// Double strikethrough.
+    pub double_strikethrough: bool,
     /// Superscript.
     pub superscript: bool,
     /// Subscript.
@@ -94,6 +103,14 @@ pub struct ResolvedRunStyle {
     pub highlight_color: Option<Color>,
     /// Character spacing in points (letter-spacing).
     pub character_spacing: f64,
+    /// Baseline shift in points (positive = up, negative = down).
+    pub baseline_shift: f64,
+    /// All caps display.
+    pub caps: bool,
+    /// Small caps display.
+    pub small_caps: bool,
+    /// Hidden text — should be excluded from rendering.
+    pub hidden: bool,
     /// Revision type for track changes (e.g., "insertion", "deletion").
     pub revision_type: Option<String>,
     /// Revision author for track changes.
@@ -108,12 +125,17 @@ impl Default for ResolvedRunStyle {
             color: DEFAULT_COLOR,
             bold: false,
             italic: false,
-            underline: false,
+            underline: "none".to_string(),
             strikethrough: false,
+            double_strikethrough: false,
             superscript: false,
             subscript: false,
             highlight_color: None,
             character_spacing: 0.0,
+            baseline_shift: 0.0,
+            caps: false,
+            small_caps: false,
+            hidden: false,
             revision_type: None,
             revision_author: None,
         }
@@ -261,6 +283,12 @@ fn apply_paragraph_attrs(node: &Node, style: &mut ResolvedParagraphStyle) {
     if let Some(AttributeValue::Bool(v)) = node.attributes.get(&AttributeKey::Bidi) {
         style.bidi = *v;
     }
+    if let Some(AttributeValue::Bool(v)) = node.attributes.get(&AttributeKey::WidowControl) {
+        style.widow_control = *v;
+    }
+    if let Some(AttributeValue::Bool(v)) = node.attributes.get(&AttributeKey::ContextualSpacing) {
+        style.contextual_spacing = *v;
+    }
 }
 
 fn apply_spacing_from_attrs(attrs: &s1_model::AttributeMap, style: &mut ResolvedParagraphStyle) {
@@ -306,13 +334,35 @@ fn apply_run_attrs_from_map(attrs: &s1_model::AttributeMap, style: &mut Resolved
     }
     if let Some(val) = attrs.get(&AttributeKey::Underline) {
         match val {
-            AttributeValue::Bool(v) => style.underline = *v,
-            AttributeValue::String(s) => style.underline = s != "none",
+            AttributeValue::Bool(v) => {
+                style.underline = if *v {
+                    "single".to_string()
+                } else {
+                    "none".to_string()
+                }
+            }
+            AttributeValue::UnderlineStyle(us) => {
+                style.underline = match us {
+                    s1_model::UnderlineStyle::None => "none",
+                    s1_model::UnderlineStyle::Single => "single",
+                    s1_model::UnderlineStyle::Double => "double",
+                    s1_model::UnderlineStyle::Thick => "thick",
+                    s1_model::UnderlineStyle::Dotted => "dotted",
+                    s1_model::UnderlineStyle::Dashed => "dashed",
+                    s1_model::UnderlineStyle::Wave => "wave",
+                    _ => "single",
+                }
+                .to_string()
+            }
+            AttributeValue::String(s) => style.underline = s.clone(),
             _ => {}
         }
     }
     if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::Strikethrough) {
         style.strikethrough = *v;
+    }
+    if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::DoubleStrikethrough) {
+        style.double_strikethrough = *v;
     }
     if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::Superscript) {
         style.superscript = *v;
@@ -325,6 +375,18 @@ fn apply_run_attrs_from_map(attrs: &s1_model::AttributeMap, style: &mut Resolved
     }
     if let Some(AttributeValue::Float(v)) = attrs.get(&AttributeKey::FontSpacing) {
         style.character_spacing = *v;
+    }
+    if let Some(AttributeValue::Float(v)) = attrs.get(&AttributeKey::BaselineShift) {
+        style.baseline_shift = *v;
+    }
+    if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::Caps) {
+        style.caps = *v;
+    }
+    if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::SmallCaps) {
+        style.small_caps = *v;
+    }
+    if let Some(AttributeValue::Bool(v)) = attrs.get(&AttributeKey::Hidden) {
+        style.hidden = *v;
     }
     if let Some(AttributeValue::String(v)) = attrs.get(&AttributeKey::RevisionType) {
         style.revision_type = Some(v.clone());

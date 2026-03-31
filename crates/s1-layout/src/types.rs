@@ -100,6 +100,30 @@ pub struct LayoutBlock {
     pub kind: LayoutBlockKind,
 }
 
+/// Margins inside a text box frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBoxMargins {
+    /// Top margin in points.
+    pub top: f64,
+    /// Bottom margin in points.
+    pub bottom: f64,
+    /// Left margin in points.
+    pub left: f64,
+    /// Right margin in points.
+    pub right: f64,
+}
+
+impl Default for TextBoxMargins {
+    fn default() -> Self {
+        Self {
+            top: 4.0,
+            bottom: 4.0,
+            left: 4.0,
+            right: 4.0,
+        }
+    }
+}
+
 /// The kind of a layout block.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -166,6 +190,46 @@ pub enum LayoutBlockKind {
         /// MIME content type (e.g., "image/png", "image/jpeg").
         content_type: Option<String>,
     },
+    /// A drawn shape (rectangle, ellipse, line, etc.).
+    Shape {
+        /// Shape type identifier (e.g., "rect", "ellipse", "line").
+        shape_type: String,
+        /// Fill color (None for no fill / transparent).
+        fill_color: Option<Color>,
+        /// Stroke/outline color (None for no stroke).
+        stroke_color: Option<Color>,
+        /// Stroke width in points.
+        stroke_width: f64,
+        /// Rotation angle in degrees (clockwise).
+        rotation_deg: f64,
+        /// Whether the shape is flipped horizontally.
+        flip_h: bool,
+        /// Whether the shape is flipped vertically.
+        flip_v: bool,
+        /// Whether this shape is floating (absolutely positioned).
+        is_floating: bool,
+        /// Text wrap type for floating shapes.
+        wrap_type: WrapType,
+        /// Whether this shape contains a text frame.
+        has_text_frame: bool,
+    },
+    /// A text box (shape with embedded text content).
+    TextBox {
+        /// Shape type identifier (e.g., "rect", "roundRect").
+        shape_type: String,
+        /// Fill color (None for no fill / transparent).
+        fill_color: Option<Color>,
+        /// Stroke/outline color (None for no stroke).
+        stroke_color: Option<Color>,
+        /// Stroke width in points.
+        stroke_width: f64,
+        /// Internal text margins.
+        text_margins: TextBoxMargins,
+        /// Vertical alignment of text within the box ("top", "center", "bottom").
+        text_vertical_align: String,
+        /// Content blocks (paragraphs, etc.) inside the text box.
+        blocks: Vec<LayoutBlock>,
+    },
 }
 
 /// A line of text within a paragraph.
@@ -221,10 +285,12 @@ pub struct GlyphRun {
     pub bold: bool,
     /// Whether this run is italic.
     pub italic: bool,
-    /// Whether this run is underlined.
-    pub underline: bool,
+    /// Underline style ("none", "single", "double", "thick", "dotted", "dashed", "wave").
+    pub underline: String,
     /// Whether this run has strikethrough.
     pub strikethrough: bool,
+    /// Whether this run has double strikethrough.
+    pub double_strikethrough: bool,
     /// Whether this run is superscript.
     pub superscript: bool,
     /// Whether this run is subscript.
@@ -233,6 +299,16 @@ pub struct GlyphRun {
     pub highlight_color: Option<Color>,
     /// Character spacing in points (letter-spacing).
     pub character_spacing: f64,
+    /// Baseline shift in points (positive = up).
+    pub baseline_shift: f64,
+    /// All caps — text should be uppercased during rendering.
+    pub caps: bool,
+    /// Small caps — lowercase letters rendered as smaller uppercase.
+    pub small_caps: bool,
+    /// Hidden text — should be excluded from visible rendering.
+    pub hidden: bool,
+    /// Font metrics (ascent, descent) for accurate baseline positioning.
+    pub metrics: Option<s1_text::FontMetrics>,
     /// Revision type for track changes (e.g., "insertion", "deletion").
     pub revision_type: Option<String>,
     /// Revision author for track changes.

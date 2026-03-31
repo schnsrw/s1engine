@@ -368,22 +368,315 @@ Recommended editor targets:
 - repaint of changed page(s) only after local edit when possible
 - no HTML diffing requirement for editor correctness
 
-## Risks and Open Decisions
+## Locked Decisions
+
+### Scene serialization: JSON (not binary)
+
+**Decision:** Scene data crosses the WASM boundary as JSON strings, parsed with `JSON.parse()` on the JS side.
+
+**Rationale:**
+
+- `JSON.parse()` is the fastest deserialization path in every browser engine (V8, SpiderMonkey, JSC). It outperforms `serde_wasm_bindgen` for payloads above ~1 KB.
+- JSON is human-readable, which simplifies debugging, fidelity comparison tooling, and snapshot testing.
+- The overhead of JSON serialization in Rust (via `serde_json`) is negligible compared to layout computation.
+- Binary formats (MessagePack, FlatBuffers) add dependencies, tooling complexity, and debugging friction for marginal throughput gains on the data sizes we produce (typical page scene is 5–50 KB).
+- Temporary `_json` wrappers can be replaced later if profiling proves JSON is a bottleneck, but the protocol shape (field names, nesting) remains stable regardless of encoding.
+
+**Convention:** All scene/geometry API methods return `String` (JSON). JS callers use `JSON.parse(result)`. Method names end with no suffix (not `_json`) since JSON is the canonical encoding.
+
+### Scene module location: `s1-layout` (not a separate crate)
+
+**Decision:** Scene serialization lives inside `s1-layout` as a `scene` submodule alongside the existing `html` submodule.
+
+**Rationale:**
+
+- The scene is a direct projection of `LayoutDocument` — adding a separate crate would create a circular dependency or force `s1-layout` to export unstable internals.
+- The `s1-layout` crate already contains `layout_to_html()` as a serialization path; `layout_to_scene_json()` is the canvas equivalent.
+- A separate crate adds coordination overhead with no architectural benefit at this scale.
+
+### Model position format across WASM boundary
+
+**Decision:** Positions use the `PositionRef` JSON shape defined in `CANVAS_EDITOR_WASM_API_CONTRACT.md`:
+
+```json
+{ "node_id": "0:42", "offset_utf16": 15, "affinity": "downstream" }
+```
+
+- `node_id` is the `NodeId` serialized as `"replica_id:counter"` (matching existing `data-node-id` attributes).
+- `offset_utf16` is the character offset in UTF-16 code units within the text-bearing node.
+- `affinity` is `"downstream"` (default) or `"upstream"` for line-wrap ambiguity.
+
+Rust internally converts UTF-16 offsets to byte/char offsets as needed. The boundary contract is always UTF-16.
+
+### Accessibility mirror: semantic output div approach
+
+**Decision:** The a11y mirror is a hidden DOM tree (`aria-hidden="false"`, visually clipped) that reflects the reading order of visible pages.
+
+**Strategy:**
+
+1. On layout revision change, `a11y/mirror.js` receives the scene summary.
+2. For each visible page, it creates semantic elements: `<p>`, `<h1>`–`<h6>`, `<table>`, `<li>`, `<a>`, `<img alt="...">`.
+3. Elements are positioned off-screen but in correct DOM order for screen reader traversal.
+4. The mirror does NOT attempt to replicate visual layout — it provides reading order and landmarks only.
+5. Active selection/focus is synchronized: `aria-activedescendant` or focus management tracks the model position.
+6. Mirror updates are debounced (100ms) to avoid screen reader chatter during rapid edits.
+
+**What it exposes:**
+- Document headings and heading levels
+- Paragraph text content
+- Table structure (rows, cells, headers)
+- Image alt text
+- Link targets
+- List structure and nesting
+- Current selection/focus position
+
+**What it does NOT do:**
+- Replicate exact visual positions
+- Handle pointer interaction (canvas handles that)
+- Own editing input (hidden textarea handles that)
+
+## Incremental Scene Updates
+
+### Invalidation model
+
+Every `EditResult` returned from a mutation includes `dirty_pages: { start, end }` — the inclusive range of page indices whose scene data changed.
+
+JS uses this to:
+
+1. Evict cached page scenes for `[start..end]` from `scene-store.js`.
+2. Re-fetch only dirty page scenes via `visible_page_scenes(start, end)`.
+3. Repaint only dirty pages on the canvas.
+
+### Invalidation levels (refined)
+
+| Level | Trigger | JS action |
+|---|---|---|
+| **paint-only** | cursor blink, selection change, hover | Repaint overlay layer only, no WASM call |
+| **page-scene dirty** | text edit, formatting change within a page | Re-fetch dirty pages from `dirty_pages` range |
+| **pagination dirty from page N** | content height change, section break, table reflow | Re-fetch scene summary + all pages from N onward |
+| **document-wide dirty** | style definition change, global setting | Re-fetch full scene summary + all visible pages |
+
+### Revision-based cache coherence
+
+- `scene-store.js` stores `(page_index, layout_revision) → PageScene`.
+- On edit, the returned `layout_revision` is compared to cached revision. Stale entries are evicted.
+- If `layout_revision` has not changed (e.g., a metadata-only edit), no scene re-fetch is needed.
+
+### No delta encoding for now
+
+Full page scenes are re-fetched for dirty pages. Delta encoding (sending only changed items) is deferred until profiling shows it's needed. The typical dirty-page set is 1–3 pages, and each page scene is 5–50 KB — well within acceptable latency.
+
+## Hidden Input Positioning Algorithm
+
+The hidden `<textarea>` must be positioned near the caret for IME candidate windows to appear correctly.
+
+### Algorithm
+
+1. On selection change, call `caret_rect(position)` → `RectPt { page_index, x, y, width, height }`.
+2. Convert page-local point coordinates to viewport CSS pixels:
+   ```
+   css_x = (page_offset_x + rect.x) * zoom
+   css_y = (page_offset_y + rect.y) * zoom - scroll_y
+   ```
+3. Position the hidden textarea at `(css_x, css_y)` with `position: fixed`.
+4. Set textarea height to match caret height for correct IME popup alignment.
+5. The textarea is `opacity: 0`, `width: 1px`, `overflow: hidden` — invisible but positioned.
+
+### Edge cases
+
+- **Caret at page bottom:** Ensure IME popup doesn't overflow viewport; browser handles this natively.
+- **Zoom change:** Reposition on zoom since CSS pixel coordinates shift.
+- **Scroll:** Reposition on scroll since page offset changes.
+- **Multi-page selection:** Position at focus (not anchor) end of selection.
+
+## Spellcheck Strategy
+
+**Decision:** Custom spellcheck rendering on canvas, with pluggable spellcheck engine.
+
+### Architecture
+
+1. **Spellcheck engine** is external (browser-native via hidden mirror, or a WASM-based dictionary checker). The editor does not ship its own dictionary.
+2. **Spellcheck results** are ranges of misspelled words, stored in JS view state (not in the Rust model).
+3. **Canvas rendering** paints red wavy underlines at the geometry positions of misspelled ranges (obtained via `selection_rects()` for each misspelled range).
+4. **Suggestion popup** is a DOM overlay positioned from the misspelled word's geometry.
+
+### Initial approach (hidden mirror)
+
+For the first implementation, use a hidden `<div contenteditable>` containing the text of the active paragraph. The browser's native spellcheck marks misspelled words. JS reads the misspelled ranges from the DOM and translates them to model ranges.
+
+This avoids shipping a dictionary while still getting canvas-painted underlines.
+
+### Future approach (WASM spellcheck)
+
+Replace the hidden mirror with a WASM-based spellcheck engine (e.g., hunspell compiled to WASM or a custom dictionary). This eliminates the hidden DOM surface entirely.
+
+## Clipboard Strategy
+
+### Copy
+
+1. On Ctrl+C / Cmd+C, call `copy_range_plain_text(range)` and `copy_range_html(range)` from WASM.
+2. Write both formats to the clipboard via the Clipboard API:
+   ```js
+   navigator.clipboard.write([
+     new ClipboardItem({
+       'text/plain': plainBlob,
+       'text/html': htmlBlob
+     })
+   ]);
+   ```
+
+### Cut
+
+1. Copy (as above).
+2. Call `delete_range(range)` to remove the selected content.
+3. Repaint dirty pages from the `EditResult`.
+
+### Paste
+
+1. Read clipboard via `navigator.clipboard.read()`.
+2. If `text/html` is available and rich paste is desired:
+   - Pass HTML to a new WASM method `paste_html(position, html)` which parses the HTML fragment and inserts structured content.
+3. If plain text only:
+   - Call `insert_text_at(position, text)` or `replace_range(range, text)`.
+4. Repaint dirty pages from the `EditResult`.
+
+### Paste sanitization
+
+- The Rust-side `paste_html()` method sanitizes the HTML (strips scripts, external images, dangerous attributes).
+- Only structural elements are preserved: paragraphs, runs with formatting, tables, lists, images (as data URIs).
+- Unknown elements are flattened to plain text.
+
+## Toolbar State Update Flow
+
+### Problem
+
+The toolbar (bold/italic/alignment buttons, font picker, etc.) must reflect the current document state at the selection. In the DOM editor, this was read from DOM element styles. In canvas mode, DOM has no styled elements to query.
+
+### Solution
+
+1. On every selection change, `selection/model-selection.js` calls a new WASM method:
+   ```
+   selection_formatting(range) → FormattingState
+   ```
+2. `FormattingState` returns the resolved formatting at the selection:
+   ```json
+   {
+     "bold": true,
+     "italic": false,
+     "underline": "none",
+     "font_family": "Times New Roman",
+     "font_size_pt": 12.0,
+     "color": "#000000",
+     "alignment": "left",
+     "line_spacing": "single",
+     "list_format": null,
+     "style_id": "Normal"
+   }
+   ```
+3. `toolbar-handlers.js` updates button active states and dropdown values from `FormattingState`.
+4. For mixed-formatting selections (e.g., partially bold), values are `null` (indeterminate).
+
+### Debouncing
+
+Toolbar state updates are debounced to 50ms to avoid excessive WASM calls during rapid cursor movement.
+
+## Undo/Redo Ownership
+
+**Decision:** Undo/redo is fully owned by the Rust `s1-ops` transaction stack. JS never maintains a parallel undo history.
+
+### Flow
+
+1. User presses Ctrl+Z → `input/bridge.js` intercepts.
+2. Calls `document/session.js` → `doc.undo()`.
+3. Rust undoes the last transaction, returns `EditResult` with dirty pages and new selection.
+4. JS repaints dirty pages, updates selection, updates toolbar state.
+
+### Redo
+
+Same flow with `doc.redo()`.
+
+### Batch operations
+
+Multi-step UI operations (e.g., find-and-replace-all) use `begin_batch()` / `end_batch()` so they undo as a single unit.
+
+## Dirty Document Tracking
+
+The editor needs to know if the document has unsaved changes (for the dirty indicator, close confirmation, etc.).
+
+### Strategy
+
+1. `document/session.js` stores `lastSavedRevision` (the `document_revision` at last save).
+2. On every edit, compare `doc.document_revision()` to `lastSavedRevision`.
+3. If different, the document is dirty → update the title bar dirty indicator.
+4. On save, update `lastSavedRevision = doc.document_revision()`.
+
+This is simpler and more reliable than tracking individual edits.
+
+## Collaborative Peer Sync with Scene Invalidation
+
+### Problem
+
+When a remote peer sends CRDT operations, the local document model updates, which may invalidate pages. The canvas must repaint without knowing which specific pages changed.
+
+### Strategy
+
+1. Remote operations arrive via the collaboration transport (WebSocket relay).
+2. `collab.js` applies them to the CRDT document: `collab_doc.apply_remote_ops(ops)`.
+3. The CRDT layer returns a `SyncResult` with `affected_node_ids`.
+4. Call `doc.layout_revision()` — if it changed, the layout is dirty.
+5. Call `scene_summary()` to get the new page count and page sizes.
+6. Compare with the cached scene summary to identify which pages changed (page count, item counts).
+7. Re-fetch and repaint changed pages.
+
+### Collaborative cursors
+
+- Each peer's cursor position is broadcast via awareness protocol.
+- Remote cursors are stored in `selection/model-selection.js` as secondary ranges.
+- `selection/painting.js` paints them with distinct colors (assigned by peer ID hash).
+- `caret_rect()` is called for each remote cursor position to get paint coordinates.
+
+## Performance Instrumentation
+
+### Metrics to track
+
+| Metric | Where measured | Target |
+|---|---|---|
+| Layout time (ms) | Rust `s1-layout` | < 50ms for single-page edit |
+| Scene serialization time (ms) | Rust `layout_to_scene_json()` | < 10ms per page |
+| WASM boundary crossing (ms) | JS before/after WASM call | < 5ms overhead |
+| Canvas paint time (ms) | JS `requestAnimationFrame` callback | < 16ms (60 FPS) |
+| Hit-test latency (ms) | JS click → position resolved | < 5ms |
+| Keypress-to-paint latency (ms) | JS input event → canvas repainted | < 50ms |
+| Scene store cache hit rate (%) | `scene-store.js` | > 90% during scrolling |
+
+### Instrumentation approach
+
+- Wrap key WASM calls in `performance.mark()` / `performance.measure()`.
+- Add a `--perf` query parameter that enables a performance overlay (FPS counter, layout time, paint time).
+- Log slow frames (> 20ms paint) to console in debug mode.
+- Expose `performance.getEntriesByType('measure')` for automated benchmark collection.
+
+### Baseline capture
+
+Before starting canvas migration, capture baseline measurements of the current DOM editor for:
+- Document open time (WASM load + first render)
+- Typing latency (keypress → visual update)
+- Scroll FPS
+- Large document (100+ pages) responsiveness
+
+These baselines are stored in `tests/fidelity/baselines/` for regression comparison.
+
+## Risks and Mitigations
 
 ### Hard problems
 
-- accessibility parity with canvas
-- browser IME edge cases
-- custom spellcheck UX
-- clipboard fidelity for rich ranges
-- selection behavior across tables, headers/footers, and shapes
-
-### Decisions to lock early
-
-- JSON vs binary scene serialization
-- whether scene lives in `s1-layout` or a dedicated UI-facing crate/module
-- exact model position format across WASM boundary
-- first-pass approach for accessibility mirror
+| Risk | Mitigation |
+|---|---|
+| Accessibility parity with canvas | Semantic mirror provides reading order; test with VoiceOver/NVDA early in Phase 1 |
+| Browser IME edge cases | Hidden textarea approach is battle-tested (Google Docs, VS Code); test CJK/Korean/Japanese/Arabic |
+| Custom spellcheck UX | Start with hidden mirror for browser-native spellcheck; migrate to WASM spellcheck later |
+| Clipboard fidelity for rich ranges | Use `copy_range_html()` from Rust for guaranteed round-trip fidelity |
+| Selection across tables/headers/shapes | Implement incrementally by element wave; tables are Wave 3 |
 
 ## Recommended First Implementation Slice
 

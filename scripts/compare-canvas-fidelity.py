@@ -332,7 +332,16 @@ def root_path(manifest_path: Path, raw: str) -> Path:
     path = Path(raw)
     if path.is_absolute():
         return path
-    return manifest_path.parent.parent / path if manifest_path.parent.name == 'fidelity' else manifest_path.parent / path
+    # Manifest paths are relative to the project root.
+    # Walk up from the manifest directory to find the project root
+    # (identified by Cargo.toml or .git).
+    candidate = manifest_path.parent.resolve()
+    for _ in range(10):
+        if (candidate / "Cargo.toml").exists() or (candidate / ".git").exists():
+            return candidate / path
+        candidate = candidate.parent
+    # Fallback: assume manifest is at tests/fidelity/
+    return manifest_path.parent.parent.parent / path
 
 
 def evaluate(report: Dict[str, Any], tolerances: Tolerances) -> Tuple[bool, List[str]]:

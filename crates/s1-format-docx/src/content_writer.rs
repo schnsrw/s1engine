@@ -555,8 +555,29 @@ fn write_table(
     xml.push_str("</w:tbl>");
 }
 
-/// Write `<w:tblGrid>` derived from the first row's cell widths.
+/// Write `<w:tblGrid>` — prefer `TableColumnWidths` attribute if present,
+/// otherwise derive from the first row's cell widths.
 fn write_table_grid(doc: &DocumentModel, table: &s1_model::Node, xml: &mut String) {
+    // First, try to use TableColumnWidths stored on the table node (round-trip from tblGrid).
+    if let Some(widths_str) = table
+        .attributes
+        .get_string(&AttributeKey::TableColumnWidths)
+    {
+        let grid_cols: Vec<i64> = widths_str
+            .split(',')
+            .filter_map(|v| v.trim().parse::<f64>().ok().map(points_to_twips))
+            .collect();
+        if !grid_cols.is_empty() {
+            xml.push_str("<w:tblGrid>");
+            for w in grid_cols {
+                xml.push_str(&format!(r#"<w:gridCol w:w="{w}"/>"#));
+            }
+            xml.push_str("</w:tblGrid>");
+            return;
+        }
+    }
+
+    // Fall back to deriving from first row's cell widths.
     if table.children.is_empty() {
         return;
     }
@@ -669,6 +690,14 @@ fn write_table_properties(attrs: &s1_model::AttributeMap) -> String {
         write_margin_side("bottom", margins.bottom, &mut tpr);
         write_margin_side("right", margins.right, &mut tpr);
         tpr.push_str("</w:tblCellMar>");
+    }
+
+    // Table shading/background
+    if let Some(color) = attrs.get_color(&AttributeKey::Background) {
+        tpr.push_str(&format!(
+            r#"<w:shd w:val="clear" w:color="auto" w:fill="{}"/>"#,
+            color.to_hex()
+        ));
     }
 
     // Table property change tracking (tblPrChange)

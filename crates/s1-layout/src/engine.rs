@@ -210,6 +210,8 @@ impl<'a> LayoutEngine<'a> {
         let mut page_section_indices: Vec<usize> = Vec::new();
         // Track previous block's space_after for CSS-style margin collapsing
         let mut prev_space_after: f64 = 0.0;
+        // Track previous paragraph's style ID for contextual spacing
+        let mut prev_para_style_id: Option<String> = None;
 
         for (block_idx, (node_id, node_type)) in blocks.iter().enumerate() {
             let block_section_idx = section_map[block_idx];
@@ -345,11 +347,26 @@ impl<'a> LayoutEngine<'a> {
                         prev_space_after = 0.0;
                     }
 
+                    // Contextual spacing: suppress space between consecutive
+                    // paragraphs with the same style (OOXML w:contextualSpacing).
+                    let current_style_id = self.doc.node(*node_id).and_then(|n| {
+                        n.attributes
+                            .get_string(&AttributeKey::StyleId)
+                            .map(|s| s.to_string())
+                    });
+                    let suppress_spacing = para_style.contextual_spacing
+                        && prev_para_style_id.is_some()
+                        && prev_para_style_id == current_style_id;
+
                     // CSS-style margin collapsing (handles negative margins per spec):
                     // - Both positive: use the larger
                     // - Both negative: use the more negative (min)
                     // - Mixed: add them together
-                    let space_before = sanitize_pt(para_style.space_before);
+                    let space_before = if suppress_spacing {
+                        0.0
+                    } else {
+                        sanitize_pt(para_style.space_before)
+                    };
                     let collapsed_spacing = if prev_space_after >= 0.0 && space_before >= 0.0 {
                         // Both positive: CSS-style collapsing — take the larger
                         space_before.max(prev_space_after) - prev_space_after
@@ -409,6 +426,7 @@ impl<'a> LayoutEngine<'a> {
                             page_blocks.push(block);
                             current_y += block_height + space_after;
                             prev_space_after = space_after;
+                            prev_para_style_id = current_style_id.clone();
                             continue;
                         }
 
@@ -473,8 +491,17 @@ impl<'a> LayoutEngine<'a> {
                                 {
                                     let mut y_accum = 0.0;
                                     for line in lines.iter_mut() {
-                                        // baseline_y is relative to block, recalculate
-                                        line.baseline_y = y_accum + line.height * 0.75;
+                                        // Recalculate baseline from font metrics
+                                        let max_ascent = line
+                                            .runs
+                                            .iter()
+                                            .filter_map(|r| r.metrics.as_ref().map(|m| m.ascent))
+                                            .fold(0.0_f64, f64::max);
+                                        line.baseline_y = if max_ascent > 0.0 {
+                                            y_accum + max_ascent
+                                        } else {
+                                            y_accum + line.height * 0.8
+                                        };
                                         y_accum += line.height;
                                     }
                                 }
@@ -482,6 +509,7 @@ impl<'a> LayoutEngine<'a> {
                                 page_blocks.push(cont);
                                 current_y += cont_height + space_after;
                                 prev_space_after = space_after;
+                                prev_para_style_id = current_style_id.clone();
 
                                 // Handle case where continuation still overflows
                                 if current_y > content_rect.bottom() {
@@ -579,6 +607,7 @@ impl<'a> LayoutEngine<'a> {
                             page_blocks.push(block);
                             current_y += block_height + space_after;
                             prev_space_after = space_after;
+                            prev_para_style_id = current_style_id.clone();
                             // If the re-laid-out block still overflows (block
                             // taller than page/column), advance to next
                             // column or force a page break so the next block
@@ -621,6 +650,7 @@ impl<'a> LayoutEngine<'a> {
                         page_blocks.push(block);
                         current_y += block_height + space_after;
                         prev_space_after = space_after;
+                        prev_para_style_id = current_style_id.clone();
                         // If the block overflows (e.g. single oversized
                         // block on an empty page), advance to next column
                         // or force a page break.
@@ -660,7 +690,8 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
                 NodeType::Table => {
-                    // Layout all rows independently for cross-page splitting
+                    prev_para_style_id = None; // break contextual spacing chain
+                                               // Layout all rows independently for cross-page splitting
                     let all_rows = self.layout_table_rows(*node_id, content_rect)?;
 
                     if all_rows.is_empty() {
@@ -956,6 +987,99 @@ impl<'a> LayoutEngine<'a> {
                         prev_space_after = 0.0;
                     }
                 }
+                NodeType::Drawing => {
+                    // Check if this is a floating drawing
+                    let is_floating = self
+                        .doc
+                        .node(*node_id)
+                        .and_then(|n| n.attributes.get_string(&AttributeKey::ImagePositionType))
+                        .map(|s| s == "anchor")
+                        .unwrap_or(false);
+
+                    // Check if this Drawing has a TextBox child
+                    let has_textbox = self
+                        .doc
+                        .node(*node_id)
+                        .map(|n| {
+                            n.children.iter().any(|&c| {
+                                self.doc
+                                    .node(c)
+                                    .map(|cn| cn.node_type == NodeType::TextBox)
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    if is_floating {
+                        let block = if has_textbox {
+                            self.layout_textbox(*node_id, content_rect, current_y)?
+                        } else {
+                            self.layout_shape(*node_id, content_rect, current_y)?
+                        };
+                        // Same floating handling as Image
+                        let float_rect = self.build_float_rect(*node_id, &block);
+                        page_floats.push(float_rect);
+                        floating_images.push(block);
+                    } else {
+                        let block = if has_textbox {
+                            self.layout_textbox(*node_id, content_rect, current_y)?
+                        } else {
+                            self.layout_shape(*node_id, content_rect, current_y)?
+                        };
+                        let block_height = block.bounds.height;
+
+                        if current_y + block_height > content_rect.bottom()
+                            && !page_blocks.is_empty()
+                        {
+                            // Try next column before going to a new page
+                            if current_column + 1 < column_count {
+                                current_column += 1;
+                                let full_rect = full_page_content_rect;
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            } else {
+                                // Flush floating images to the page before creating it
+                                let mut new_page = self.make_page(
+                                    page_index,
+                                    &page_layout,
+                                    std::mem::take(&mut page_blocks),
+                                    current_section_idx,
+                                );
+                                new_page.floating_images = std::mem::take(&mut floating_images);
+                                pages.push(new_page);
+                                page_section_indices.push(current_section_idx);
+                                page_index += 1;
+                                page_floats.clear();
+                                current_column = 0;
+                                let full_rect = full_page_content_rect;
+                                content_rect = Self::column_content_rect(
+                                    full_rect,
+                                    column_count,
+                                    column_spacing,
+                                    current_column,
+                                );
+                                current_y = content_rect.y;
+                            }
+
+                            let block = if has_textbox {
+                                self.layout_textbox(*node_id, content_rect, current_y)?
+                            } else {
+                                self.layout_shape(*node_id, content_rect, current_y)?
+                            };
+                            let block_height = block.bounds.height;
+                            page_blocks.push(block);
+                            current_y += block_height;
+                        } else {
+                            page_blocks.push(block);
+                            current_y += block_height;
+                        }
+                    }
+                }
                 _ => {} // Skip other node types
             }
         }
@@ -1180,7 +1304,10 @@ impl<'a> LayoutEngine<'a> {
             for &child_id in &body.children {
                 if let Some(child) = self.doc.node(child_id) {
                     match child.node_type {
-                        NodeType::Paragraph | NodeType::Table | NodeType::Image => {
+                        NodeType::Paragraph
+                        | NodeType::Table
+                        | NodeType::Image
+                        | NodeType::Drawing => {
                             blocks.push((child_id, child.node_type));
                         }
                         NodeType::TableOfContents => {
@@ -1390,12 +1517,17 @@ impl<'a> LayoutEngine<'a> {
                             text: String::new(),
                             bold: false,
                             italic: false,
-                            underline: false,
+                            underline: "none".to_string(),
                             strikethrough: false,
+                            double_strikethrough: false,
                             superscript: false,
                             subscript: false,
                             highlight_color: None,
                             character_spacing: 0.0,
+                            baseline_shift: 0.0,
+                            caps: false,
+                            small_caps: false,
+                            hidden: false,
                             revision_type: None,
                             revision_author: None,
                             inline_image: None,
@@ -1473,12 +1605,17 @@ impl<'a> LayoutEngine<'a> {
                             text: "\t".to_string(),
                             bold: false,
                             italic: false,
-                            underline: false,
+                            underline: "none".to_string(),
                             strikethrough: false,
+                            double_strikethrough: false,
                             superscript: false,
                             subscript: false,
                             highlight_color: None,
                             character_spacing: 0.0,
+                            baseline_shift: 0.0,
+                            caps: false,
+                            small_caps: false,
+                            hidden: false,
                             revision_type: None,
                             revision_author: None,
                             inline_image: None,
@@ -1511,12 +1648,17 @@ impl<'a> LayoutEngine<'a> {
                                 text: field_text,
                                 bold: false,
                                 italic: false,
-                                underline: false,
+                                underline: "none".to_string(),
                                 strikethrough: false,
+                                double_strikethrough: false,
                                 superscript: false,
                                 subscript: false,
                                 highlight_color: None,
                                 character_spacing: 0.0,
+                                baseline_shift: 0.0,
+                                caps: false,
+                                small_caps: false,
+                                hidden: false,
                                 revision_type: None,
                                 revision_author: None,
                                 inline_image: None,
@@ -1642,12 +1784,17 @@ impl<'a> LayoutEngine<'a> {
                             text: String::new(),
                             bold: false,
                             italic: false,
-                            underline: false,
+                            underline: "none".to_string(),
                             strikethrough: false,
+                            double_strikethrough: false,
                             superscript: false,
                             subscript: false,
                             highlight_color: None,
                             character_spacing: 0.0,
+                            baseline_shift: 0.0,
+                            caps: false,
+                            small_caps: false,
+                            hidden: false,
                             revision_type: None,
                             revision_author: None,
                             inline_image: Some(InlineImage {
@@ -1765,24 +1912,57 @@ impl<'a> LayoutEngine<'a> {
     ) -> Result<ShapedRunInfo, LayoutError> {
         let run_style = resolve_run_style(self.doc, run_id);
 
-        // Find font with extended fallback chain
+        // Find font with substitution table (Calibri→Carlito, etc.)
         let font_id = self
             .font_db
-            .find(&run_style.font_family, run_style.bold, run_style.italic)
+            .find_with_substitution(&run_style.font_family, run_style.bold, run_style.italic)
             // Try the same font without bold/italic
-            .or_else(|| self.font_db.find(&run_style.font_family, false, false))
-            .or_else(|| self.font_db.find(DEFAULT_FONT_FAMILY, false, false))
-            // Common serif fonts
-            .or_else(|| self.font_db.find("Times New Roman", false, false))
-            .or_else(|| self.font_db.find("Georgia", false, false))
-            // Common sans-serif fonts
-            .or_else(|| self.font_db.find("Helvetica", false, false))
-            .or_else(|| self.font_db.find("Arial", false, false))
-            .or_else(|| self.font_db.find("Verdana", false, false))
-            .or_else(|| self.font_db.find("Roboto", false, false))
+            .or_else(|| {
+                self.font_db
+                    .find_with_substitution(&run_style.font_family, false, false)
+            })
+            .or_else(|| {
+                self.font_db
+                    .find_with_substitution(DEFAULT_FONT_FAMILY, false, false)
+            })
+            // Common fallback fonts
             .or_else(|| self.font_db.find("Noto Sans", false, false))
-            .or_else(|| self.font_db.find("DejaVu Sans", false, false))
-            .or_else(|| self.font_db.find("Liberation Sans", false, false));
+            .or_else(|| self.font_db.find("Noto Serif", false, false))
+            .or_else(|| self.font_db.find("Roboto", false, false))
+            .or_else(|| self.font_db.find("Liberation Sans", false, false))
+            .or_else(|| self.font_db.find("DejaVu Sans", false, false));
+
+        // Hidden text: produce a zero-width run so it occupies no space
+        if run_style.hidden {
+            return Ok(ShapedRunInfo {
+                source_id: run_id,
+                font_id: None,
+                font_family: run_style.font_family,
+                font_size: run_style.font_size,
+                color: run_style.color,
+                glyphs: Vec::new(),
+                is_line_break: false,
+                metrics: None,
+                hyperlink_url: None,
+                text: String::new(),
+                bold: run_style.bold,
+                italic: run_style.italic,
+                underline: run_style.underline.clone(),
+                strikethrough: run_style.strikethrough,
+                double_strikethrough: run_style.double_strikethrough,
+                superscript: run_style.superscript,
+                subscript: run_style.subscript,
+                highlight_color: run_style.highlight_color,
+                character_spacing: run_style.character_spacing,
+                baseline_shift: run_style.baseline_shift,
+                caps: run_style.caps,
+                small_caps: run_style.small_caps,
+                hidden: true,
+                revision_type: run_style.revision_type,
+                revision_author: run_style.revision_author,
+                inline_image: None,
+            });
+        }
 
         // Collect text from children
         let mut text = String::new();
@@ -1796,6 +1976,15 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
             }
+        }
+
+        // Apply caps/smallCaps text transform before shaping
+        if run_style.caps {
+            text = text.to_uppercase();
+        } else if run_style.small_caps {
+            // Small caps: uppercase the text (renderer will use smaller font size
+            // for originally-lowercase characters, but for shaping we uppercase all)
+            text = text.to_uppercase();
         }
 
         // L-15: Only apply 65% scaling if the run doesn't have an explicit font size
@@ -1910,12 +2099,17 @@ impl<'a> LayoutEngine<'a> {
             text,
             bold: run_style.bold,
             italic: run_style.italic,
-            underline: run_style.underline,
+            underline: run_style.underline.clone(),
             strikethrough: run_style.strikethrough,
+            double_strikethrough: run_style.double_strikethrough,
             superscript: run_style.superscript,
             subscript: run_style.subscript,
             highlight_color: run_style.highlight_color,
             character_spacing: run_style.character_spacing,
+            baseline_shift: run_style.baseline_shift,
+            caps: run_style.caps,
+            small_caps: run_style.small_caps,
+            hidden: run_style.hidden,
             revision_type: run_style.revision_type.clone(),
             revision_author: run_style.revision_author.clone(),
             inline_image: None,
@@ -2004,12 +2198,17 @@ impl<'a> LayoutEngine<'a> {
                             text: String::new(),
                             bold: run_style.bold,
                             italic: run_style.italic,
-                            underline: run_style.underline,
+                            underline: run_style.underline.clone(),
                             strikethrough: run_style.strikethrough,
+                            double_strikethrough: run_style.double_strikethrough,
                             superscript: run_style.superscript,
                             subscript: run_style.subscript,
                             highlight_color: run_style.highlight_color,
                             character_spacing: run_style.character_spacing,
+                            baseline_shift: run_style.baseline_shift,
+                            caps: run_style.caps,
+                            small_caps: run_style.small_caps,
+                            hidden: run_style.hidden,
                             revision_type: run_style.revision_type.clone(),
                             revision_author: run_style.revision_author.clone(),
                             inline_image: None,
@@ -2151,12 +2350,17 @@ impl<'a> LayoutEngine<'a> {
             text: text.to_string(),
             bold: run_style.bold,
             italic: run_style.italic,
-            underline: run_style.underline,
+            underline: run_style.underline.clone(),
             strikethrough: run_style.strikethrough,
+            double_strikethrough: run_style.double_strikethrough,
             superscript: run_style.superscript,
             subscript: run_style.subscript,
             highlight_color: run_style.highlight_color,
             character_spacing: run_style.character_spacing,
+            baseline_shift: run_style.baseline_shift,
+            caps: run_style.caps,
+            small_caps: run_style.small_caps,
+            hidden: run_style.hidden,
             revision_type: run_style.revision_type.clone(),
             revision_author: run_style.revision_author.clone(),
             inline_image: None,
@@ -2250,12 +2454,18 @@ impl<'a> LayoutEngine<'a> {
                             text: sub_text,
                             bold: run_info.bold,
                             italic: run_info.italic,
-                            underline: run_info.underline,
+                            underline: run_info.underline.clone(),
                             strikethrough: run_info.strikethrough,
+                            double_strikethrough: run_info.double_strikethrough,
                             superscript: run_info.superscript,
                             subscript: run_info.subscript,
                             highlight_color: run_info.highlight_color,
                             character_spacing: run_info.character_spacing,
+                            baseline_shift: run_info.baseline_shift,
+                            caps: run_info.caps,
+                            small_caps: run_info.small_caps,
+                            hidden: run_info.hidden,
+                            metrics: run_info.metrics,
                             revision_type: run_info.revision_type.clone(),
                             revision_author: run_info.revision_author.clone(),
                             inline_image: run_info.inline_image.clone(),
@@ -2343,10 +2553,24 @@ impl<'a> LayoutEngine<'a> {
             });
         }
 
-        // Compute baseline_y positions
+        // Compute baseline_y positions using actual font metrics when available.
+        // The baseline should be at: line_top + max_ascent_in_line.
+        // If no font metrics are available, fall back to line_height * 0.8
+        // which approximates typical serif/sans-serif ascent ratios.
         let mut y = 0.0;
         for line in &mut lines {
-            line.baseline_y = y + line.height * 0.8;
+            // Find the maximum ascent among all runs in this line
+            let max_ascent = line
+                .runs
+                .iter()
+                .filter_map(|r| r.metrics.as_ref().map(|m| m.ascent))
+                .fold(0.0_f64, f64::max);
+            if max_ascent > 0.0 {
+                line.baseline_y = y + max_ascent;
+            } else {
+                // Fallback: approximate baseline from line height
+                line.baseline_y = y + line.height * 0.8;
+            }
             y += line.height;
         }
 
@@ -2625,68 +2849,97 @@ impl<'a> LayoutEngine<'a> {
             .unwrap_or(1)
             .max(1);
 
-        // Build column widths from cell width attributes in the first row.
-        // Falls back to equal distribution if no widths are specified.
+        // Build column widths: prefer TableColumnWidths (from w:tblGrid),
+        // then fall back to cell width attributes in the first row,
+        // then equal distribution.
         let col_widths: Vec<f64> = {
-            let mut widths = Vec::with_capacity(num_cols);
-            let mut has_explicit = false;
+            // First, try to use TableColumnWidths from the table node (parsed from w:tblGrid).
+            let grid_widths: Option<Vec<f64>> = table
+                .attributes
+                .get_string(&AttributeKey::TableColumnWidths)
+                .and_then(|s| {
+                    let parsed: Vec<f64> = s
+                        .split(',')
+                        .filter_map(|v| v.trim().parse::<f64>().ok())
+                        .collect();
+                    if parsed.is_empty() {
+                        None
+                    } else {
+                        Some(parsed)
+                    }
+                });
 
-            if let Some(&first_row_id) = table.children.first() {
-                if let Some(first_row) = self.doc.node(first_row_id) {
-                    for &cell_id in first_row.children.iter().take(num_cols) {
-                        if let Some(cell) = self.doc.node(cell_id) {
-                            match cell.attributes.get(&AttributeKey::CellWidth) {
-                                Some(AttributeValue::TableWidth(TableWidth::Fixed(pts))) => {
-                                    widths.push(*pts);
-                                    has_explicit = true;
+            if let Some(grid) = grid_widths {
+                // Use tblGrid column widths, scaling to fit content width if needed
+                let total: f64 = grid.iter().sum();
+                if total > 0.0 && (total - content_rect.width).abs() > 1.0 {
+                    let scale = content_rect.width / total;
+                    grid.iter().map(|&w| w * scale).collect()
+                } else {
+                    grid
+                }
+            } else {
+                // Fall back to cell width attributes in the first row
+                let mut widths = Vec::with_capacity(num_cols);
+                let mut has_explicit = false;
+
+                if let Some(&first_row_id) = table.children.first() {
+                    if let Some(first_row) = self.doc.node(first_row_id) {
+                        for &cell_id in first_row.children.iter().take(num_cols) {
+                            if let Some(cell) = self.doc.node(cell_id) {
+                                match cell.attributes.get(&AttributeKey::CellWidth) {
+                                    Some(AttributeValue::TableWidth(TableWidth::Fixed(pts))) => {
+                                        widths.push(*pts);
+                                        has_explicit = true;
+                                    }
+                                    Some(AttributeValue::TableWidth(TableWidth::Percent(pct))) => {
+                                        widths.push(content_rect.width * pct / 100.0);
+                                        has_explicit = true;
+                                    }
+                                    _ => {
+                                        widths.push(0.0); // placeholder
+                                    }
                                 }
-                                Some(AttributeValue::TableWidth(TableWidth::Percent(pct))) => {
-                                    widths.push(content_rect.width * pct / 100.0);
-                                    has_explicit = true;
-                                }
-                                _ => {
-                                    widths.push(0.0); // placeholder
-                                }
+                            } else {
+                                widths.push(0.0);
                             }
-                        } else {
-                            widths.push(0.0);
                         }
                     }
                 }
-            }
 
-            if !has_explicit || widths.is_empty() {
-                // Fall back to equal distribution
-                vec![content_rect.width / num_cols as f64; num_cols]
-            } else {
-                // Distribute remaining width among auto-sized columns
-                let total_explicit: f64 = widths.iter().filter(|&&w| w > 0.0).sum();
-                let auto_count = widths.iter().filter(|&&w| w <= 0.0).count();
-                let remaining = (content_rect.width - total_explicit).max(0.0);
-                let auto_width = if auto_count > 0 {
-                    remaining / auto_count as f64
+                if !has_explicit || widths.is_empty() {
+                    // Fall back to equal distribution
+                    vec![content_rect.width / num_cols as f64; num_cols]
                 } else {
-                    0.0
-                };
+                    // Distribute remaining width among auto-sized columns
+                    let total_explicit: f64 = widths.iter().filter(|&&w| w > 0.0).sum();
+                    let auto_count = widths.iter().filter(|&&w| w <= 0.0).count();
+                    let remaining = (content_rect.width - total_explicit).max(0.0);
+                    let auto_width = if auto_count > 0 {
+                        remaining / auto_count as f64
+                    } else {
+                        0.0
+                    };
 
-                // Scale proportionally if total exceeds content width
-                let total_with_auto: f64 = total_explicit + auto_width * auto_count as f64;
-                let scale = if total_with_auto > content_rect.width && total_with_auto > 0.0 {
-                    content_rect.width / total_with_auto
-                } else {
-                    1.0
-                };
+                    // Scale proportionally if total exceeds content width
+                    let total_with_auto: f64 = total_explicit + auto_width * auto_count as f64;
+                    let scale = if total_with_auto > content_rect.width && total_with_auto > 0.0 {
+                        content_rect.width / total_with_auto
+                    } else {
+                        1.0
+                    };
 
-                widths
-                    .iter()
-                    .map(|&w| {
-                        if w > 0.0 {
-                            w * scale
-                        } else {
-                            auto_width * scale
-                        }
-                    })
-                    .collect()
+                    widths
+                        .iter()
+                        .map(|&w| {
+                            if w > 0.0 {
+                                w * scale
+                            } else {
+                                auto_width * scale
+                            }
+                        })
+                        .collect()
+                }
             }
         };
 
@@ -2713,6 +2966,37 @@ impl<'a> LayoutEngine<'a> {
                 }
             });
 
+        // Read table-level default cell margins
+        let default_cell_margins = table
+            .attributes
+            .get(&AttributeKey::TableDefaultCellMargins)
+            .and_then(|v| {
+                if let AttributeValue::Margins(m) = v {
+                    Some(*m)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(s1_model::Margins {
+                top: 2.0,
+                bottom: 2.0,
+                left: 2.0,
+                right: 2.0,
+            });
+
+        // Read table indent
+        let table_indent = table
+            .attributes
+            .get(&AttributeKey::TableIndent)
+            .and_then(|v| {
+                if let AttributeValue::Float(f) = v {
+                    Some(*f)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0.0);
+
         let mut rows: Vec<LayoutTableRow> = Vec::new();
         let mut cumulative_y = 0.0;
 
@@ -2721,6 +3005,23 @@ impl<'a> LayoutEngine<'a> {
                 if row_node.node_type != NodeType::TableRow {
                     continue;
                 }
+
+                // Read row height constraints
+                let row_min_height =
+                    row_node
+                        .attributes
+                        .get(&AttributeKey::RowHeight)
+                        .and_then(|v| {
+                            if let AttributeValue::Float(h) = v {
+                                Some(*h)
+                            } else {
+                                None
+                            }
+                        });
+                let row_height_rule = row_node
+                    .attributes
+                    .get_string(&AttributeKey::RowHeightRule)
+                    .unwrap_or("atLeast");
 
                 let mut cells: Vec<LayoutTableCell> = Vec::new();
                 let mut max_cell_height: f64 = 20.0; // Minimum row height
@@ -2731,27 +3032,63 @@ impl<'a> LayoutEngine<'a> {
                             continue;
                         }
 
-                        let this_col_width = col_widths
+                        // Column span: sum widths of spanned columns
+                        let col_span = cell_node
+                            .attributes
+                            .get(&AttributeKey::ColSpan)
+                            .and_then(|v| {
+                                if let AttributeValue::Int(n) = v {
+                                    Some(*n as usize)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(1)
+                            .max(1);
+
+                        // Resolve cell margins: per-cell overrides table default
+                        let cell_margins = cell_node
+                            .attributes
+                            .get(&AttributeKey::CellPadding)
+                            .and_then(|v| {
+                                if let AttributeValue::Margins(m) = v {
+                                    Some(*m)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(default_cell_margins);
+
+                        let single_col_width = col_widths
                             .get(col_idx)
                             .copied()
                             .unwrap_or(content_rect.width / num_cols as f64);
-                        let cell_x = col_x_positions.get(col_idx).copied().unwrap_or(0.0);
+                        let this_col_width: f64 = if col_span > 1 {
+                            (col_idx..col_idx + col_span)
+                                .filter_map(|i| col_widths.get(i))
+                                .sum::<f64>()
+                                .max(single_col_width)
+                        } else {
+                            single_col_width
+                        };
+                        let cell_x =
+                            col_x_positions.get(col_idx).copied().unwrap_or(0.0) + table_indent;
                         let cell_rect = Rect::new(cell_x, 0.0, this_col_width, 0.0);
 
-                        // Layout cell content
+                        // Layout cell content using actual margins
+                        let margin_h = cell_margins.left + cell_margins.right;
+                        let content_width = (this_col_width - margin_h).max(1.0);
+                        let content_x = cell_x + cell_margins.left;
+
                         let mut cell_blocks = Vec::new();
-                        let mut cell_y = 2.0; // Padding
+                        let mut cell_y = cell_margins.top;
 
                         for &content_id in &cell_node.children {
                             if let Some(content) = self.doc.node(content_id) {
                                 if content.node_type == NodeType::Paragraph {
                                     let ps = resolve_paragraph_style(self.doc, content_id);
-                                    let cell_content_rect = Rect::new(
-                                        cell_x + 2.0,
-                                        cell_y,
-                                        this_col_width - 4.0,
-                                        1000.0,
-                                    );
+                                    let cell_content_rect =
+                                        Rect::new(content_x, cell_y, content_width, 1000.0);
                                     let block = self.layout_paragraph(
                                         content_id,
                                         &ps,
@@ -2761,12 +3098,8 @@ impl<'a> LayoutEngine<'a> {
                                     cell_y += block.bounds.height + sanitize_pt(ps.space_after);
                                     cell_blocks.push(block);
                                 } else if content.node_type == NodeType::Table {
-                                    let nested_rect = Rect::new(
-                                        cell_x + 2.0,
-                                        cell_y,
-                                        this_col_width - 4.0,
-                                        1000.0,
-                                    );
+                                    let nested_rect =
+                                        Rect::new(content_x, cell_y, content_width, 1000.0);
                                     let nested_rows = self.layout_table_rows_with_depth(
                                         content_id,
                                         nested_rect,
@@ -2777,9 +3110,9 @@ impl<'a> LayoutEngine<'a> {
                                     let block = LayoutBlock {
                                         source_id: content_id,
                                         bounds: Rect::new(
-                                            cell_x + 2.0,
+                                            content_x,
                                             cell_y,
-                                            this_col_width - 4.0,
+                                            content_width,
                                             nested_height,
                                         ),
                                         kind: LayoutBlockKind::Table {
@@ -2793,7 +3126,7 @@ impl<'a> LayoutEngine<'a> {
                             }
                         }
 
-                        cell_y += 2.0; // Bottom padding
+                        cell_y += cell_margins.bottom;
                         if cell_y > max_cell_height {
                             max_cell_height = cell_y;
                         }
@@ -2849,9 +3182,43 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
 
-                // Set actual cell heights
-                for cell in &mut cells {
+                // Apply row height constraints (w:trHeight)
+                if let Some(rh) = row_min_height {
+                    match row_height_rule {
+                        "exact" => {
+                            // Exact: force row to specified height
+                            max_cell_height = rh;
+                        }
+                        _ => {
+                            // atLeast (default): ensure minimum height
+                            if rh > max_cell_height {
+                                max_cell_height = rh;
+                            }
+                        }
+                    }
+                }
+
+                // Set actual cell heights and apply vertical alignment
+                for (ci, cell) in cells.iter_mut().enumerate() {
                     cell.bounds.height = max_cell_height;
+
+                    // Vertical alignment: shift content blocks within cell
+                    let cell_id = row_node.children.get(ci).copied();
+                    let valign = cell_id
+                        .and_then(|cid| self.doc.node(cid))
+                        .and_then(|cn| cn.attributes.get_string(&AttributeKey::VerticalAlign))
+                        .unwrap_or("top");
+                    let content_height: f64 = cell.blocks.iter().map(|b| b.bounds.height).sum();
+                    let shift = match valign {
+                        "center" => ((max_cell_height - content_height) / 2.0).max(0.0),
+                        "bottom" => (max_cell_height - content_height).max(0.0),
+                        _ => 0.0, // top = no shift
+                    };
+                    if shift > 0.1 {
+                        for block in &mut cell.blocks {
+                            block.bounds.y += shift;
+                        }
+                    }
                 }
 
                 let is_header = row_node
@@ -2861,7 +3228,12 @@ impl<'a> LayoutEngine<'a> {
                     .unwrap_or(false);
 
                 rows.push(LayoutTableRow {
-                    bounds: Rect::new(0.0, cumulative_y, content_rect.width, max_cell_height),
+                    bounds: Rect::new(
+                        table_indent,
+                        cumulative_y,
+                        content_rect.width - table_indent,
+                        max_cell_height,
+                    ),
                     cells,
                     is_header_row: is_header,
                     source_id: row_id,
@@ -2991,6 +3363,292 @@ impl<'a> LayoutEngine<'a> {
                 content_type,
             },
         })
+    }
+
+    /// Layout a drawing shape (rectangle, ellipse, line, etc.) without text content.
+    fn layout_shape(
+        &self,
+        drawing_id: NodeId,
+        content_rect: Rect,
+        y_pos: f64,
+    ) -> Result<LayoutBlock, LayoutError> {
+        let node = self.doc.node(drawing_id);
+
+        // Read dimensions
+        let width = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeWidth))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(100.0);
+        let height = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeHeight))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(100.0);
+
+        // Read shape properties
+        let shape_type = node
+            .and_then(|n| n.attributes.get_string(&AttributeKey::ShapeType))
+            .unwrap_or("rect")
+            .to_string();
+        let fill_color = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeFillColor))
+            .and_then(|v| {
+                if let AttributeValue::Color(c) = v {
+                    Some(*c)
+                } else {
+                    None
+                }
+            });
+        let stroke_color = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeStrokeColor))
+            .and_then(|v| {
+                if let AttributeValue::Color(c) = v {
+                    Some(*c)
+                } else {
+                    None
+                }
+            });
+        let stroke_width = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeStrokeWidth))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(1.0);
+        let rotation = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeRotation))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0.0);
+        let flip_h = node
+            .and_then(|n| n.attributes.get_bool(&AttributeKey::ShapeFlipH))
+            .unwrap_or(false);
+        let flip_v = node
+            .and_then(|n| n.attributes.get_bool(&AttributeKey::ShapeFlipV))
+            .unwrap_or(false);
+
+        // Constrain to content area, preserving aspect ratio
+        let scale_w = if width > content_rect.width {
+            content_rect.width / width
+        } else {
+            1.0
+        };
+        let scale_h = if height > content_rect.height && content_rect.height > 0.0 {
+            content_rect.height / height
+        } else {
+            1.0
+        };
+        let scale = scale_w.min(scale_h);
+        let final_w = width * scale;
+        let final_h = height * scale;
+
+        Ok(LayoutBlock {
+            source_id: drawing_id,
+            bounds: Rect::new(content_rect.x, y_pos, final_w, final_h),
+            kind: LayoutBlockKind::Shape {
+                shape_type,
+                fill_color,
+                stroke_color,
+                stroke_width,
+                rotation_deg: rotation,
+                flip_h,
+                flip_v,
+                is_floating: false,
+                wrap_type: WrapType::TopAndBottom,
+                has_text_frame: false,
+            },
+        })
+    }
+
+    /// Layout a drawing that contains a text box with paragraph content.
+    fn layout_textbox(
+        &mut self,
+        drawing_id: NodeId,
+        content_rect: Rect,
+        y_pos: f64,
+    ) -> Result<LayoutBlock, LayoutError> {
+        let node = self.doc.node(drawing_id);
+
+        // Read shape dimensions
+        let width = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeWidth))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(200.0);
+        let height = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeHeight))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(100.0);
+
+        // Shape properties
+        let shape_type = node
+            .and_then(|n| n.attributes.get_string(&AttributeKey::ShapeType))
+            .unwrap_or("rect")
+            .to_string();
+        let fill_color = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeFillColor))
+            .and_then(|v| {
+                if let AttributeValue::Color(c) = v {
+                    Some(*c)
+                } else {
+                    None
+                }
+            });
+        let stroke_color = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeStrokeColor))
+            .and_then(|v| {
+                if let AttributeValue::Color(c) = v {
+                    Some(*c)
+                } else {
+                    None
+                }
+            });
+        let stroke_width = node
+            .and_then(|n| n.attributes.get(&AttributeKey::ShapeStrokeWidth))
+            .and_then(|v| {
+                if let AttributeValue::Float(d) = v {
+                    Some(*d)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(1.0);
+
+        // Text margins and vertical alignment
+        let text_margins = self.read_text_margins(drawing_id);
+        let text_vertical_align = node
+            .and_then(|n| {
+                n.attributes
+                    .get_string(&AttributeKey::ShapeTextVerticalAlign)
+            })
+            .unwrap_or("top")
+            .to_string();
+
+        // Constrain width to content area
+        let scale_w = if width > content_rect.width {
+            content_rect.width / width
+        } else {
+            1.0
+        };
+        let final_w = width * scale_w;
+        let final_h = height; // Don't constrain height for textboxes — they may need full height
+
+        // Inner content rect (shape bounds minus text margins)
+        let inner_rect = Rect::new(
+            content_rect.x + text_margins.left,
+            y_pos + text_margins.top,
+            (final_w - text_margins.left - text_margins.right).max(1.0),
+            (final_h - text_margins.top - text_margins.bottom).max(1.0),
+        );
+
+        // Find TextBox child and layout its paragraph children
+        let mut inner_blocks = Vec::new();
+        let mut inner_y = inner_rect.y;
+
+        // Collect child IDs to avoid borrow conflicts with layout_paragraph_cached
+        let textbox_para_ids: Vec<NodeId> = self
+            .doc
+            .node(drawing_id)
+            .map(|dn| {
+                let mut para_ids = Vec::new();
+                for &child_id in &dn.children {
+                    if let Some(child) = self.doc.node(child_id) {
+                        if child.node_type == NodeType::TextBox {
+                            if let Some(tb_node) = self.doc.node(child_id) {
+                                for &para_id in &tb_node.children {
+                                    if let Some(para) = self.doc.node(para_id) {
+                                        if para.node_type == NodeType::Paragraph {
+                                            para_ids.push(para_id);
+                                        }
+                                    }
+                                }
+                            }
+                            break; // Only process first TextBox
+                        }
+                    }
+                }
+                para_ids
+            })
+            .unwrap_or_default();
+
+        for para_id in textbox_para_ids {
+            let para_style = resolve_paragraph_style(self.doc, para_id);
+            let block = self.layout_paragraph_cached(para_id, &para_style, inner_rect, inner_y)?;
+            inner_y += block.bounds.height;
+            inner_blocks.push(block);
+        }
+
+        Ok(LayoutBlock {
+            source_id: drawing_id,
+            bounds: Rect::new(content_rect.x, y_pos, final_w, final_h),
+            kind: LayoutBlockKind::TextBox {
+                shape_type,
+                fill_color,
+                stroke_color,
+                stroke_width,
+                text_margins,
+                text_vertical_align,
+                blocks: inner_blocks,
+            },
+        })
+    }
+
+    /// Read text margins from a drawing node's attributes.
+    ///
+    /// Returns default 4pt margins if the attribute is not present.
+    fn read_text_margins(&self, node_id: NodeId) -> TextBoxMargins {
+        let node = self.doc.node(node_id);
+        // Try to parse ShapeTextMargins attribute (stored as "top,bottom,left,right" in points)
+        if let Some(margins_str) =
+            node.and_then(|n| n.attributes.get_string(&AttributeKey::ShapeTextMargins))
+        {
+            let parts: Vec<&str> = margins_str.split(',').collect();
+            let parse_pt = |idx: usize| -> f64 {
+                parts
+                    .get(idx)
+                    .and_then(|p| p.trim().parse::<f64>().ok())
+                    .unwrap_or(4.0)
+            };
+            if parts.len() >= 4 {
+                return TextBoxMargins {
+                    top: parse_pt(0),
+                    bottom: parse_pt(1),
+                    left: parse_pt(2),
+                    right: parse_pt(3),
+                };
+            }
+        }
+        TextBoxMargins::default()
     }
 
     /// Layout a floating (anchored) image.
@@ -3584,12 +4242,18 @@ impl<'a> LayoutEngine<'a> {
                                         text: text.clone(),
                                         bold: false,
                                         italic: false,
-                                        underline: false,
+                                        underline: "none".to_string(),
                                         strikethrough: false,
+                                        double_strikethrough: false,
                                         superscript: false,
                                         subscript: false,
                                         highlight_color: None,
                                         character_spacing: 0.0,
+                                        baseline_shift: 0.0,
+                                        caps: false,
+                                        small_caps: false,
+                                        hidden: false,
+                                        metrics: None,
                                         revision_type: None,
                                         revision_author: None,
                                         inline_image: None,
@@ -3778,7 +4442,9 @@ impl<'a> LayoutEngine<'a> {
         bookmarks: &mut Vec<LayoutBookmark>,
     ) {
         match &block.kind {
-            LayoutBlockKind::Paragraph { .. } | LayoutBlockKind::Image { .. } => {
+            LayoutBlockKind::Paragraph { .. }
+            | LayoutBlockKind::Image { .. }
+            | LayoutBlockKind::Shape { .. } => {
                 // Check if the source node has BookmarkStart children
                 if let Some(node) = self.doc.node(block.source_id) {
                     for &child_id in &node.children {
@@ -3805,6 +4471,11 @@ impl<'a> LayoutEngine<'a> {
                             self.collect_bookmarks_from_block(cell_block, page_index, bookmarks);
                         }
                     }
+                }
+            }
+            LayoutBlockKind::TextBox { blocks, .. } => {
+                for inner_block in blocks {
+                    self.collect_bookmarks_from_block(inner_block, page_index, bookmarks);
                 }
             }
         }
@@ -3885,7 +4556,9 @@ impl<'a> LayoutEngine<'a> {
         starts: &mut Vec<(NodeId, usize, f64)>,
     ) {
         match &block.kind {
-            LayoutBlockKind::Paragraph { .. } | LayoutBlockKind::Image { .. } => {
+            LayoutBlockKind::Paragraph { .. }
+            | LayoutBlockKind::Image { .. }
+            | LayoutBlockKind::Shape { .. } => {
                 if let Some(node) = self.doc.node(block.source_id) {
                     for &child_id in &node.children {
                         if let Some(child) = self.doc.node(child_id) {
@@ -3903,6 +4576,11 @@ impl<'a> LayoutEngine<'a> {
                             self.collect_comment_starts_from_block(cell_block, page_index, starts);
                         }
                     }
+                }
+            }
+            LayoutBlockKind::TextBox { blocks, .. } => {
+                for inner_block in blocks {
+                    self.collect_comment_starts_from_block(inner_block, page_index, starts);
                 }
             }
         }
@@ -3985,7 +4663,12 @@ impl<'a> LayoutEngine<'a> {
                     }
                 }
             }
-            LayoutBlockKind::Image { .. } => {}
+            LayoutBlockKind::Image { .. } | LayoutBlockKind::Shape { .. } => {}
+            LayoutBlockKind::TextBox { blocks, .. } => {
+                for inner_block in blocks {
+                    self.collect_highlights_from_block(inner_block, page_index, annotations);
+                }
+            }
         }
     }
 

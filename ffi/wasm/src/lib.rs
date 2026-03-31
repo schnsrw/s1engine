@@ -37,6 +37,9 @@ impl WasmEngine {
             batch_label: None,
             batch_count: 0,
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         }
     }
 
@@ -53,6 +56,9 @@ impl WasmEngine {
             batch_count: 0,
             inner: Some(doc),
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         })
     }
 
@@ -70,6 +76,9 @@ impl WasmEngine {
             batch_count: 0,
             inner: Some(doc),
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         })
     }
 }
@@ -212,6 +221,12 @@ pub struct WasmDocument {
     /// Uses `RefCell` for interior mutability so read-like methods (`&self`)
     /// can lazily compute and cache the layout.
     layout_cache: std::cell::RefCell<Option<s1_layout::LayoutDocument>>,
+    /// IME composition anchor paragraph node ID (as "replica:counter" string).
+    composition_anchor_node: Option<String>,
+    /// IME composition anchor char offset within the paragraph.
+    composition_anchor_offset: Option<u32>,
+    /// Length (in chars) of the currently inserted composition preview text.
+    composition_preview_len: usize,
 }
 
 #[wasm_bindgen]
@@ -222,6 +237,9 @@ impl WasmDocument {
         self.batch_label = None;
         self.batch_count = 0;
         *self.layout_cache.get_mut() = None;
+        self.composition_anchor_node = None;
+        self.composition_anchor_offset = None;
+        self.composition_preview_len = 0;
     }
 
     /// Begin a batch of operations that form a single undo step.
@@ -6167,6 +6185,1385 @@ impl WasmDocument {
         self.get_notes_json(NodeType::EndnoteBody, &AttributeKey::EndnoteNumber)
     }
 
+    // ─── Canvas Editor Scene & Geometry APIs ─────────────────────
+
+    /// Return the scene protocol version supported by this build.
+    pub fn scene_protocol_version(&self) -> u32 {
+        1
+    }
+
+    /// Return a monotonically increasing document revision number.
+    ///
+    /// Bumps on every model mutation (insert, delete, format change).
+    /// Uses undo_count as a proxy for revision tracking.
+    pub fn document_revision(&self) -> Result<u32, JsError> {
+        let doc = self.doc()?;
+        Ok(doc.undo_count() as u32)
+    }
+
+    /// Return a monotonically increasing layout revision number.
+    ///
+    /// Bumps when pagination output changes (page count, block positions).
+    pub fn layout_revision(&self) -> Result<u32, JsError> {
+        let doc = self.doc()?;
+        Ok(doc.undo_count() as u32)
+    }
+
+    /// Return a lightweight scene summary for viewport boot.
+    ///
+    /// Returns JSON: `{ "protocol_version": 1, "document_revision": N,
+    /// "layout_revision": N, "page_count": N, "default_page_size_pt": {...},
+    /// "pages": [...] }`
+    pub fn scene_summary(&self, _config_json: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let rev = doc.undo_count() as u64;
+
+        let mut json = String::with_capacity(2048);
+        json.push_str(&format!(
+            "{{\"protocol_version\":1,\"document_revision\":{},\"layout_revision\":{},\"page_count\":{},",
+            rev, rev, layout.pages.len()
+        ));
+
+        // Default page size from first page or Letter
+        let (pw, ph) = if let Some(p) = layout.pages.first() {
+            (p.width, p.height)
+        } else {
+            (612.0, 792.0)
+        };
+        json.push_str(&format!(
+            "\"default_page_size_pt\":{{\"width\":{:.2},\"height\":{:.2}}},\"pages\":[",
+            pw, ph
+        ));
+
+        for (i, page) in layout.pages.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            let item_count = page.blocks.len()
+                + page.floating_images.len()
+                + page.footnotes.len()
+                + if page.header.is_some() { 1 } else { 0 }
+                + if page.footer.is_some() { 1 } else { 0 };
+            json.push_str(&format!(
+                "{{\"page_index\":{},\"section_index\":{},\"bounds_pt\":{{\"x\":0.0,\"y\":0.0,\"width\":{:.2},\"height\":{:.2}}},\"content_rect_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"has_header\":{},\"has_footer\":{},\"item_count\":{}}}",
+                page.index, page.section_index,
+                page.width, page.height,
+                page.content_area.x, page.content_area.y,
+                page.content_area.width, page.content_area.height,
+                page.header.is_some(), page.footer.is_some(),
+                item_count,
+            ));
+        }
+
+        json.push_str("]}");
+        Ok(json)
+    }
+
+    /// Return a full scene for a single page.
+    ///
+    /// Returns JSON with page bounds, content rect, header/footer rects,
+    /// and all scene items (text runs, backgrounds, borders, images, shapes, etc.).
+    pub fn page_scene(&self, page_index: u32) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+        let rev = doc.undo_count() as u64;
+        let pi = page_index as usize;
+
+        if pi >= layout.pages.len() {
+            return Ok(format!(
+                "{{\"error\":{{\"code\":\"invalid_page_index\",\"message\":\"Page index {} out of range (0..{})\"}}}}",
+                pi,
+                layout.pages.len()
+            ));
+        }
+
+        let page = &layout.pages[pi];
+        Ok(layout_page_to_scene_json(page, model, rev))
+    }
+
+    /// Return scenes for a range of pages (batch fetch for viewport).
+    ///
+    /// Returns JSON: `{ "pages": [...] }`
+    pub fn visible_page_scenes(&self, start_page: u32, end_page: u32) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+        let rev = doc.undo_count() as u64;
+        let start = start_page as usize;
+        let end = (end_page as usize).min(layout.pages.len());
+
+        let mut json = String::with_capacity(8192);
+        json.push_str("{\"pages\":[");
+        for (i, pi) in (start..end).enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&layout_page_to_scene_json(&layout.pages[pi], model, rev));
+        }
+        json.push_str("]}");
+        Ok(json)
+    }
+
+    /// Return scene summary using loaded fonts for accurate text shaping.
+    pub fn scene_summary_with_fonts(
+        &self,
+        font_db: &WasmFontDatabase,
+        config_json: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        self.ensure_layout(&font_db.inner)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let rev = doc.undo_count() as u64;
+        let _ = config_json;
+
+        let mut json = String::with_capacity(2048);
+        json.push_str(&format!(
+            "{{\"protocol_version\":1,\"document_revision\":{},\"layout_revision\":{},\"page_count\":{},",
+            rev, rev, layout.pages.len()
+        ));
+        let (pw, ph) = if let Some(p) = layout.pages.first() {
+            (p.width, p.height)
+        } else {
+            (612.0, 792.0)
+        };
+        json.push_str(&format!(
+            "\"default_page_size_pt\":{{\"width\":{:.2},\"height\":{:.2}}},\"pages\":[",
+            pw, ph
+        ));
+        for (i, page) in layout.pages.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            let item_count = page.blocks.len()
+                + page.floating_images.len()
+                + page.footnotes.len()
+                + if page.header.is_some() { 1 } else { 0 }
+                + if page.footer.is_some() { 1 } else { 0 };
+            json.push_str(&format!(
+                "{{\"page_index\":{},\"section_index\":{},\"bounds_pt\":{{\"x\":0.0,\"y\":0.0,\"width\":{:.2},\"height\":{:.2}}},\"content_rect_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"has_header\":{},\"has_footer\":{},\"item_count\":{}}}",
+                page.index, page.section_index,
+                page.width, page.height,
+                page.content_area.x, page.content_area.y,
+                page.content_area.width, page.content_area.height,
+                page.header.is_some(), page.footer.is_some(),
+                item_count,
+            ));
+        }
+        json.push_str("]}");
+        Ok(json)
+    }
+
+    /// Return page scene using loaded fonts for accurate text shaping.
+    pub fn page_scene_with_fonts(
+        &self,
+        font_db: &WasmFontDatabase,
+        page_index: u32,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        self.ensure_layout(&font_db.inner)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+        let rev = doc.undo_count() as u64;
+        let pi = page_index as usize;
+        if pi >= layout.pages.len() {
+            return Ok(format!(
+                "{{\"error\":{{\"code\":\"invalid_page_index\",\"message\":\"Page index {} out of range (0..{})\"}}}}",
+                pi, layout.pages.len()
+            ));
+        }
+        let page = &layout.pages[pi];
+        Ok(layout_page_to_scene_json(page, model, rev))
+    }
+
+    /// Return visible page scenes using loaded fonts for accurate text shaping.
+    pub fn visible_page_scenes_with_fonts(
+        &self,
+        font_db: &WasmFontDatabase,
+        start_page: u32,
+        end_page: u32,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        self.ensure_layout(&font_db.inner)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+        let rev = doc.undo_count() as u64;
+        let start = start_page as usize;
+        let end = (end_page as usize).min(layout.pages.len());
+        let mut json = String::with_capacity(8192);
+        json.push_str("{\"pages\":[");
+        for (i, pi) in (start..end).enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&layout_page_to_scene_json(&layout.pages[pi], model, rev));
+        }
+        json.push_str("]}");
+        Ok(json)
+    }
+
+    /// Hit-test a point on a page to find the nearest model position.
+    ///
+    /// Returns JSON `HitTestResult` with position, kind, node_id, and inside flag.
+    pub fn hit_test(&self, page_index: u32, x_pt: f64, y_pt: f64) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+        let pi = page_index as usize;
+
+        if pi >= layout.pages.len() {
+            return Ok(format!(
+                "{{\"error\":{{\"code\":\"invalid_page_index\",\"message\":\"Page index {} out of range\"}}}}",
+                pi
+            ));
+        }
+
+        let page = &layout.pages[pi];
+
+        // Check if point is in content area
+        let in_content = x_pt >= page.content_area.x
+            && x_pt <= page.content_area.x + page.content_area.width
+            && y_pt >= page.content_area.y
+            && y_pt <= page.content_area.y + page.content_area.height;
+
+        // Check header/footer regions
+        if let Some(ref hdr) = page.header {
+            if y_pt >= hdr.bounds.y && y_pt <= hdr.bounds.y + hdr.bounds.height {
+                let pos = hit_test_block(hdr, x_pt, y_pt, model);
+                return Ok(format!(
+                    "{{\"page_index\":{},\"kind\":\"header\",\"position\":{},\"node_id\":\"{}\",\"item_id\":null,\"inside\":true}}",
+                    pi, pos.to_json(), pos.node_id_str()
+                ));
+            }
+        }
+        if let Some(ref ftr) = page.footer {
+            if y_pt >= ftr.bounds.y && y_pt <= ftr.bounds.y + ftr.bounds.height {
+                let pos = hit_test_block(ftr, x_pt, y_pt, model);
+                return Ok(format!(
+                    "{{\"page_index\":{},\"kind\":\"footer\",\"position\":{},\"node_id\":\"{}\",\"item_id\":null,\"inside\":true}}",
+                    pi, pos.to_json(), pos.node_id_str()
+                ));
+            }
+        }
+
+        if !in_content {
+            // Point is in page margin
+            return Ok(format!(
+                "{{\"page_index\":{},\"kind\":\"page_margin\",\"position\":null,\"node_id\":null,\"item_id\":null,\"inside\":false}}",
+                pi
+            ));
+        }
+
+        // Find closest block to the y coordinate
+        let mut best_block: Option<&s1_layout::LayoutBlock> = None;
+        let mut best_dist = f64::MAX;
+
+        for block in &page.blocks {
+            let block_top = block.bounds.y;
+            let block_bottom = block.bounds.y + block.bounds.height;
+
+            if y_pt >= block_top && y_pt <= block_bottom {
+                best_block = Some(block);
+                best_dist = 0.0;
+                break;
+            }
+
+            let dist = if y_pt < block_top {
+                block_top - y_pt
+            } else {
+                y_pt - block_bottom
+            };
+            if dist < best_dist {
+                best_dist = dist;
+                best_block = Some(block);
+            }
+        }
+
+        // Also check floating images
+        for block in &page.floating_images {
+            let bt = block.bounds.y;
+            let bb = block.bounds.y + block.bounds.height;
+            let bl = block.bounds.x;
+            let br = block.bounds.x + block.bounds.width;
+            if x_pt >= bl && x_pt <= br && y_pt >= bt && y_pt <= bb {
+                let src = format!("{}:{}", block.source_id.replica, block.source_id.counter);
+                return Ok(format!(
+                    "{{\"page_index\":{},\"kind\":\"image\",\"position\":{{\"node_id\":\"{}\",\"offset_utf16\":0,\"affinity\":\"downstream\"}},\"node_id\":\"{}\",\"item_id\":null,\"inside\":true}}",
+                    pi, escape_json(&src), escape_json(&src)
+                ));
+            }
+        }
+
+        if let Some(block) = best_block {
+            let kind = match &block.kind {
+                s1_layout::LayoutBlockKind::Paragraph { .. } => "text",
+                s1_layout::LayoutBlockKind::Table { .. } => "table_cell",
+                s1_layout::LayoutBlockKind::Image { .. } => "image",
+                s1_layout::LayoutBlockKind::Shape { .. } => "shape",
+                s1_layout::LayoutBlockKind::TextBox { .. } => "text",
+                _ => "text",
+            };
+            let pos = hit_test_block(block, x_pt, y_pt, model);
+            Ok(format!(
+                "{{\"page_index\":{},\"kind\":\"{}\",\"position\":{},\"node_id\":\"{}\",\"item_id\":null,\"inside\":{}}}",
+                pi, kind, pos.to_json(), pos.node_id_str(), best_dist < 0.5
+            ))
+        } else {
+            Ok(format!(
+                "{{\"page_index\":{},\"kind\":\"none\",\"position\":null,\"node_id\":null,\"item_id\":null,\"inside\":false}}",
+                pi
+            ))
+        }
+    }
+
+    /// Get the caret rectangle for a model position.
+    ///
+    /// Returns JSON `RectPt` with page_index, x, y, width (1.0), height.
+    pub fn caret_rect(&self, position_json: &str) -> Result<String, JsError> {
+        // Use global font database if available via layout cache, otherwise empty
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+
+        let pos = PositionRefParsed::from_json(position_json)?;
+
+        // Find the node in the layout
+        for page in &layout.pages {
+            if let Some(rect) = find_caret_rect_in_page(page, &pos, model) {
+                return Ok(format!(
+                    "{{\"page_index\":{},\"x\":{:.2},\"y\":{:.2},\"width\":1.0,\"height\":{:.2}}}",
+                    page.index, rect.x, rect.y, rect.height
+                ));
+            }
+        }
+
+        // Fallback: return beginning of first page content area
+        if let Some(page) = layout.pages.first() {
+            Ok(format!(
+                "{{\"page_index\":0,\"x\":{:.2},\"y\":{:.2},\"width\":1.0,\"height\":14.0}}",
+                page.content_area.x, page.content_area.y
+            ))
+        } else {
+            Ok(
+                "{\"page_index\":0,\"x\":72.0,\"y\":72.0,\"width\":1.0,\"height\":14.0}"
+                    .to_string(),
+            )
+        }
+    }
+
+    /// Get selection rectangles for a model range.
+    ///
+    /// Returns JSON array of `RectPt` objects covering the selection.
+    pub fn selection_rects(&self, range_json: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+
+        let range = RangeRefParsed::from_json(range_json)?;
+        let mut rects = Vec::new();
+
+        // Find rects for the range across pages
+        for page in &layout.pages {
+            collect_selection_rects_in_page(page, &range, model, &mut rects);
+        }
+
+        let mut json = String::with_capacity(512);
+        json.push('[');
+        for (i, rect) in rects.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            json.push_str(&format!(
+                "{{\"page_index\":{},\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+                rect.page_index, rect.x, rect.y, rect.width, rect.height
+            ));
+        }
+        json.push(']');
+        Ok(json)
+    }
+
+    /// Move a position in a direction by a granularity.
+    ///
+    /// Returns JSON `PositionRef`.
+    pub fn move_position(
+        &self,
+        position_json: &str,
+        direction: &str,
+        granularity: &str,
+    ) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+
+        let pos = PositionRefParsed::from_json(position_json)?;
+        let new_pos = navigate_position(layout, model, &pos, direction, granularity);
+        Ok(new_pos.to_json())
+    }
+
+    /// Get the word boundary around a position.
+    ///
+    /// Returns JSON `RangeRef` with anchor at word start and focus at word end.
+    pub fn word_boundary(&self, position_json: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let _cache = self.layout_cache.borrow();
+        let _layout = _cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+
+        let pos = PositionRefParsed::from_json(position_json)?;
+
+        // Find the text node and compute word boundaries
+        if let Some(node) = model.node(pos.node_id) {
+            if let Some(text) = &node.text_content {
+                let char_offset = utf16_to_char_offset(text, pos.offset_utf16 as usize);
+                let chars: Vec<char> = text.chars().collect();
+
+                // Walk backward to find word start
+                let mut start = char_offset;
+                while start > 0 && chars.get(start - 1).is_some_and(|c| c.is_alphanumeric()) {
+                    start -= 1;
+                }
+
+                // Walk forward to find word end
+                let mut end = char_offset;
+                while end < chars.len() && chars.get(end).is_some_and(|c| c.is_alphanumeric()) {
+                    end += 1;
+                }
+
+                let start_utf16 = char_to_utf16_offset(text, start);
+                let end_utf16 = char_to_utf16_offset(text, end);
+
+                let node_str = format!("{}:{}", pos.node_id.replica, pos.node_id.counter);
+                return Ok(format!(
+                    "{{\"anchor\":{{\"node_id\":\"{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}},\"focus\":{{\"node_id\":\"{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}}}}",
+                    escape_json(&node_str), start_utf16,
+                    escape_json(&node_str), end_utf16
+                ));
+            }
+        }
+
+        // Fallback: collapsed range at position
+        Ok(format!(
+            "{{\"anchor\":{},\"focus\":{}}}",
+            pos.to_json(),
+            pos.to_json()
+        ))
+    }
+
+    /// Get bounds for all pages containing a node.
+    ///
+    /// Returns JSON array of `RectPt`.
+    pub fn node_bounds(&self, node_id_str: &str) -> Result<String, JsError> {
+        let _doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+
+        let node_id = parse_node_id(node_id_str)?;
+
+        let mut json = String::with_capacity(256);
+        json.push('[');
+        let mut first = true;
+        for page in &layout.pages {
+            for block in &page.blocks {
+                if block.source_id == node_id {
+                    if !first {
+                        json.push(',');
+                    }
+                    first = false;
+                    json.push_str(&format!(
+                        "{{\"page_index\":{},\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+                        page.index, block.bounds.x, block.bounds.y,
+                        block.bounds.width, block.bounds.height
+                    ));
+                }
+            }
+        }
+        json.push(']');
+        Ok(json)
+    }
+
+    /// Return formatting state at a selection range for toolbar display.
+    ///
+    /// Returns JSON `FormattingState` with bold, italic, font info, etc.
+    pub fn selection_formatting(&self, range_json: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+
+        let range = RangeRefParsed::from_json(range_json)?;
+
+        // Get formatting from the anchor node
+        let mut bold = false;
+        let mut italic = false;
+        let mut underline = "none".to_string();
+        let mut font_family = "serif".to_string();
+        let mut font_size = 11.0_f64;
+        let mut color = "#000000".to_string();
+        let mut alignment = "left".to_string();
+
+        // Walk from anchor node upward to find run and paragraph formatting
+        if let Some(node) = model.node(range.anchor.node_id) {
+            // Check parent run node for inline formatting
+            if let Some(parent_id) = node.parent {
+                if let Some(run_node) = model.node(parent_id) {
+                    bold = run_node
+                        .attributes
+                        .get_bool(&AttributeKey::Bold)
+                        .unwrap_or(false);
+                    italic = run_node
+                        .attributes
+                        .get_bool(&AttributeKey::Italic)
+                        .unwrap_or(false);
+                    if let Some(ul) = run_node.attributes.get(&AttributeKey::Underline) {
+                        underline = match ul {
+                            s1_model::AttributeValue::Bool(true) => "single".to_string(),
+                            s1_model::AttributeValue::UnderlineStyle(s) => {
+                                format!("{:?}", s).to_lowercase()
+                            }
+                            _ => "none".to_string(),
+                        };
+                    }
+                    if let Some(ff) = run_node.attributes.get_string(&AttributeKey::FontFamily) {
+                        font_family = ff.to_string();
+                    }
+                    if let Some(fs) = run_node.attributes.get_f64(&AttributeKey::FontSize) {
+                        font_size = fs;
+                    }
+                    if let Some(s1_model::AttributeValue::Color(col)) =
+                        run_node.attributes.get(&AttributeKey::Color)
+                    {
+                        color = format!("#{}", col.to_hex());
+                    }
+
+                    // Check paragraph parent for block formatting
+                    if let Some(para_id) = run_node.parent {
+                        if let Some(para_node) = model.node(para_id) {
+                            if let Some(s1_model::AttributeValue::Alignment(a)) =
+                                para_node.attributes.get(&AttributeKey::Alignment)
+                            {
+                                alignment = format!("{:?}", a).to_lowercase();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(format!(
+            "{{\"bold\":{},\"italic\":{},\"underline\":\"{}\",\"strikethrough\":false,\"superscript\":false,\"subscript\":false,\"font_family\":\"{}\",\"font_size_pt\":{:.1},\"color\":\"{}\",\"highlight_color\":null,\"alignment\":\"{}\",\"line_spacing\":\"single\",\"list_format\":null,\"style_id\":\"Normal\",\"indent_left_pt\":0.0,\"indent_right_pt\":0.0,\"indent_first_line_pt\":0.0,\"spacing_before_pt\":0.0,\"spacing_after_pt\":0.0}}",
+            bold, italic,
+            escape_json(&underline),
+            escape_json(&font_family),
+            font_size,
+            escape_json(&color),
+            escape_json(&alignment),
+        ))
+    }
+
+    // ─── Canvas Editing Methods (Phase 1) ─────────────────────────
+
+    /// Insert text at a canvas position (text-node ID + UTF-16 offset).
+    ///
+    /// Resolves the position to paragraph coordinates, performs the insert,
+    /// and returns an EditResult JSON string with the new cursor position.
+    pub fn canvas_insert_text(
+        &mut self,
+        position_json: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let pos = PositionRefParsed::from_json(position_json)?;
+        let model = self.doc()?.model().clone();
+        let (para_id, char_offset) = resolve_position_to_paragraph(&model, &pos)?;
+
+        let para_id_str = format!("{}:{}", para_id.replica, para_id.counter);
+        self.insert_text_in_paragraph(&para_id_str, char_offset, text)?;
+
+        // Compute new position: advance by the inserted text length in UTF-16 units
+        let inserted_utf16_len: u32 = text.chars().map(|c| c.len_utf16() as u32).sum();
+        let new_pos = PositionRefParsed {
+            node_id: pos.node_id,
+            offset_utf16: pos.offset_utf16 + inserted_utf16_len,
+            affinity: "downstream".to_string(),
+        };
+
+        let doc = self.doc()?;
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    /// Delete a canvas range (anchor + focus as text-node IDs + UTF-16 offsets).
+    ///
+    /// Resolves the range to paragraph coordinates, performs the deletion,
+    /// and returns an EditResult JSON string with the cursor collapsed at range start.
+    pub fn canvas_delete_range(&mut self, range_json: &str) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+        let model = self.doc()?.model().clone();
+        let (start_para, start_offset, end_para, end_offset) =
+            resolve_range_to_paragraphs(&model, &range)?;
+
+        let start_para_str = format!("{}:{}", start_para.replica, start_para.counter);
+        let end_para_str = format!("{}:{}", end_para.replica, end_para.counter);
+        self.delete_selection(&start_para_str, start_offset, &end_para_str, end_offset)?;
+
+        // Resolve the start position back to text-node coordinates for the result.
+        // After deletion, the document has changed, so we use the anchor position
+        // (or focus, whichever is earlier) as the new collapsed cursor.
+        let new_pos = if range.anchor.node_id == range.focus.node_id {
+            let min_offset = range.anchor.offset_utf16.min(range.focus.offset_utf16);
+            PositionRefParsed {
+                node_id: range.anchor.node_id,
+                offset_utf16: min_offset,
+                affinity: "downstream".to_string(),
+            }
+        } else {
+            // Multi-paragraph: cursor collapses to the start (anchor or focus)
+            let (anchor_para, _) = resolve_position_to_paragraph(&model, &range.anchor)?;
+            let (focus_para, _) = resolve_position_to_paragraph(&model, &range.focus)?;
+            if let Some(bid) = model.body_id() {
+                if let Some(body) = model.node(bid) {
+                    let ai = body.children.iter().position(|&c| c == anchor_para);
+                    let fi = body.children.iter().position(|&c| c == focus_para);
+                    match (ai, fi) {
+                        (Some(a), Some(f)) if a <= f => range.anchor.to_parsed_clone(),
+                        (Some(_), Some(_)) => range.focus.to_parsed_clone(),
+                        _ => range.anchor.to_parsed_clone(),
+                    }
+                } else {
+                    range.anchor.to_parsed_clone()
+                }
+            } else {
+                range.anchor.to_parsed_clone()
+            }
+        };
+
+        let doc = self.doc()?;
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    /// Replace a canvas range with new text.
+    ///
+    /// Deletes the range, then inserts text at the start position.
+    /// Returns an EditResult JSON with the cursor after the inserted text.
+    pub fn canvas_replace_range(
+        &mut self,
+        range_json: &str,
+        text: &str,
+    ) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+        let model = self.doc()?.model().clone();
+        let (start_para, start_offset, end_para, end_offset) =
+            resolve_range_to_paragraphs(&model, &range)?;
+
+        let start_para_str = format!("{}:{}", start_para.replica, start_para.counter);
+        let end_para_str = format!("{}:{}", end_para.replica, end_para.counter);
+
+        // Delete the range
+        self.delete_selection(&start_para_str, start_offset, &end_para_str, end_offset)?;
+
+        // Insert text at start position
+        self.insert_text_in_paragraph(&start_para_str, start_offset, text)?;
+
+        // Compute new position: need to figure out the text node at the insertion point
+        // For now, use the anchor position advanced by inserted text length
+        let earlier_pos = if range.anchor.offset_utf16 <= range.focus.offset_utf16
+            && range.anchor.node_id == range.focus.node_id
+        {
+            &range.anchor
+        } else {
+            // Multi-node: use whichever resolved to start_para/start_offset
+            let (ap, _) = resolve_position_to_paragraph(&model, &range.anchor)
+                .unwrap_or((start_para, start_offset));
+            if ap == start_para {
+                &range.anchor
+            } else {
+                &range.focus
+            }
+        };
+
+        let inserted_utf16_len: u32 = text.chars().map(|c| c.len_utf16() as u32).sum();
+        let new_pos = PositionRefParsed {
+            node_id: earlier_pos.node_id,
+            offset_utf16: earlier_pos.offset_utf16 + inserted_utf16_len,
+            affinity: "downstream".to_string(),
+        };
+
+        let doc = self.doc()?;
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    /// Insert a paragraph break at a canvas position.
+    ///
+    /// Splits the paragraph at the resolved char offset.
+    /// Returns an EditResult JSON with the cursor at the start of the new paragraph.
+    pub fn canvas_insert_paragraph_break(
+        &mut self,
+        position_json: &str,
+    ) -> Result<String, JsError> {
+        let pos = PositionRefParsed::from_json(position_json)?;
+        let model = self.doc()?.model().clone();
+        let (para_id, char_offset) = resolve_position_to_paragraph(&model, &pos)?;
+
+        let para_id_str = format!("{}:{}", para_id.replica, para_id.counter);
+        let new_para_id_str = self.split_paragraph(&para_id_str, char_offset)?;
+        let new_para_id = parse_node_id(&new_para_id_str)?;
+
+        // Find the first text node in the new paragraph to set cursor there
+        let doc = self.doc()?;
+        let new_text_node_id = find_first_text_node(doc.model(), new_para_id)
+            .map(|(tid, _)| tid)
+            .unwrap_or(new_para_id);
+
+        let new_pos = PositionRefParsed {
+            node_id: new_text_node_id,
+            offset_utf16: 0,
+            affinity: "downstream".to_string(),
+        };
+
+        Ok(build_edit_result_json_with_para(
+            doc,
+            &new_pos,
+            Some(&new_para_id_str),
+        ))
+    }
+
+    /// Toggle a formatting mark on a canvas range.
+    ///
+    /// Checks the current formatting state at the anchor position and
+    /// toggles the specified mark. Supported marks: "bold", "italic",
+    /// "underline", "strikethrough".
+    ///
+    /// Returns an EditResult JSON.
+    pub fn canvas_toggle_mark(&mut self, range_json: &str, mark: &str) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+        let model = self.doc()?.model().clone();
+
+        // Check current formatting at anchor position
+        let currently_active = {
+            if let Some(text_node) = model.node(range.anchor.node_id) {
+                if let Some(run_id) = text_node.parent {
+                    if let Some(run_node) = model.node(run_id) {
+                        match mark {
+                            "bold" => run_node
+                                .attributes
+                                .get_bool(&AttributeKey::Bold)
+                                .unwrap_or(false),
+                            "italic" => run_node
+                                .attributes
+                                .get_bool(&AttributeKey::Italic)
+                                .unwrap_or(false),
+                            "underline" => run_node
+                                .attributes
+                                .get(&AttributeKey::Underline)
+                                .map(|v| match v {
+                                    AttributeValue::Bool(b) => *b,
+                                    AttributeValue::UnderlineStyle(_) => true,
+                                    _ => false,
+                                })
+                                .unwrap_or(false),
+                            "strikethrough" => run_node
+                                .attributes
+                                .get_bool(&AttributeKey::Strikethrough)
+                                .unwrap_or(false),
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        let new_value = if currently_active { "false" } else { "true" };
+
+        let (start_para, start_offset, end_para, end_offset) =
+            resolve_range_to_paragraphs(&model, &range)?;
+        let start_str = format!("{}:{}", start_para.replica, start_para.counter);
+        let end_str = format!("{}:{}", end_para.replica, end_para.counter);
+
+        self.format_selection(
+            &start_str,
+            start_offset,
+            &end_str,
+            end_offset,
+            mark,
+            new_value,
+        )?;
+
+        let doc = self.doc()?;
+        let result_pos = range.anchor.to_parsed_clone();
+        Ok(build_edit_result_json(doc, &result_pos))
+    }
+
+    // ─── Clipboard Methods (Phase 4) ────────────────────────────────
+
+    /// Copy a canvas range as plain text.
+    ///
+    /// Walks text nodes from anchor to focus, joining with newlines
+    /// at paragraph boundaries.
+    pub fn copy_range_plain_text(&self, range_json: &str) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+        let doc = self.doc()?;
+        let model = doc.model();
+        let (start_para, start_offset, end_para, end_offset) =
+            resolve_range_to_paragraphs(model, &range)?;
+
+        if start_para == end_para {
+            let text = extract_paragraph_text(model, start_para);
+            let chars: Vec<char> = text.chars().collect();
+            let safe_start = start_offset.min(chars.len());
+            let safe_end = end_offset.min(chars.len());
+            let result: String = chars[safe_start..safe_end].iter().collect();
+            return Ok(result);
+        }
+
+        // Multi-paragraph
+        let body_id = doc.body_id().ok_or_else(|| JsError::new("No body node"))?;
+        let body = doc
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+        let children = body.children.clone();
+
+        let start_idx = children.iter().position(|&c| c == start_para);
+        let end_idx = children.iter().position(|&c| c == end_para);
+
+        let mut result = String::new();
+        match (start_idx, end_idx) {
+            (Some(si), Some(ei)) => {
+                // First paragraph: from start_offset to end
+                let first_text = extract_paragraph_text(model, children[si]);
+                let first_chars: Vec<char> = first_text.chars().collect();
+                let safe_start = start_offset.min(first_chars.len());
+                result.extend(&first_chars[safe_start..]);
+
+                // Middle paragraphs (full)
+                for &child_id in &children[si + 1..ei] {
+                    if let Some(child) = doc.node(child_id) {
+                        if child.node_type == NodeType::Paragraph {
+                            result.push('\n');
+                            result.push_str(&extract_paragraph_text(model, child_id));
+                        }
+                    }
+                }
+
+                // Last paragraph: from 0 to end_offset
+                result.push('\n');
+                let last_text = extract_paragraph_text(model, children[ei]);
+                let last_chars: Vec<char> = last_text.chars().collect();
+                let safe_end = end_offset.min(last_chars.len());
+                let tail: String = last_chars[..safe_end].iter().collect();
+                result.push_str(&tail);
+            }
+            _ => {
+                return Err(JsError::new("Start or end paragraph not found in body"));
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Copy a canvas range as HTML.
+    ///
+    /// Resolves the range to paragraph coordinates and delegates to
+    /// the existing `export_selection_html` method.
+    pub fn copy_range_html(&self, range_json: &str) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+        let doc = self.doc()?;
+        let model = doc.model();
+        let (start_para, start_offset, end_para, end_offset) =
+            resolve_range_to_paragraphs(model, &range)?;
+
+        let start_str = format!("{}:{}", start_para.replica, start_para.counter);
+        let end_str = format!("{}:{}", end_para.replica, end_para.counter);
+        self.export_selection_html(&start_str, start_offset, &end_str, end_offset)
+    }
+
+    /// Paste HTML at a canvas position.
+    ///
+    /// For now, strips HTML tags and inserts as plain text.
+    /// Returns an EditResult JSON.
+    pub fn paste_html(&mut self, position_json: &str, html: &str) -> Result<String, JsError> {
+        // Simple HTML tag stripping
+        let plain = strip_html_tags(html);
+        self.canvas_insert_text(position_json, &plain)
+    }
+
+    // ─── IME Composition Methods (Phase 5) ──────────────────────────
+
+    /// Begin an IME composition at the given position.
+    ///
+    /// Stores the anchor position for subsequent composition updates.
+    /// Returns JSON `{"status":"composing","anchor":<position>}`.
+    pub fn begin_composition(&mut self, position_json: &str) -> Result<String, JsError> {
+        let pos = PositionRefParsed::from_json(position_json)?;
+        let model = self.doc()?.model().clone();
+        let (para_id, char_offset) = resolve_position_to_paragraph(&model, &pos)?;
+
+        self.composition_anchor_node = Some(format!("{}:{}", para_id.replica, para_id.counter));
+        self.composition_anchor_offset = Some(char_offset as u32);
+        self.composition_preview_len = 0;
+
+        Ok(format!(
+            "{{\"status\":\"composing\",\"anchor\":{}}}",
+            pos.to_json()
+        ))
+    }
+
+    /// Update the IME composition preview text.
+    ///
+    /// If a preview already exists, deletes it first, then inserts
+    /// the new preview text at the anchor.
+    /// Returns an EditResult JSON.
+    pub fn update_composition(&mut self, text: &str) -> Result<String, JsError> {
+        let anchor_node = self
+            .composition_anchor_node
+            .clone()
+            .ok_or_else(|| JsError::new("No active composition"))?;
+        let anchor_offset =
+            self.composition_anchor_offset
+                .ok_or_else(|| JsError::new("No active composition"))? as usize;
+        let prev_len = self.composition_preview_len;
+
+        // Delete previous preview if any
+        if prev_len > 0 {
+            self.delete_text_in_paragraph(&anchor_node, anchor_offset, prev_len)?;
+        }
+
+        // Insert new preview text
+        if !text.is_empty() {
+            self.insert_text_in_paragraph(&anchor_node, anchor_offset, text)?;
+        }
+
+        self.composition_preview_len = text.chars().count();
+
+        // Build position after the preview text
+        let para_id = parse_node_id(&anchor_node)?;
+        let doc = self.doc()?;
+        let new_char_offset = anchor_offset + self.composition_preview_len;
+        // Find the text node at the new position
+        let (text_node_id, local_offset) =
+            match find_text_node_at_char_offset(doc.model(), para_id, new_char_offset) {
+                Ok((tid, lo, _)) => (tid, lo),
+                Err(_) => {
+                    // Fallback: use paragraph start
+                    match find_first_text_node(doc.model(), para_id) {
+                        Ok((tid, _)) => (tid, 0),
+                        Err(_) => {
+                            return Err(JsError::new("Cannot find text node after composition"))
+                        }
+                    }
+                }
+            };
+
+        // Convert local char offset back to UTF-16
+        let text_content = doc
+            .model()
+            .node(text_node_id)
+            .and_then(|n| n.text_content.as_deref())
+            .unwrap_or("");
+        let utf16_offset = char_offset_to_utf16_offset(text_content, local_offset);
+
+        let new_pos = PositionRefParsed {
+            node_id: text_node_id,
+            offset_utf16: utf16_offset,
+            affinity: "downstream".to_string(),
+        };
+
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    /// Commit the IME composition with final text.
+    ///
+    /// Deletes the preview, inserts the final text, and clears composition state.
+    /// Returns an EditResult JSON.
+    pub fn commit_composition(&mut self, text: &str) -> Result<String, JsError> {
+        let anchor_node = self
+            .composition_anchor_node
+            .clone()
+            .ok_or_else(|| JsError::new("No active composition"))?;
+        let anchor_offset =
+            self.composition_anchor_offset
+                .ok_or_else(|| JsError::new("No active composition"))? as usize;
+        let prev_len = self.composition_preview_len;
+
+        // Delete preview
+        if prev_len > 0 {
+            self.delete_text_in_paragraph(&anchor_node, anchor_offset, prev_len)?;
+        }
+
+        // Insert final text
+        if !text.is_empty() {
+            self.insert_text_in_paragraph(&anchor_node, anchor_offset, text)?;
+        }
+
+        // Clear composition state
+        let final_char_len = text.chars().count();
+        self.composition_anchor_node = None;
+        self.composition_anchor_offset = None;
+        self.composition_preview_len = 0;
+
+        // Build position after committed text
+        let para_id = parse_node_id(&anchor_node)?;
+        let doc = self.doc()?;
+        let new_char_offset = anchor_offset + final_char_len;
+        let (text_node_id, local_offset) =
+            match find_text_node_at_char_offset(doc.model(), para_id, new_char_offset) {
+                Ok((tid, lo, _)) => (tid, lo),
+                Err(_) => match find_first_text_node(doc.model(), para_id) {
+                    Ok((tid, _)) => (tid, 0),
+                    Err(_) => return Err(JsError::new("Cannot find text node after commit")),
+                },
+            };
+
+        let text_content = doc
+            .model()
+            .node(text_node_id)
+            .and_then(|n| n.text_content.as_deref())
+            .unwrap_or("");
+        let utf16_offset = char_offset_to_utf16_offset(text_content, local_offset);
+
+        let new_pos = PositionRefParsed {
+            node_id: text_node_id,
+            offset_utf16: utf16_offset,
+            affinity: "downstream".to_string(),
+        };
+
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    /// Cancel the IME composition.
+    ///
+    /// Deletes the preview text and clears composition state.
+    /// Returns an EditResult JSON with cursor at the original anchor.
+    pub fn cancel_composition(&mut self) -> Result<String, JsError> {
+        let anchor_node = self
+            .composition_anchor_node
+            .clone()
+            .ok_or_else(|| JsError::new("No active composition"))?;
+        let anchor_offset =
+            self.composition_anchor_offset
+                .ok_or_else(|| JsError::new("No active composition"))? as usize;
+        let prev_len = self.composition_preview_len;
+
+        // Delete preview
+        if prev_len > 0 {
+            self.delete_text_in_paragraph(&anchor_node, anchor_offset, prev_len)?;
+        }
+
+        // Clear composition state
+        self.composition_anchor_node = None;
+        self.composition_anchor_offset = None;
+        self.composition_preview_len = 0;
+
+        // Build position at original anchor
+        let para_id = parse_node_id(&anchor_node)?;
+        let doc = self.doc()?;
+        let (text_node_id, local_offset) =
+            match find_text_node_at_char_offset(doc.model(), para_id, anchor_offset) {
+                Ok((tid, lo, _)) => (tid, lo),
+                Err(_) => match find_first_text_node(doc.model(), para_id) {
+                    Ok((tid, _)) => (tid, 0),
+                    Err(_) => return Err(JsError::new("Cannot find text node after cancel")),
+                },
+            };
+
+        let text_content = doc
+            .model()
+            .node(text_node_id)
+            .and_then(|n| n.text_content.as_deref())
+            .unwrap_or("");
+        let utf16_offset = char_offset_to_utf16_offset(text_content, local_offset);
+
+        let new_pos = PositionRefParsed {
+            node_id: text_node_id,
+            offset_utf16: utf16_offset,
+            affinity: "downstream".to_string(),
+        };
+
+        Ok(build_edit_result_json(doc, &new_pos))
+    }
+
+    // ─── Navigation & Remaining Methods (Phase 7) ───────────────────
+
+    /// Get the line boundary position for "start" or "end" of the line
+    /// containing the given position.
+    ///
+    /// Returns a PositionRef JSON.
+    pub fn line_boundary(&self, position_json: &str, side: &str) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let font_db = s1_text::FontDatabase::new();
+        self.ensure_layout(&font_db)?;
+        let cache = self.layout_cache.borrow();
+        let layout = cache
+            .as_ref()
+            .ok_or_else(|| JsError::new("Layout not available"))?;
+        let model = doc.model();
+
+        let pos = PositionRefParsed::from_json(position_json)?;
+
+        // Find the line containing this position in the layout.
+        // GlyphRun.source_id is a Run node ID; the text node is its first child.
+        for page in &layout.pages {
+            for block in &page.blocks {
+                if let s1_layout::LayoutBlockKind::Paragraph { lines, .. } = &block.kind {
+                    for line in lines {
+                        let mut line_contains_pos = false;
+                        for run in &line.runs {
+                            // Check if this run contains our text node
+                            let text_node_id = model
+                                .node(run.source_id)
+                                .and_then(|n| n.children.first().copied())
+                                .unwrap_or(run.source_id);
+                            if text_node_id == pos.node_id || run.source_id == pos.node_id {
+                                line_contains_pos = true;
+                                break;
+                            }
+                        }
+                        if line_contains_pos {
+                            match side {
+                                "start" => {
+                                    if let Some(first_run) = line.runs.first() {
+                                        let text_node_id = model
+                                            .node(first_run.source_id)
+                                            .and_then(|n| n.children.first().copied())
+                                            .unwrap_or(first_run.source_id);
+                                        let result = PositionRefParsed {
+                                            node_id: text_node_id,
+                                            offset_utf16: 0,
+                                            affinity: "downstream".to_string(),
+                                        };
+                                        return Ok(result.to_json());
+                                    }
+                                }
+                                "end" => {
+                                    if let Some(last_run) = line.runs.last() {
+                                        let text_node_id = model
+                                            .node(last_run.source_id)
+                                            .and_then(|n| n.children.first().copied())
+                                            .unwrap_or(last_run.source_id);
+                                        let end_utf16 = last_run.text.encode_utf16().count() as u32;
+                                        let result = PositionRefParsed {
+                                            node_id: text_node_id,
+                                            offset_utf16: end_utf16,
+                                            affinity: "downstream".to_string(),
+                                        };
+                                        return Ok(result.to_json());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: return original position
+        Ok(pos.to_json())
+    }
+
+    /// Move a range in a direction by a granularity.
+    ///
+    /// If extend is true, moves only the focus while keeping the anchor.
+    /// If extend is false, collapses the range and moves.
+    /// Returns a RangeRef JSON.
+    pub fn move_range(
+        &self,
+        range_json: &str,
+        direction: &str,
+        granularity: &str,
+        extend: bool,
+    ) -> Result<String, JsError> {
+        let range = RangeRefParsed::from_json(range_json)?;
+
+        if extend {
+            // Move focus only
+            let new_focus_json =
+                self.move_position(&range.focus.to_json(), direction, granularity)?;
+            let new_focus = PositionRefParsed::from_json(&new_focus_json)?;
+            Ok(format!(
+                "{{\"anchor\":{},\"focus\":{}}}",
+                range.anchor.to_json(),
+                new_focus.to_json()
+            ))
+        } else {
+            // Collapse then move
+            // When collapsing a non-collapsed range, go to the edge in the movement direction
+            let collapse_pos = if range.anchor.node_id == range.focus.node_id
+                && range.anchor.offset_utf16 == range.focus.offset_utf16
+            {
+                // Already collapsed, just move
+                range.anchor.to_json()
+            } else {
+                // Collapse to the appropriate edge
+                match direction {
+                    "forward" => {
+                        // Collapse to end of range (later position)
+                        if range.anchor.offset_utf16 >= range.focus.offset_utf16
+                            && range.anchor.node_id == range.focus.node_id
+                        {
+                            range.anchor.to_json()
+                        } else {
+                            range.focus.to_json()
+                        }
+                    }
+                    "backward" => {
+                        // Collapse to start of range (earlier position)
+                        if range.anchor.offset_utf16 <= range.focus.offset_utf16
+                            && range.anchor.node_id == range.focus.node_id
+                        {
+                            range.anchor.to_json()
+                        } else {
+                            range.focus.to_json()
+                        }
+                    }
+                    _ => range.anchor.to_json(),
+                }
+            };
+
+            let new_pos_json = self.move_position(&collapse_pos, direction, granularity)?;
+            let new_pos = PositionRefParsed::from_json(&new_pos_json)?;
+            Ok(format!(
+                "{{\"anchor\":{},\"focus\":{}}}",
+                new_pos.to_json(),
+                new_pos.to_json()
+            ))
+        }
+    }
+
+    /// Get the editor capabilities as a JSON object.
+    ///
+    /// Returns a JSON object indicating which editing features are available.
+    pub fn editor_capabilities(&self) -> Result<String, JsError> {
+        Ok("{\"tables\":true,\"images\":true,\"shapes\":true,\"textboxes\":true,\"undo\":true,\"redo\":true,\"clipboard\":true,\"find\":true}".to_string())
+    }
+
+    /// Search for text matches and return results with page rects.
+    ///
+    /// Wraps the existing `find_text` and enriches results with layout
+    /// position information when available.
+    pub fn search_matches(&self, query: &str, case_sensitive: bool) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let body_id = model.body_id().ok_or_else(|| JsError::new("No body"))?;
+        let body = model
+            .node(body_id)
+            .ok_or_else(|| JsError::new("Body not found"))?;
+
+        let query_normalized = if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        };
+
+        let mut results = Vec::new();
+        collect_find_results(
+            model,
+            &body.children,
+            &query_normalized,
+            case_sensitive,
+            &mut results,
+        );
+
+        // Try to add layout rects
+        let font_db = s1_text::FontDatabase::new();
+        let has_layout = self.ensure_layout(&font_db).is_ok();
+        if has_layout {
+            let cache = self.layout_cache.borrow();
+            if let Some(layout) = cache.as_ref() {
+                let mut enriched = Vec::new();
+                for result_json in &results {
+                    // Each result is {"nodeId":"r:c","offset":N,"length":N}
+                    // Parse nodeId, offset, length to find page rects
+                    let node_id_str =
+                        scene_extract_json_string(result_json, "nodeId").unwrap_or_default();
+                    let offset =
+                        scene_extract_json_number(result_json, "offset").unwrap_or(0.0) as usize;
+                    let length =
+                        scene_extract_json_number(result_json, "length").unwrap_or(0.0) as usize;
+
+                    // Find page containing this paragraph
+                    if let Ok(nid) = parse_node_id(&node_id_str) {
+                        let mut page_idx = 0;
+                        for page in &layout.pages {
+                            for block in &page.blocks {
+                                if block.source_id == nid {
+                                    page_idx = page.index;
+                                    break;
+                                }
+                            }
+                        }
+                        enriched.push(format!(
+                            "{{\"nodeId\":\"{}\",\"offset\":{},\"length\":{},\"page_index\":{}}}",
+                            escape_json(&node_id_str),
+                            offset,
+                            length,
+                            page_idx
+                        ));
+                    } else {
+                        enriched.push(result_json.clone());
+                    }
+                }
+                return Ok(format!("[{}]", enriched.join(",")));
+            }
+        }
+
+        Ok(format!("[{}]", results.join(",")))
+    }
+
     // ─── Lifecycle ────────────────────────────────────────────────
 
     /// Free the document, releasing memory.
@@ -6175,6 +7572,9 @@ impl WasmDocument {
     pub fn free(&mut self) {
         self.inner = None;
         *self.layout_cache.get_mut() = None;
+        self.composition_anchor_node = None;
+        self.composition_anchor_offset = None;
+        self.composition_preview_len = 0;
     }
 
     /// Check if this document handle is still valid.
@@ -6668,6 +8068,9 @@ impl WasmDocumentBuilder {
             batch_count: 0,
             inner: Some(doc),
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         })
     }
 }
@@ -7317,6 +8720,276 @@ fn find_first_text_node(
         }
     }
     Err(JsError::new("No text node found in run"))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Canvas editing helpers — Phase 0: Position resolution
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Convert a UTF-16 offset to a char offset within a string.
+///
+/// Walks the string char by char, accumulating UTF-16 code units.
+/// Returns the char index when accumulated UTF-16 units reach the target offset.
+fn utf16_offset_to_char_offset(text: &str, utf16_offset: u32) -> usize {
+    let mut utf16_pos: u32 = 0;
+    for (char_idx, c) in text.chars().enumerate() {
+        if utf16_pos >= utf16_offset {
+            return char_idx;
+        }
+        utf16_pos += c.len_utf16() as u32;
+    }
+    text.chars().count()
+}
+
+/// Convert a char offset to a UTF-16 offset within a string.
+fn char_offset_to_utf16_offset(text: &str, char_offset: usize) -> u32 {
+    text.chars()
+        .take(char_offset)
+        .map(|c| c.len_utf16() as u32)
+        .sum()
+}
+
+/// Resolve a PositionRefParsed (text-node ID + UTF-16 offset) to paragraph
+/// coordinates (paragraph ID + char offset within the paragraph).
+///
+/// The hit_test system returns positions with text-node IDs and UTF-16 offsets.
+/// The existing editing methods (insert_text_in_paragraph, delete_selection, etc.)
+/// expect paragraph IDs and char offsets. This function bridges the gap.
+fn resolve_position_to_paragraph(
+    model: &DocumentModel,
+    pos: &PositionRefParsed,
+) -> Result<(NodeId, usize), JsError> {
+    let text_node = model
+        .node(pos.node_id)
+        .ok_or_else(|| JsError::new("Position text node not found"))?;
+
+    // Get the text content to convert UTF-16 offset to char offset
+    let text_content = text_node.text_content.as_deref().unwrap_or("");
+    let local_char_offset = utf16_offset_to_char_offset(text_content, pos.offset_utf16);
+
+    // Walk up: Text -> Run -> Paragraph
+    let run_id = text_node
+        .parent
+        .ok_or_else(|| JsError::new("Text node has no parent Run"))?;
+    let run_node = model
+        .node(run_id)
+        .ok_or_else(|| JsError::new("Parent Run not found"))?;
+    if run_node.node_type != NodeType::Run {
+        return Err(JsError::new("Position node parent is not a Run"));
+    }
+
+    let para_id = run_node
+        .parent
+        .ok_or_else(|| JsError::new("Run has no parent Paragraph"))?;
+    let para_node = model
+        .node(para_id)
+        .ok_or_else(|| JsError::new("Parent Paragraph not found"))?;
+    if para_node.node_type != NodeType::Paragraph {
+        return Err(JsError::new("Run parent is not a Paragraph"));
+    }
+
+    // Accumulate char offsets across all preceding children in the paragraph
+    let mut accumulated: usize = 0;
+    for &child_id in &para_node.children {
+        if let Some(child) = model.node(child_id) {
+            match child.node_type {
+                NodeType::Run => {
+                    if child_id == run_id {
+                        // Found our run. Now accumulate offsets for preceding
+                        // text nodes within this run up to our text node.
+                        for &sub_id in &child.children {
+                            if sub_id == pos.node_id {
+                                // This is our text node
+                                return Ok((para_id, accumulated + local_char_offset));
+                            }
+                            if let Some(sub) = model.node(sub_id) {
+                                if sub.node_type == NodeType::Text {
+                                    accumulated += sub
+                                        .text_content
+                                        .as_ref()
+                                        .map(|t| t.chars().count())
+                                        .unwrap_or(0);
+                                }
+                            }
+                        }
+                        // Text node not found in this run (shouldn't happen)
+                        return Ok((para_id, accumulated + local_char_offset));
+                    }
+                    // Not our run — add full run length
+                    accumulated += run_char_len(model, child_id);
+                }
+                NodeType::LineBreak | NodeType::Tab => {
+                    accumulated += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Fallback: if we couldn't trace the exact path, return best estimate
+    Ok((para_id, accumulated + local_char_offset))
+}
+
+/// Resolve a RangeRefParsed to paragraph coordinates for both endpoints.
+///
+/// Returns (start_para_id, start_char_offset, end_para_id, end_char_offset)
+/// where start is always the earlier position in document order.
+fn resolve_range_to_paragraphs(
+    model: &DocumentModel,
+    range: &RangeRefParsed,
+) -> Result<(NodeId, usize, NodeId, usize), JsError> {
+    let (anchor_para, anchor_offset) = resolve_position_to_paragraph(model, &range.anchor)?;
+    let (focus_para, focus_offset) = resolve_position_to_paragraph(model, &range.focus)?;
+
+    // Determine document order: if same paragraph, compare offsets;
+    // otherwise, compare paragraph positions in body.
+    if anchor_para == focus_para {
+        if anchor_offset <= focus_offset {
+            Ok((anchor_para, anchor_offset, focus_para, focus_offset))
+        } else {
+            Ok((focus_para, focus_offset, anchor_para, anchor_offset))
+        }
+    } else {
+        // Check which paragraph comes first in the body
+        let body_id = model.body_id();
+        if let Some(bid) = body_id {
+            if let Some(body) = model.node(bid) {
+                let anchor_idx = body.children.iter().position(|&c| c == anchor_para);
+                let focus_idx = body.children.iter().position(|&c| c == focus_para);
+                match (anchor_idx, focus_idx) {
+                    (Some(ai), Some(fi)) if ai <= fi => {
+                        return Ok((anchor_para, anchor_offset, focus_para, focus_offset));
+                    }
+                    (Some(_), Some(_)) => {
+                        return Ok((focus_para, focus_offset, anchor_para, anchor_offset));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Default: anchor first
+        Ok((anchor_para, anchor_offset, focus_para, focus_offset))
+    }
+}
+
+/// Build an EditResult JSON string after a canvas editing operation.
+///
+/// Produces JSON with document_revision, layout_revision, dirty_pages, and selection.
+fn build_edit_result_json(doc: &s1engine::Document, new_position: &PositionRefParsed) -> String {
+    let revision = doc.undo_count() as u64;
+    // Use a large upper bound for dirty pages instead of computing layout on
+    // every edit (layout is expensive). The JS renderer will clamp to actual
+    // page count when re-rendering.
+    format!(
+        "{{\"document_revision\":{},\"layout_revision\":{},\"dirty_pages\":{{\"start\":0,\"end\":9999}},\"selection\":{}}}",
+        revision,
+        revision,
+        new_position.to_json()
+    )
+}
+
+/// Build an EditResult JSON with an optional new_paragraph_id field.
+fn build_edit_result_json_with_para(
+    doc: &s1engine::Document,
+    new_position: &PositionRefParsed,
+    new_para_id: Option<&str>,
+) -> String {
+    let revision = doc.undo_count() as u64;
+    let page_count = 9999; // cheap upper bound; JS renderer clamps
+
+    let para_field = match new_para_id {
+        Some(pid) => format!(",\"new_paragraph_id\":\"{}\"", escape_json(pid)),
+        None => String::new(),
+    };
+
+    format!(
+        "{{\"document_revision\":{},\"layout_revision\":{},\"dirty_pages\":{{\"start\":0,\"end\":{}}},\"selection\":{}{}}}",
+        revision,
+        revision,
+        page_count,
+        new_position.to_json(),
+        para_field
+    )
+}
+
+/// Strip HTML tags from a string, returning plain text.
+///
+/// Simple implementation that handles basic HTML. Converts `<br>` and `</p>`
+/// to newlines for paragraph structure.
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut tag_name = String::new();
+    let html_lower = html.to_lowercase();
+    let chars: Vec<char> = html.chars().collect();
+    let chars_lower: Vec<char> = html_lower.chars().collect();
+
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<' {
+            in_tag = true;
+            tag_name.clear();
+            i += 1;
+            continue;
+        }
+        if chars[i] == '>' && in_tag {
+            in_tag = false;
+            let tag_lower = tag_name.trim().to_lowercase();
+            // Convert block elements to newlines
+            if (tag_lower == "br"
+                || tag_lower == "br/"
+                || tag_lower == "/p"
+                || tag_lower == "/div"
+                || tag_lower == "/li")
+                && !result.ends_with('\n')
+            {
+                result.push('\n');
+            }
+            i += 1;
+            continue;
+        }
+        if in_tag {
+            tag_name.push(chars_lower[i]);
+            i += 1;
+            continue;
+        }
+        // Handle HTML entities
+        if chars[i] == '&' {
+            let rest: String = chars[i..].iter().take(10).collect();
+            if rest.starts_with("&amp;") {
+                result.push('&');
+                i += 5;
+            } else if rest.starts_with("&lt;") {
+                result.push('<');
+                i += 4;
+            } else if rest.starts_with("&gt;") {
+                result.push('>');
+                i += 4;
+            } else if rest.starts_with("&quot;") {
+                result.push('"');
+                i += 6;
+            } else if rest.starts_with("&nbsp;") {
+                result.push(' ');
+                i += 6;
+            } else if rest.starts_with("&#39;") {
+                result.push('\'');
+                i += 5;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    // Trim trailing newlines
+    while result.ends_with('\n') {
+        result.pop();
+    }
+
+    result
 }
 
 /// Extract all text from a paragraph's runs.
@@ -10800,6 +12473,59 @@ fn layout_block_to_json(block: &s1_layout::LayoutBlock, model: &DocumentModel, j
             }
             json.push('}');
         }
+        s1_layout::LayoutBlockKind::Shape {
+            shape_type,
+            fill_color,
+            stroke_color,
+            stroke_width,
+            rotation_deg,
+            flip_h,
+            flip_v,
+            is_floating,
+            wrap_type,
+            has_text_frame,
+        } => {
+            json.push_str(&format!(
+                "\"type\":\"shape\",\"shapeType\":\"{}\",\"strokeWidth\":{:.2},\"rotationDeg\":{:.2},\"flipH\":{},\"flipV\":{},\"isFloating\":{},\"wrapType\":\"{:?}\",\"hasTextFrame\":{}",
+                escape_json(shape_type), stroke_width, rotation_deg, flip_h, flip_v, is_floating, wrap_type, has_text_frame,
+            ));
+            if let Some(fc) = fill_color {
+                json.push_str(&format!(",\"fillColor\":\"#{}\"", fc.to_hex()));
+            }
+            if let Some(sc) = stroke_color {
+                json.push_str(&format!(",\"strokeColor\":\"#{}\"", sc.to_hex()));
+            }
+            json.push('}');
+        }
+        s1_layout::LayoutBlockKind::TextBox {
+            shape_type,
+            fill_color,
+            stroke_color,
+            stroke_width,
+            text_margins,
+            text_vertical_align,
+            blocks: inner_blocks,
+        } => {
+            json.push_str(&format!(
+                "\"type\":\"textBox\",\"shapeType\":\"{}\",\"strokeWidth\":{:.2},\"textVerticalAlign\":\"{}\",\"textMargins\":{{\"top\":{:.2},\"bottom\":{:.2},\"left\":{:.2},\"right\":{:.2}}}",
+                escape_json(shape_type), stroke_width, escape_json(text_vertical_align),
+                text_margins.top, text_margins.bottom, text_margins.left, text_margins.right,
+            ));
+            if let Some(fc) = fill_color {
+                json.push_str(&format!(",\"fillColor\":\"#{}\"", fc.to_hex()));
+            }
+            if let Some(sc) = stroke_color {
+                json.push_str(&format!(",\"strokeColor\":\"#{}\"", sc.to_hex()));
+            }
+            json.push_str(",\"blocks\":[");
+            for (bi, inner_block) in inner_blocks.iter().enumerate() {
+                if bi > 0 {
+                    json.push(',');
+                }
+                layout_block_to_json(inner_block, model, json);
+            }
+            json.push_str("]}");
+        }
         _ => {
             // Unknown block kind — emit a minimal placeholder
             json.push_str("\"type\":\"unknown\"}");
@@ -10811,7 +12537,7 @@ fn layout_block_to_json(block: &s1_layout::LayoutBlock, model: &DocumentModel, j
 fn glyph_run_to_json(run: &s1_layout::GlyphRun, model: &DocumentModel, json: &mut String) {
     let source = format!("{}:{}", run.source_id.replica, run.source_id.counter);
     json.push_str(&format!(
-        "{{\"sourceId\":\"{}\",\"text\":\"{}\",\"x\":{:.2},\"fontSize\":{:.2},\"width\":{:.2},\"bold\":{},\"italic\":{},\"underline\":{},\"strikethrough\":{},\"superscript\":{},\"subscript\":{},\"color\":\"#{}\",\"characterSpacing\":{:.2}",
+        "{{\"sourceId\":\"{}\",\"text\":\"{}\",\"x\":{:.2},\"fontSize\":{:.2},\"width\":{:.2},\"bold\":{},\"italic\":{},\"underline\":\"{}\",\"strikethrough\":{},\"superscript\":{},\"subscript\":{},\"color\":\"#{}\",\"characterSpacing\":{:.2}",
         escape_json(&source),
         escape_json(&run.text),
         run.x_offset,
@@ -10819,7 +12545,7 @@ fn glyph_run_to_json(run: &s1_layout::GlyphRun, model: &DocumentModel, json: &mu
         run.width,
         run.bold,
         run.italic,
-        run.underline,
+        escape_json(&run.underline),
         run.strikethrough,
         run.superscript,
         run.subscript,
@@ -10898,6 +12624,1001 @@ fn table_cell_to_json(cell: &s1_layout::LayoutTableCell, model: &DocumentModel, 
         layout_block_to_json(block, model, json);
     }
     json.push_str("]}");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// F4.4: Scene JSON serialization for canvas-first editor
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A parsed model position from JSON.
+struct PositionRefParsed {
+    node_id: NodeId,
+    offset_utf16: u32,
+    #[allow(dead_code)]
+    affinity: String,
+}
+
+impl PositionRefParsed {
+    fn from_json(json: &str) -> Result<Self, JsError> {
+        // Simple JSON parsing for {"node_id":"R:C","offset_utf16":N,"affinity":"..."}
+        let node_id_str = scene_extract_json_string(json, "node_id")
+            .ok_or_else(|| JsError::new("Missing node_id in position JSON"))?;
+        let offset = scene_extract_json_number(json, "offset_utf16").unwrap_or(0.0) as u32;
+        let affinity =
+            scene_extract_json_string(json, "affinity").unwrap_or_else(|| "downstream".to_string());
+        let node_id = parse_node_id(&node_id_str)?;
+        Ok(Self {
+            node_id,
+            offset_utf16: offset,
+            affinity,
+        })
+    }
+
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"node_id\":\"{}:{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}}",
+            self.node_id.replica, self.node_id.counter, self.offset_utf16
+        )
+    }
+
+    fn node_id_str(&self) -> String {
+        format!("{}:{}", self.node_id.replica, self.node_id.counter)
+    }
+}
+
+/// A parsed model range from JSON.
+struct RangeRefParsed {
+    anchor: PositionRefParsed,
+    #[allow(dead_code)]
+    focus: PositionRefParsed,
+}
+
+impl RangeRefParsed {
+    fn from_json(json: &str) -> Result<Self, JsError> {
+        // Extract anchor and focus sub-objects
+        let anchor_str = extract_json_object(json, "anchor")
+            .ok_or_else(|| JsError::new("Missing anchor in range JSON"))?;
+        let focus_str = extract_json_object(json, "focus")
+            .ok_or_else(|| JsError::new("Missing focus in range JSON"))?;
+        Ok(Self {
+            anchor: PositionRefParsed::from_json(&anchor_str)?,
+            focus: PositionRefParsed::from_json(&focus_str)?,
+        })
+    }
+}
+
+/// A rect with page index for selection results.
+struct PageRect {
+    page_index: usize,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Extract a string value from simple JSON (scene API helper).
+fn scene_extract_json_string(json: &str, key: &str) -> Option<String> {
+    let search = format!("\"{}\":\"", key);
+    let start = json.find(&search)? + search.len();
+    let rest = &json[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract a number value from simple JSON (scene API helper).
+fn scene_extract_json_number(json: &str, key: &str) -> Option<f64> {
+    let search = format!("\"{}\":", key);
+    let start = json.find(&search)? + search.len();
+    let rest = json[start..].trim_start();
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// Extract a JSON object value (including braces).
+fn extract_json_object(json: &str, key: &str) -> Option<String> {
+    let search = format!("\"{}\":{{", key);
+    let start = json.find(&search)? + search.len() - 1; // include opening brace
+    let rest = &json[start..];
+    let mut depth = 0;
+    let mut end = 0;
+    for (i, c) in rest.chars().enumerate() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if end > 0 {
+        Some(rest[..end].to_string())
+    } else {
+        None
+    }
+}
+
+/// Convert UTF-16 offset to char offset.
+fn utf16_to_char_offset(text: &str, utf16_offset: usize) -> usize {
+    let mut utf16_pos = 0;
+    for (char_idx, c) in text.chars().enumerate() {
+        if utf16_pos >= utf16_offset {
+            return char_idx;
+        }
+        utf16_pos += c.len_utf16();
+    }
+    text.chars().count()
+}
+
+/// Convert char offset to UTF-16 offset.
+fn char_to_utf16_offset(text: &str, char_offset: usize) -> usize {
+    text.chars().take(char_offset).map(|c| c.len_utf16()).sum()
+}
+
+/// Serialize a single page to scene JSON.
+fn layout_page_to_scene_json(
+    page: &s1_layout::LayoutPage,
+    model: &DocumentModel,
+    revision: u64,
+) -> String {
+    let mut json = String::with_capacity(4096);
+    json.push_str(&format!(
+        "{{\"page_index\":{},\"document_revision\":{},\"layout_revision\":{},\"bounds_pt\":{{\"x\":0.0,\"y\":0.0,\"width\":{:.2},\"height\":{:.2}}},\"content_rect_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+        page.index, revision, revision,
+        page.width, page.height,
+        page.content_area.x, page.content_area.y,
+        page.content_area.width, page.content_area.height,
+    ));
+
+    // Header rect
+    if let Some(ref hdr) = page.header {
+        json.push_str(&format!(
+            ",\"header_rect_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+            hdr.bounds.x, hdr.bounds.y, hdr.bounds.width, hdr.bounds.height
+        ));
+    } else {
+        json.push_str(",\"header_rect_pt\":null");
+    }
+
+    // Footer rect
+    if let Some(ref ftr) = page.footer {
+        json.push_str(&format!(
+            ",\"footer_rect_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}}",
+            ftr.bounds.x, ftr.bounds.y, ftr.bounds.width, ftr.bounds.height
+        ));
+    } else {
+        json.push_str(",\"footer_rect_pt\":null");
+    }
+
+    // Items: flatten all blocks into scene items
+    json.push_str(",\"items\":[");
+    let mut first_item = true;
+
+    // Header items
+    if let Some(ref hdr) = page.header {
+        emit_block_scene_items(hdr, model, &mut json, &mut first_item);
+    }
+
+    // Body block items
+    for block in &page.blocks {
+        emit_block_scene_items(block, model, &mut json, &mut first_item);
+    }
+
+    // Floating images
+    for block in &page.floating_images {
+        emit_block_scene_items(block, model, &mut json, &mut first_item);
+    }
+
+    // Footnotes
+    for block in &page.footnotes {
+        emit_block_scene_items(block, model, &mut json, &mut first_item);
+    }
+
+    // Footer items
+    if let Some(ref ftr) = page.footer {
+        emit_block_scene_items(ftr, model, &mut json, &mut first_item);
+    }
+
+    json.push_str("]}");
+    json
+}
+
+/// Emit scene items for a block (paragraph, table, image, shape, textbox).
+fn emit_block_scene_items(
+    block: &s1_layout::LayoutBlock,
+    model: &DocumentModel,
+    json: &mut String,
+    first_item: &mut bool,
+) {
+    let source = format!("{}:{}", block.source_id.replica, block.source_id.counter);
+
+    match &block.kind {
+        s1_layout::LayoutBlockKind::Paragraph {
+            lines,
+            background_color,
+            border,
+            list_marker,
+            list_level,
+            ..
+        } => {
+            // Paragraph background
+            if let Some(bg) = background_color {
+                if !*first_item {
+                    json.push(',');
+                }
+                *first_item = false;
+                json.push_str(&format!(
+                    "{{\"kind\":\"paragraph_background\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"color\":\"#{}\"}}",
+                    escape_json(&source),
+                    block.bounds.x, block.bounds.y, block.bounds.width, block.bounds.height,
+                    bg.to_hex()
+                ));
+            }
+
+            // Paragraph border
+            if let Some(b) = border {
+                if !*first_item {
+                    json.push(',');
+                }
+                *first_item = false;
+                json.push_str(&format!(
+                    "{{\"kind\":\"paragraph_border\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"border\":\"{}\"}}",
+                    escape_json(&source),
+                    block.bounds.x, block.bounds.y, block.bounds.width, block.bounds.height,
+                    escape_json(b)
+                ));
+            }
+
+            // List marker
+            if let Some(marker) = list_marker {
+                if !*first_item {
+                    json.push(',');
+                }
+                *first_item = false;
+                // Position marker to the left of the first line
+                let marker_x = block.bounds.x - 18.0;
+                let marker_y = if let Some(first_line) = lines.first() {
+                    block.bounds.y + first_line.baseline_y - first_line.height
+                } else {
+                    block.bounds.y
+                };
+                let font_size = lines
+                    .first()
+                    .and_then(|l| l.runs.first())
+                    .map(|r| r.font_size)
+                    .unwrap_or(11.0);
+                json.push_str(&format!(
+                    "{{\"kind\":\"list_marker\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":18.0,\"height\":{:.2}}},\"marker_text\":\"{}\",\"font_size_pt\":{:.2},\"color\":\"#000000\",\"list_level\":{}}}",
+                    escape_json(&source),
+                    marker_x, marker_y, font_size,
+                    escape_json(marker),
+                    font_size,
+                    list_level
+                ));
+            }
+
+            // Text runs
+            for line in lines {
+                for run in &line.runs {
+                    if !*first_item {
+                        json.push(',');
+                    }
+                    *first_item = false;
+                    let run_source = format!("{}:{}", run.source_id.replica, run.source_id.counter);
+                    let run_x = block.bounds.x + run.x_offset;
+                    let run_y = block.bounds.y + line.baseline_y - line.height;
+                    let font_family = model
+                        .node(run.source_id)
+                        .and_then(|n| n.attributes.get_string(&AttributeKey::FontFamily))
+                        .unwrap_or("serif");
+
+                    json.push_str(&format!(
+                        "{{\"kind\":\"text_run\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"baseline_y\":{:.2},\"text\":\"{}\",\"font_family\":\"{}\",\"font_size_pt\":{:.2},\"bold\":{},\"italic\":{},\"underline\":\"{}\",\"strikethrough\":{},\"double_strikethrough\":{},\"color\":\"#{}\",\"highlight_color\":{},\"superscript\":{},\"subscript\":{},\"character_spacing\":{:.2},\"baseline_shift\":{:.2},\"caps\":{},\"small_caps\":{},\"hidden\":{}",
+                        escape_json(&run_source),
+                        run_x, run_y, run.width, line.height,
+                        block.bounds.y + line.baseline_y,
+                        escape_json(&run.text),
+                        escape_json(font_family),
+                        run.font_size,
+                        run.bold, run.italic,
+                        escape_json(&run.underline),
+                        run.strikethrough,
+                        run.double_strikethrough,
+                        run.color.to_hex(),
+                        run.highlight_color.as_ref().map(|c| format!("\"#{}\"", c.to_hex())).unwrap_or_else(|| "null".to_string()),
+                        run.superscript, run.subscript,
+                        run.character_spacing,
+                        run.baseline_shift,
+                        run.caps, run.small_caps, run.hidden,
+                    ));
+
+                    if let Some(ref url) = run.hyperlink_url {
+                        json.push_str(&format!(",\"hyperlink_url\":\"{}\"", escape_json(url)));
+                    }
+                    if let Some(ref rt) = run.revision_type {
+                        json.push_str(&format!(",\"revision_type\":\"{}\"", escape_json(rt)));
+                    }
+                    if let Some(ref ra) = run.revision_author {
+                        json.push_str(&format!(",\"revision_author\":\"{}\"", escape_json(ra)));
+                    }
+                    // Inline image data (base64 encoded)
+                    if let Some(ref img) = run.inline_image {
+                        json.push_str(&format!(
+                            ",\"inline_image\":{{\"media_id\":\"{}\",\"width\":{:.2},\"height\":{:.2}",
+                            escape_json(&img.media_id), img.width, img.height
+                        ));
+                        if let (Some(data), Some(ct)) = (&img.image_data, &img.content_type) {
+                            let b64 = base64_encode(data);
+                            json.push_str(&format!(
+                                ",\"src\":\"data:{};base64,{}\"",
+                                escape_json(ct),
+                                b64
+                            ));
+                        }
+                        json.push_str("}}");
+                    }
+                    json.push('}');
+                }
+            }
+        }
+        s1_layout::LayoutBlockKind::Table { rows, .. } => {
+            for row in rows {
+                for cell in &row.cells {
+                    // Cell background
+                    if let Some(ref bg) = cell.background_color {
+                        if !*first_item {
+                            json.push(',');
+                        }
+                        *first_item = false;
+                        json.push_str(&format!(
+                            "{{\"kind\":\"table_cell_background\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"color\":\"#{}\"}}",
+                            escape_json(&source),
+                            cell.bounds.x, cell.bounds.y, cell.bounds.width, cell.bounds.height,
+                            bg.to_hex()
+                        ));
+                    }
+
+                    // Cell borders
+                    let cx = cell.bounds.x;
+                    let cy = cell.bounds.y;
+                    let cw = cell.bounds.width;
+                    let ch = cell.bounds.height;
+
+                    if let Some(ref bt) = cell.border_top {
+                        if !*first_item {
+                            json.push(',');
+                        }
+                        *first_item = false;
+                        json.push_str(&format!(
+                            "{{\"kind\":\"table_border_segment\",\"node_id\":\"{}\",\"start_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"end_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"border\":\"{}\"}}",
+                            escape_json(&source), cx, cy, cx + cw, cy, escape_json(bt)
+                        ));
+                    }
+                    if let Some(ref bb) = cell.border_bottom {
+                        if !*first_item {
+                            json.push(',');
+                        }
+                        *first_item = false;
+                        json.push_str(&format!(
+                            "{{\"kind\":\"table_border_segment\",\"node_id\":\"{}\",\"start_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"end_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"border\":\"{}\"}}",
+                            escape_json(&source), cx, cy + ch, cx + cw, cy + ch, escape_json(bb)
+                        ));
+                    }
+                    if let Some(ref bl) = cell.border_left {
+                        if !*first_item {
+                            json.push(',');
+                        }
+                        *first_item = false;
+                        json.push_str(&format!(
+                            "{{\"kind\":\"table_border_segment\",\"node_id\":\"{}\",\"start_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"end_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"border\":\"{}\"}}",
+                            escape_json(&source), cx, cy, cx, cy + ch, escape_json(bl)
+                        ));
+                    }
+                    if let Some(ref br) = cell.border_right {
+                        if !*first_item {
+                            json.push(',');
+                        }
+                        *first_item = false;
+                        json.push_str(&format!(
+                            "{{\"kind\":\"table_border_segment\",\"node_id\":\"{}\",\"start_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"end_pt\":{{\"x\":{:.2},\"y\":{:.2}}},\"border\":\"{}\"}}",
+                            escape_json(&source), cx + cw, cy, cx + cw, cy + ch, escape_json(br)
+                        ));
+                    }
+
+                    // Cell content blocks
+                    for inner_block in &cell.blocks {
+                        emit_block_scene_items(inner_block, model, json, first_item);
+                    }
+                }
+            }
+        }
+        s1_layout::LayoutBlockKind::Image {
+            media_id,
+            bounds,
+            image_data,
+            content_type,
+        } => {
+            if !*first_item {
+                json.push(',');
+            }
+            *first_item = false;
+            json.push_str(&format!(
+                "{{\"kind\":\"image\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"media_id\":\"{}\",\"is_floating\":false,\"wrap_type\":\"none\"",
+                escape_json(&source),
+                bounds.x, bounds.y, bounds.width, bounds.height,
+                escape_json(media_id),
+            ));
+            if let Some(ct) = content_type {
+                json.push_str(&format!(",\"content_type\":\"{}\"", escape_json(ct)));
+            }
+            if let (Some(data), Some(ct)) = (image_data, content_type) {
+                let b64 = base64_encode(data);
+                json.push_str(&format!(
+                    ",\"src_base64\":\"data:{};base64,{}\"",
+                    escape_json(ct),
+                    b64
+                ));
+            }
+            json.push('}');
+        }
+        s1_layout::LayoutBlockKind::Shape {
+            shape_type,
+            fill_color,
+            stroke_color,
+            stroke_width,
+            rotation_deg,
+            flip_h,
+            flip_v,
+            is_floating,
+            wrap_type,
+            has_text_frame,
+        } => {
+            if !*first_item {
+                json.push(',');
+            }
+            *first_item = false;
+            json.push_str(&format!(
+                "{{\"kind\":\"shape\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"shape_type\":\"{}\",",
+                escape_json(&source),
+                block.bounds.x, block.bounds.y, block.bounds.width, block.bounds.height,
+                escape_json(shape_type),
+            ));
+            json.push_str(&format!(
+                "\"fill_color\":{},\"stroke_color\":{},\"stroke_width\":{:.2},\"rotation_deg\":{:.2},\"flip_h\":{},\"flip_v\":{},\"is_floating\":{},\"wrap_type\":\"{:?}\",\"has_text_frame\":{}}}",
+                fill_color.as_ref().map(|c| format!("\"#{}\"", c.to_hex())).unwrap_or_else(|| "null".to_string()),
+                stroke_color.as_ref().map(|c| format!("\"#{}\"", c.to_hex())).unwrap_or_else(|| "null".to_string()),
+                stroke_width, rotation_deg, flip_h, flip_v, is_floating,
+                wrap_type, has_text_frame,
+            ));
+        }
+        s1_layout::LayoutBlockKind::TextBox {
+            shape_type,
+            fill_color,
+            stroke_color,
+            stroke_width,
+            text_margins,
+            text_vertical_align,
+            blocks,
+        } => {
+            if !*first_item {
+                json.push(',');
+            }
+            *first_item = false;
+            json.push_str(&format!(
+                "{{\"kind\":\"text_box\",\"node_id\":\"{}\",\"bounds_pt\":{{\"x\":{:.2},\"y\":{:.2},\"width\":{:.2},\"height\":{:.2}}},\"shape_type\":\"{}\",",
+                escape_json(&source),
+                block.bounds.x, block.bounds.y, block.bounds.width, block.bounds.height,
+                escape_json(shape_type),
+            ));
+            json.push_str(&format!(
+                "\"fill_color\":{},\"stroke_color\":{},\"stroke_width\":{:.2},\"text_margins\":{{\"top\":{:.2},\"bottom\":{:.2},\"left\":{:.2},\"right\":{:.2}}},\"text_vertical_align\":\"{}\"}}",
+                fill_color.as_ref().map(|c| format!("\"#{}\"", c.to_hex())).unwrap_or_else(|| "null".to_string()),
+                stroke_color.as_ref().map(|c| format!("\"#{}\"", c.to_hex())).unwrap_or_else(|| "null".to_string()),
+                stroke_width,
+                text_margins.top, text_margins.bottom, text_margins.left, text_margins.right,
+                escape_json(text_vertical_align),
+            ));
+
+            // Emit text content blocks inside the text box
+            for inner_block in blocks {
+                emit_block_scene_items(inner_block, model, json, first_item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Hit-test within a single block to find the closest text position.
+fn hit_test_block(
+    block: &s1_layout::LayoutBlock,
+    x_pt: f64,
+    y_pt: f64,
+    model: &DocumentModel,
+) -> PositionRefParsed {
+    match &block.kind {
+        s1_layout::LayoutBlockKind::Paragraph { lines, .. } => {
+            // Find closest line
+            let mut best_line: Option<&s1_layout::LayoutLine> = None;
+            let mut best_line_dist = f64::MAX;
+
+            for line in lines {
+                let line_top = block.bounds.y + line.baseline_y - line.height;
+                let line_bottom = block.bounds.y + line.baseline_y;
+                if y_pt >= line_top && y_pt <= line_bottom {
+                    best_line = Some(line);
+                    break;
+                }
+                let dist = (y_pt - (line_top + line_bottom) / 2.0).abs();
+                if dist < best_line_dist {
+                    best_line_dist = dist;
+                    best_line = Some(line);
+                }
+            }
+
+            if let Some(line) = best_line {
+                // Find closest run and offset within the line
+                for run in &line.runs {
+                    let run_x = block.bounds.x + run.x_offset;
+                    let run_end = run_x + run.width;
+                    if x_pt >= run_x && x_pt <= run_end {
+                        // Estimate character offset based on position within run
+                        let frac = (x_pt - run_x) / run.width.max(1.0);
+                        let text = &run.text;
+                        let char_count = text.chars().count();
+                        let char_offset =
+                            ((frac * char_count as f64).round() as usize).min(char_count);
+                        let utf16_offset = char_to_utf16_offset(text, char_offset);
+
+                        // Find the text node child of this run
+                        let text_node_id = model
+                            .node(run.source_id)
+                            .and_then(|n| n.children.first().copied())
+                            .unwrap_or(run.source_id);
+
+                        return PositionRefParsed {
+                            node_id: text_node_id,
+                            offset_utf16: utf16_offset as u32,
+                            affinity: "downstream".to_string(),
+                        };
+                    }
+                }
+                // No run matched x — use last run
+                if let Some(run) = line.runs.last() {
+                    let text_node_id = model
+                        .node(run.source_id)
+                        .and_then(|n| n.children.first().copied())
+                        .unwrap_or(run.source_id);
+                    let utf16_len = run.text.encode_utf16().count();
+                    return PositionRefParsed {
+                        node_id: text_node_id,
+                        offset_utf16: utf16_len as u32,
+                        affinity: "downstream".to_string(),
+                    };
+                }
+            }
+
+            // Fallback to block source
+            PositionRefParsed {
+                node_id: block.source_id,
+                offset_utf16: 0,
+                affinity: "downstream".to_string(),
+            }
+        }
+        s1_layout::LayoutBlockKind::Table { rows, .. } => {
+            // Find the cell containing the point
+            for row in rows {
+                for cell in &row.cells {
+                    let cx = cell.bounds.x;
+                    let cy = cell.bounds.y;
+                    if x_pt >= cx
+                        && x_pt <= cx + cell.bounds.width
+                        && y_pt >= cy
+                        && y_pt <= cy + cell.bounds.height
+                    {
+                        // Recurse into cell blocks
+                        for inner_block in &cell.blocks {
+                            if y_pt >= inner_block.bounds.y
+                                && y_pt <= inner_block.bounds.y + inner_block.bounds.height
+                            {
+                                return hit_test_block(inner_block, x_pt, y_pt, model);
+                            }
+                        }
+                        // Use first cell block
+                        if let Some(inner) = cell.blocks.first() {
+                            return hit_test_block(inner, x_pt, y_pt, model);
+                        }
+                    }
+                }
+            }
+            PositionRefParsed {
+                node_id: block.source_id,
+                offset_utf16: 0,
+                affinity: "downstream".to_string(),
+            }
+        }
+        _ => PositionRefParsed {
+            node_id: block.source_id,
+            offset_utf16: 0,
+            affinity: "downstream".to_string(),
+        },
+    }
+}
+
+/// Find the caret rect for a position within a page.
+fn find_caret_rect_in_page(
+    page: &s1_layout::LayoutPage,
+    pos: &PositionRefParsed,
+    model: &DocumentModel,
+) -> Option<s1_layout::Rect> {
+    // Check all blocks for the target node
+    let all_blocks = page
+        .blocks
+        .iter()
+        .chain(page.header.iter())
+        .chain(page.footer.iter())
+        .chain(page.footnotes.iter())
+        .chain(page.floating_images.iter());
+
+    for block in all_blocks {
+        if let Some(rect) = find_caret_rect_in_block(block, pos, model) {
+            return Some(rect);
+        }
+    }
+    None
+}
+
+/// Find the caret rect within a block.
+fn find_caret_rect_in_block(
+    block: &s1_layout::LayoutBlock,
+    pos: &PositionRefParsed,
+    model: &DocumentModel,
+) -> Option<s1_layout::Rect> {
+    match &block.kind {
+        s1_layout::LayoutBlockKind::Paragraph { lines, .. } => {
+            for line in lines {
+                for run in &line.runs {
+                    // Check if the target node is this run's text child
+                    let text_node_id = model
+                        .node(run.source_id)
+                        .and_then(|n| n.children.first().copied())
+                        .unwrap_or(run.source_id);
+
+                    if text_node_id == pos.node_id || run.source_id == pos.node_id {
+                        let char_offset =
+                            utf16_to_char_offset(&run.text, pos.offset_utf16 as usize);
+                        let char_count = run.text.chars().count();
+                        let frac = if char_count > 0 {
+                            char_offset as f64 / char_count as f64
+                        } else {
+                            0.0
+                        };
+                        let caret_x = block.bounds.x + run.x_offset + frac * run.width;
+                        let caret_y = block.bounds.y + line.baseline_y - line.height;
+                        return Some(s1_layout::Rect::new(caret_x, caret_y, 1.0, line.height));
+                    }
+                }
+            }
+            None
+        }
+        s1_layout::LayoutBlockKind::Table { rows, .. } => {
+            for row in rows {
+                for cell in &row.cells {
+                    for inner_block in &cell.blocks {
+                        if let Some(rect) = find_caret_rect_in_block(inner_block, pos, model) {
+                            return Some(rect);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        s1_layout::LayoutBlockKind::TextBox { blocks, .. } => {
+            for inner_block in blocks {
+                if let Some(rect) = find_caret_rect_in_block(inner_block, pos, model) {
+                    return Some(rect);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Collect selection rectangles within a page for a given range.
+fn collect_selection_rects_in_page(
+    page: &s1_layout::LayoutPage,
+    range: &RangeRefParsed,
+    model: &DocumentModel,
+    rects: &mut Vec<PageRect>,
+) {
+    let all_blocks = page
+        .blocks
+        .iter()
+        .chain(page.header.iter())
+        .chain(page.footer.iter())
+        .chain(page.footnotes.iter());
+
+    let mut in_range = false;
+
+    for block in all_blocks {
+        collect_selection_rects_in_block(block, range, model, page.index, rects, &mut in_range);
+    }
+}
+
+/// Collect selection rects within a block.
+fn collect_selection_rects_in_block(
+    block: &s1_layout::LayoutBlock,
+    range: &RangeRefParsed,
+    model: &DocumentModel,
+    page_index: usize,
+    rects: &mut Vec<PageRect>,
+    in_range: &mut bool,
+) {
+    match &block.kind {
+        s1_layout::LayoutBlockKind::Paragraph { lines, .. } => {
+            for line in lines {
+                let line_top = block.bounds.y + line.baseline_y - line.height;
+                let mut line_sel_start = f64::MAX;
+                let mut line_sel_end = f64::MIN;
+
+                for run in &line.runs {
+                    let text_node_id = model
+                        .node(run.source_id)
+                        .and_then(|n| n.children.first().copied())
+                        .unwrap_or(run.source_id);
+
+                    let is_anchor_node = text_node_id == range.anchor.node_id
+                        || run.source_id == range.anchor.node_id;
+                    let is_focus_node =
+                        text_node_id == range.focus.node_id || run.source_id == range.focus.node_id;
+
+                    let run_x = block.bounds.x + run.x_offset;
+                    let run_end = run_x + run.width;
+
+                    if is_anchor_node && !*in_range {
+                        *in_range = true;
+                        let char_count = run.text.chars().count();
+                        let anchor_char =
+                            utf16_to_char_offset(&run.text, range.anchor.offset_utf16 as usize);
+                        let frac = if char_count > 0 {
+                            anchor_char as f64 / char_count as f64
+                        } else {
+                            0.0
+                        };
+                        line_sel_start = line_sel_start.min(run_x + frac * run.width);
+                    }
+
+                    if *in_range {
+                        line_sel_start = line_sel_start.min(run_x);
+                        line_sel_end = line_sel_end.max(run_end);
+                    }
+
+                    if is_focus_node && *in_range {
+                        let char_count = run.text.chars().count();
+                        let focus_char =
+                            utf16_to_char_offset(&run.text, range.focus.offset_utf16 as usize);
+                        let frac = if char_count > 0 {
+                            focus_char as f64 / char_count as f64
+                        } else {
+                            1.0
+                        };
+                        line_sel_end = run_x + frac * run.width;
+                        *in_range = false;
+                    }
+                }
+
+                if line_sel_start < line_sel_end {
+                    rects.push(PageRect {
+                        page_index,
+                        x: line_sel_start,
+                        y: line_top,
+                        width: line_sel_end - line_sel_start,
+                        height: line.height,
+                    });
+                }
+            }
+        }
+        s1_layout::LayoutBlockKind::Table { rows, .. } => {
+            for row in rows {
+                for cell in &row.cells {
+                    for inner_block in &cell.blocks {
+                        collect_selection_rects_in_block(
+                            inner_block,
+                            range,
+                            model,
+                            page_index,
+                            rects,
+                            in_range,
+                        );
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Navigate a position in a direction.
+fn navigate_position(
+    _layout: &s1_layout::LayoutDocument,
+    model: &DocumentModel,
+    pos: &PositionRefParsed,
+    direction: &str,
+    granularity: &str,
+) -> PositionRefParsed {
+    match granularity {
+        "character" => {
+            if let Some(node) = model.node(pos.node_id) {
+                if let Some(text) = &node.text_content {
+                    let char_offset = utf16_to_char_offset(text, pos.offset_utf16 as usize);
+                    let char_count = text.chars().count();
+
+                    match direction {
+                        "forward" => {
+                            if char_offset < char_count {
+                                let new_char = char_offset + 1;
+                                let new_utf16 = char_to_utf16_offset(text, new_char);
+                                return PositionRefParsed {
+                                    node_id: pos.node_id,
+                                    offset_utf16: new_utf16 as u32,
+                                    affinity: "downstream".to_string(),
+                                };
+                            }
+                            // At end of text node — try next text node
+                            if let Some(next_id) = find_next_text_node(model, pos.node_id) {
+                                return PositionRefParsed {
+                                    node_id: next_id,
+                                    offset_utf16: 0,
+                                    affinity: "downstream".to_string(),
+                                };
+                            }
+                        }
+                        "backward" => {
+                            if char_offset > 0 {
+                                let new_char = char_offset - 1;
+                                let new_utf16 = char_to_utf16_offset(text, new_char);
+                                return PositionRefParsed {
+                                    node_id: pos.node_id,
+                                    offset_utf16: new_utf16 as u32,
+                                    affinity: "downstream".to_string(),
+                                };
+                            }
+                            // At start of text node — try previous text node
+                            if let Some(prev_id) = find_prev_text_node(model, pos.node_id) {
+                                if let Some(prev_node) = model.node(prev_id) {
+                                    if let Some(prev_text) = &prev_node.text_content {
+                                        let utf16_len = prev_text.encode_utf16().count();
+                                        return PositionRefParsed {
+                                            node_id: prev_id,
+                                            offset_utf16: utf16_len as u32,
+                                            affinity: "downstream".to_string(),
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Unchanged
+            pos.to_parsed_clone()
+        }
+        "word" => {
+            if let Some(node) = model.node(pos.node_id) {
+                if let Some(text) = &node.text_content {
+                    let chars: Vec<char> = text.chars().collect();
+                    let char_offset = utf16_to_char_offset(text, pos.offset_utf16 as usize);
+
+                    match direction {
+                        "forward" => {
+                            let mut i = char_offset;
+                            // Skip current word
+                            while i < chars.len() && chars[i].is_alphanumeric() {
+                                i += 1;
+                            }
+                            // Skip whitespace
+                            while i < chars.len() && !chars[i].is_alphanumeric() {
+                                i += 1;
+                            }
+                            let new_utf16 = char_to_utf16_offset(text, i);
+                            return PositionRefParsed {
+                                node_id: pos.node_id,
+                                offset_utf16: new_utf16 as u32,
+                                affinity: "downstream".to_string(),
+                            };
+                        }
+                        "backward" => {
+                            let mut i = char_offset;
+                            // Skip whitespace
+                            while i > 0 && !chars[i - 1].is_alphanumeric() {
+                                i -= 1;
+                            }
+                            // Skip word
+                            while i > 0 && chars[i - 1].is_alphanumeric() {
+                                i -= 1;
+                            }
+                            let new_utf16 = char_to_utf16_offset(text, i);
+                            return PositionRefParsed {
+                                node_id: pos.node_id,
+                                offset_utf16: new_utf16 as u32,
+                                affinity: "downstream".to_string(),
+                            };
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            pos.to_parsed_clone()
+        }
+        _ => {
+            // line, paragraph, document — fall back to character for now
+            navigate_position(_layout, model, pos, direction, "character")
+        }
+    }
+}
+
+impl PositionRefParsed {
+    fn to_parsed_clone(&self) -> Self {
+        Self {
+            node_id: self.node_id,
+            offset_utf16: self.offset_utf16,
+            affinity: self.affinity.clone(),
+        }
+    }
+}
+
+/// Find the next text node in document order.
+fn find_next_text_node(model: &DocumentModel, from: NodeId) -> Option<NodeId> {
+    let nodes = collect_text_nodes_in_order(model);
+    let mut found = false;
+    for nid in &nodes {
+        if found {
+            return Some(*nid);
+        }
+        if *nid == from {
+            found = true;
+        }
+    }
+    None
+}
+
+/// Find the previous text node in document order.
+fn find_prev_text_node(model: &DocumentModel, from: NodeId) -> Option<NodeId> {
+    let nodes = collect_text_nodes_in_order(model);
+    let mut prev: Option<NodeId> = None;
+    for nid in &nodes {
+        if *nid == from {
+            return prev;
+        }
+        prev = Some(*nid);
+    }
+    None
+}
+
+/// Collect all text nodes in document order.
+fn collect_text_nodes_in_order(model: &DocumentModel) -> Vec<NodeId> {
+    let mut result = Vec::new();
+    if let Some(root) = model.root_node() {
+        collect_text_nodes_recursive(model, root.id, &mut result);
+    }
+    result
+}
+
+fn collect_text_nodes_recursive(model: &DocumentModel, node_id: NodeId, result: &mut Vec<NodeId>) {
+    if let Some(node) = model.node(node_id) {
+        if node.text_content.is_some() {
+            result.push(node_id);
+        }
+        for child_id in &node.children {
+            collect_text_nodes_recursive(model, *child_id, result);
+        }
+    }
 }
 
 /// Detect the format of a document from its bytes.
@@ -11277,6 +13998,9 @@ impl WasmCollabDocument {
             batch_count: 0,
             inner: Some(temp),
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         };
         wasm_doc.get_formatting_json(node_id_str)
     }
@@ -11375,6 +14099,9 @@ impl WasmCollabDocument {
             batch_count: 0,
             inner: Some(s1engine::Document::from_model(model)),
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         };
 
         // Run the mutation (e.g. split_paragraph) on the temporary engine document
@@ -14174,6 +16901,9 @@ mod tests {
             batch_label: None,
             batch_count: 0,
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         };
         let real_layout = doc
             .doc()
@@ -14201,12 +16931,18 @@ mod tests {
                 text: text.to_string(),
                 bold: false,
                 italic: false,
-                underline: false,
+                underline: "none".to_string(),
                 strikethrough: false,
+                double_strikethrough: false,
                 superscript: false,
                 subscript: false,
                 highlight_color: None,
                 character_spacing: 0.0,
+                baseline_shift: 0.0,
+                caps: false,
+                small_caps: false,
+                hidden: false,
+                metrics: None,
                 revision_type: None,
                 revision_author: None,
                 inline_image: None,
@@ -17286,6 +20022,9 @@ mod tests {
             batch_label: None,
             batch_count: 0,
             layout_cache: std::cell::RefCell::new(None),
+            composition_anchor_node: None,
+            composition_anchor_offset: None,
+            composition_preview_len: 0,
         }
     }
 
@@ -17448,6 +20187,806 @@ mod tests {
         assert!(
             doc.layout_cache.borrow().is_none(),
             "layout cache should start empty before any layout call"
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Canvas Editing WASM Method Tests
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Helper: given a WasmDocument, get (paragraph_id, run_id, text_node_id) for
+    /// the first paragraph. Returns string IDs and actual NodeIds.
+    fn first_para_text_ids(doc: &WasmDocument) -> (NodeId, NodeId, NodeId) {
+        let model = doc.doc().unwrap().model().clone();
+        let body_id = model.body_id().unwrap();
+        let body = model.node(body_id).unwrap();
+        let para_id = body.children[0];
+        let para = model.node(para_id).unwrap();
+        // Find the first Run child
+        let run_id = para
+            .children
+            .iter()
+            .find(|&&c| {
+                model
+                    .node(c)
+                    .map(|n| n.node_type == NodeType::Run)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .unwrap();
+        let run = model.node(run_id).unwrap();
+        // Find the first Text child
+        let text_id = run
+            .children
+            .iter()
+            .find(|&&c| {
+                model
+                    .node(c)
+                    .map(|n| n.node_type == NodeType::Text)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .unwrap();
+        (para_id, run_id, text_id)
+    }
+
+    /// Helper: format a NodeId as "replica:counter" string.
+    fn nid_str(id: NodeId) -> String {
+        format!("{}:{}", id.replica, id.counter)
+    }
+
+    /// Helper: build a position JSON string.
+    fn pos_json(node_id: NodeId, offset_utf16: u32) -> String {
+        format!(
+            "{{\"node_id\":\"{}:{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}}",
+            node_id.replica, node_id.counter, offset_utf16
+        )
+    }
+
+    /// Helper: build a range JSON string where anchor and focus are in the same text node.
+    fn range_json(
+        anchor_node: NodeId,
+        anchor_offset: u32,
+        focus_node: NodeId,
+        focus_offset: u32,
+    ) -> String {
+        format!(
+            "{{\"anchor\":{{\"node_id\":\"{}:{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}},\"focus\":{{\"node_id\":\"{}:{}\",\"offset_utf16\":{},\"affinity\":\"downstream\"}}}}",
+            anchor_node.replica, anchor_node.counter, anchor_offset,
+            focus_node.replica, focus_node.counter, focus_offset
+        )
+    }
+
+    /// Helper: get the nth paragraph's (para_id, run_id, text_node_id).
+    fn nth_para_text_ids(doc: &WasmDocument, n: usize) -> (NodeId, NodeId, NodeId) {
+        let model = doc.doc().unwrap().model().clone();
+        let body_id = model.body_id().unwrap();
+        let body = model.node(body_id).unwrap();
+        let para_id = body.children[n];
+        let para = model.node(para_id).unwrap();
+        let run_id = para
+            .children
+            .iter()
+            .find(|&&c| {
+                model
+                    .node(c)
+                    .map(|n| n.node_type == NodeType::Run)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .unwrap();
+        let run = model.node(run_id).unwrap();
+        let text_id = run
+            .children
+            .iter()
+            .find(|&&c| {
+                model
+                    .node(c)
+                    .map(|n| n.node_type == NodeType::Text)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .unwrap();
+        (para_id, run_id, text_id)
+    }
+
+    // ─── Phase 0: Position Resolution ─────────────────────────────
+
+    #[test]
+    fn test_resolve_position_to_paragraph_inserts_at_correct_offset() {
+        // Create a paragraph with multiple runs by formatting a portion.
+        // Using a single paragraph "Hello World", insert "X" at text-node offset 2.
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Insert "X" at UTF-16 offset 2 within the text node (after "He")
+        let position = pos_json(text_id, 2);
+        let result = doc.canvas_insert_text(&position, "X").unwrap();
+
+        // Verify the text is now "HeXllo World"
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "HeXllo World",
+            "insert at offset 2 should produce HeXllo World"
+        );
+
+        // Verify result JSON contains selection info
+        assert!(
+            result.contains("\"document_revision\""),
+            "result should contain document_revision"
+        );
+        assert!(
+            result.contains("\"selection\""),
+            "result should contain selection"
+        );
+    }
+
+    // ─── Phase 1: Canvas Editing ──────────────────────────────────
+
+    #[test]
+    fn test_canvas_insert_text_basic() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Insert "X" at offset 2 (after "He")
+        let position = pos_json(text_id, 2);
+        doc.canvas_insert_text(&position, "X").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "HeXllo",
+            "insert 'X' at offset 2 in 'Hello' should produce 'HeXllo'"
+        );
+    }
+
+    #[test]
+    fn test_canvas_insert_text_at_start() {
+        let mut doc = doc_with_paragraphs(&["World"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let position = pos_json(text_id, 0);
+        doc.canvas_insert_text(&position, "Hello ").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Hello World");
+    }
+
+    #[test]
+    fn test_canvas_insert_text_at_end() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let position = pos_json(text_id, 5);
+        doc.canvas_insert_text(&position, " World").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Hello World");
+    }
+
+    #[test]
+    fn test_canvas_delete_range_within_paragraph() {
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Delete "lo Wo" (offset 3..8)
+        let range = range_json(text_id, 3, text_id, 8);
+        doc.canvas_delete_range(&range).unwrap();
+
+        let text = doc.to_plain_text().unwrap();
+        assert!(
+            text.contains("Helrld"),
+            "deleting offsets 3..8 from 'Hello World' should yield 'Helrld', got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_canvas_delete_range_full_word() {
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Delete "Hello " (offset 0..6)
+        let range = range_json(text_id, 0, text_id, 6);
+        doc.canvas_delete_range(&range).unwrap();
+
+        let text = doc.to_plain_text().unwrap();
+        assert!(
+            text.contains("World"),
+            "should have 'World' after deleting 'Hello ', got: {}",
+            text
+        );
+        assert!(
+            !text.contains("Hello"),
+            "should not still contain 'Hello', got: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_canvas_replace_range_basic() {
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Replace "World" (offset 6..11) with "Rust"
+        let range = range_json(text_id, 6, text_id, 11);
+        doc.canvas_replace_range(&range, "Rust").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "Hello Rust",
+            "replacing 'World' with 'Rust' should produce 'Hello Rust'"
+        );
+    }
+
+    #[test]
+    fn test_canvas_replace_range_with_longer_text() {
+        let mut doc = doc_with_paragraphs(&["ABCD"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Replace "BC" (offset 1..3) with "XXXX"
+        let range = range_json(text_id, 1, text_id, 3);
+        doc.canvas_replace_range(&range, "XXXX").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "AXXXXD",
+            "replacing 'BC' with 'XXXX' should yield 'AXXXXD'"
+        );
+    }
+
+    #[test]
+    fn test_canvas_insert_paragraph_break() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Split at offset 2 (after "He")
+        let position = pos_json(text_id, 2);
+        let result = doc.canvas_insert_paragraph_break(&position).unwrap();
+
+        // Should now have 2 paragraphs
+        let count = doc.paragraph_count().unwrap();
+        assert_eq!(count, 2, "splitting should create 2 paragraphs");
+
+        // Check content of each paragraph
+        let (first_para_id, _, _) = nth_para_text_ids(&doc, 0);
+        let (second_para_id, _, _) = nth_para_text_ids(&doc, 1);
+
+        let first_text = doc.get_paragraph_text(&nid_str(first_para_id)).unwrap();
+        let second_text = doc.get_paragraph_text(&nid_str(second_para_id)).unwrap();
+
+        assert_eq!(first_text, "He", "first paragraph should contain 'He'");
+        assert_eq!(second_text, "llo", "second paragraph should contain 'llo'");
+
+        // Result should contain new paragraph ID
+        assert!(
+            result.contains("\"selection\""),
+            "result should have selection field"
+        );
+    }
+
+    #[test]
+    fn test_canvas_insert_paragraph_break_at_start() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Split at offset 0 (beginning)
+        let position = pos_json(text_id, 0);
+        doc.canvas_insert_paragraph_break(&position).unwrap();
+
+        let count = doc.paragraph_count().unwrap();
+        assert_eq!(count, 2, "splitting at start should create 2 paragraphs");
+
+        let (first_para_id, _, _) = nth_para_text_ids(&doc, 0);
+        let first_text = doc.get_paragraph_text(&nid_str(first_para_id)).unwrap();
+        assert_eq!(
+            first_text, "",
+            "first paragraph should be empty after split at start"
+        );
+    }
+
+    #[test]
+    fn test_canvas_toggle_mark_bold() {
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Toggle bold on entire text (offset 0..11)
+        let range = range_json(text_id, 0, text_id, 11);
+        let result = doc.canvas_toggle_mark(&range, "bold").unwrap();
+
+        assert!(
+            result.contains("\"document_revision\""),
+            "toggle mark should return edit result JSON"
+        );
+
+        // Verify via HTML that bold was applied
+        let html = doc.to_html().unwrap();
+        assert!(
+            html.contains("<strong>") || html.contains("font-weight"),
+            "text should be bold after toggle, html: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_canvas_toggle_mark_italic() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Toggle italic on "Hel" (offset 0..3)
+        let range = range_json(text_id, 0, text_id, 3);
+        doc.canvas_toggle_mark(&range, "italic").unwrap();
+
+        let html = doc.to_html().unwrap();
+        assert!(
+            html.contains("<em>") || html.contains("font-style"),
+            "text should be italic after toggle, html: {}",
+            html
+        );
+    }
+
+    // ─── Phase 4: Clipboard ───────────────────────────────────────
+
+    #[test]
+    fn test_copy_range_plain_text_single_paragraph() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Copy "lo Wo" (offset 3..8)
+        let range = range_json(text_id, 3, text_id, 8);
+        let copied = doc.copy_range_plain_text(&range).unwrap();
+        assert_eq!(copied, "lo Wo", "should copy the exact substring");
+    }
+
+    #[test]
+    fn test_copy_range_plain_text_full() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Copy entire text (offset 0..11)
+        let range = range_json(text_id, 0, text_id, 11);
+        let copied = doc.copy_range_plain_text(&range).unwrap();
+        assert_eq!(copied, "Hello World");
+    }
+
+    #[test]
+    fn test_copy_range_plain_text_multi_paragraph() {
+        let doc = doc_with_paragraphs(&["First paragraph", "Second paragraph"]);
+        let (_p1_id, _r1_id, t1_id) = nth_para_text_ids(&doc, 0);
+        let (_p2_id, _r2_id, t2_id) = nth_para_text_ids(&doc, 1);
+
+        // Copy from offset 6 of first paragraph to offset 6 of second
+        let range = range_json(t1_id, 6, t2_id, 6);
+        let copied = doc.copy_range_plain_text(&range).unwrap();
+
+        assert!(
+            copied.contains("paragraph"),
+            "multi-paragraph copy should include text from first para"
+        );
+        assert!(
+            copied.contains("Second"),
+            "multi-paragraph copy should include text from second para"
+        );
+        assert!(
+            copied.contains('\n'),
+            "multi-paragraph copy should have newline separators"
+        );
+    }
+
+    #[test]
+    fn test_copy_range_html_single_paragraph() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Copy "World" (offset 6..11)
+        let range = range_json(text_id, 6, text_id, 11);
+        let html = doc.copy_range_html(&range).unwrap();
+
+        assert!(
+            html.contains("World"),
+            "HTML copy should contain 'World', got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_copy_range_html_contains_tags() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Copy all
+        let range = range_json(text_id, 0, text_id, 11);
+        let html = doc.copy_range_html(&range).unwrap();
+
+        assert!(
+            html.contains("Hello") && html.contains("World"),
+            "HTML copy should contain both words, got: {}",
+            html
+        );
+        // HTML output should have some structure (tags)
+        assert!(
+            html.contains('<') && html.contains('>'),
+            "HTML should contain angle brackets for tags, got: {}",
+            html
+        );
+    }
+
+    // ─── Phase 5: IME Composition ─────────────────────────────────
+
+    #[test]
+    fn test_ime_full_flow_begin_update_commit() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Begin composition at offset 5 (end of "Hello")
+        let position = pos_json(text_id, 5);
+        let begin_result = doc.begin_composition(&position).unwrap();
+        assert!(
+            begin_result.contains("\"status\":\"composing\""),
+            "begin_composition should return composing status"
+        );
+
+        // Update with preview text
+        let update_result = doc.update_composition("abc").unwrap();
+        assert!(
+            update_result.contains("\"document_revision\""),
+            "update_composition should return edit result"
+        );
+
+        // Check that the preview text was inserted
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Helloabc", "preview text should be appended");
+
+        // Commit with final text (different from preview)
+        doc.commit_composition("XYZ").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "HelloXYZ",
+            "after commit, preview should be replaced with final text"
+        );
+
+        // Composition state should be cleared (begin again should work)
+        let position2 = pos_json(text_id, 0);
+        let result = doc.begin_composition(&position2);
+        assert!(
+            result.is_ok(),
+            "should be able to start new composition after commit"
+        );
+    }
+
+    #[test]
+    fn test_ime_update_replaces_previous_preview() {
+        let mut doc = doc_with_paragraphs(&["Test"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let position = pos_json(text_id, 4);
+        doc.begin_composition(&position).unwrap();
+
+        // First update
+        doc.update_composition("aaa").unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Testaaa");
+
+        // Second update should replace previous preview
+        doc.update_composition("bb").unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Testbb", "second update should replace first preview");
+
+        // Third update
+        doc.update_composition("c").unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Testc", "third update should replace second preview");
+    }
+
+    #[test]
+    fn test_ime_cancel_composition_restores_original() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Begin at offset 5
+        let position = pos_json(text_id, 5);
+        doc.begin_composition(&position).unwrap();
+
+        // Update with preview
+        doc.update_composition("xyz").unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Helloxyz", "preview should be inserted");
+
+        // Cancel — should remove preview and restore original
+        doc.cancel_composition().unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "Hello",
+            "cancel should restore original text by removing preview"
+        );
+    }
+
+    #[test]
+    fn test_ime_cancel_without_preview() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Begin but don't update
+        let position = pos_json(text_id, 3);
+        doc.begin_composition(&position).unwrap();
+
+        // Cancel immediately
+        doc.cancel_composition().unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(
+            text, "Hello",
+            "cancel without preview should leave text unchanged"
+        );
+    }
+
+    #[test]
+    fn test_ime_commit_empty_text() {
+        let mut doc = doc_with_paragraphs(&["Hello"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let position = pos_json(text_id, 5);
+        doc.begin_composition(&position).unwrap();
+        doc.update_composition("temp").unwrap();
+
+        // Commit with empty text — should just remove preview
+        doc.commit_composition("").unwrap();
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "Hello", "committing empty text should remove preview");
+    }
+
+    // ─── Phase 7: Navigation & Capabilities ───────────────────────
+
+    #[test]
+    fn test_line_boundary_returns_valid_position() {
+        let doc = doc_with_paragraphs(&["Hello World this is a test"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Compute layout first by calling ensure_layout indirectly
+        let position = pos_json(text_id, 5);
+
+        // line_boundary requires layout — it should work or return fallback
+        let result = doc.line_boundary(&position, "start");
+        // The method should succeed (layout is computed on demand)
+        assert!(
+            result.is_ok(),
+            "line_boundary should succeed, got: {:?}",
+            result
+        );
+
+        let pos_out = result.unwrap();
+        assert!(
+            pos_out.contains("\"node_id\""),
+            "result should be a valid position JSON, got: {}",
+            pos_out
+        );
+        assert!(
+            pos_out.contains("\"offset_utf16\""),
+            "result should have offset_utf16, got: {}",
+            pos_out
+        );
+
+        // Also test "end" side
+        let end_result = doc.line_boundary(&position, "end").unwrap();
+        assert!(
+            end_result.contains("\"node_id\""),
+            "end boundary should be valid position JSON"
+        );
+    }
+
+    #[test]
+    fn test_move_range_extend_true_keeps_anchor() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Create a collapsed range at offset 5
+        let range = range_json(text_id, 5, text_id, 5);
+
+        // Move forward by character with extend=true
+        let result = doc.move_range(&range, "forward", "character", true);
+        assert!(
+            result.is_ok(),
+            "move_range should succeed, got: {:?}",
+            result
+        );
+
+        let result_json = result.unwrap();
+        // When extend=true, anchor should stay at original position
+        // and focus should move forward
+        assert!(
+            result_json.contains("\"anchor\""),
+            "result should have anchor field"
+        );
+        assert!(
+            result_json.contains("\"focus\""),
+            "result should have focus field"
+        );
+
+        // Parse the result to verify anchor stayed
+        let anchor_str = extract_json_object(&result_json, "anchor").unwrap();
+        let anchor_offset = scene_extract_json_number(&anchor_str, "offset_utf16").unwrap();
+        assert_eq!(
+            anchor_offset as u32, 5,
+            "anchor offset should remain at 5 when extend=true"
+        );
+    }
+
+    #[test]
+    fn test_move_range_extend_false_collapses() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Create an extended range (offset 2..8)
+        let range = range_json(text_id, 2, text_id, 8);
+
+        // Move forward by character with extend=false
+        let result = doc
+            .move_range(&range, "forward", "character", false)
+            .unwrap();
+
+        // When extend=false, range should collapse first then move
+        assert!(result.contains("\"anchor\""), "result should have anchor");
+        assert!(result.contains("\"focus\""), "result should have focus");
+
+        // Anchor and focus should be the same (collapsed)
+        let anchor_str = extract_json_object(&result, "anchor").unwrap();
+        let focus_str = extract_json_object(&result, "focus").unwrap();
+        let anchor_offset = scene_extract_json_number(&anchor_str, "offset_utf16").unwrap() as u32;
+        let focus_offset = scene_extract_json_number(&focus_str, "offset_utf16").unwrap() as u32;
+        assert_eq!(
+            anchor_offset, focus_offset,
+            "with extend=false, anchor and focus should be at the same offset"
+        );
+    }
+
+    #[test]
+    fn test_editor_capabilities_contains_expected_keys() {
+        let doc = doc_with_paragraphs(&["test"]);
+        let caps = doc.editor_capabilities().unwrap();
+
+        // Verify it's valid JSON with expected keys
+        assert!(caps.contains("\"tables\""), "should have tables capability");
+        assert!(caps.contains("\"images\""), "should have images capability");
+        assert!(caps.contains("\"shapes\""), "should have shapes capability");
+        assert!(
+            caps.contains("\"textboxes\""),
+            "should have textboxes capability"
+        );
+        assert!(caps.contains("\"undo\""), "should have undo capability");
+        assert!(caps.contains("\"redo\""), "should have redo capability");
+        assert!(
+            caps.contains("\"clipboard\""),
+            "should have clipboard capability"
+        );
+        assert!(caps.contains("\"find\""), "should have find capability");
+
+        // All values should be true
+        assert!(caps.contains("\"tables\":true"), "tables should be true");
+        assert!(caps.contains("\"undo\":true"), "undo should be true");
+    }
+
+    #[test]
+    fn test_editor_capabilities_on_empty_doc() {
+        let doc = wrap(s1engine::Engine::new().create());
+        let caps = doc.editor_capabilities().unwrap();
+        assert!(
+            caps.starts_with('{') && caps.ends_with('}'),
+            "should be valid JSON object, got: {}",
+            caps
+        );
+    }
+
+    #[test]
+    fn test_search_matches_finds_substring() {
+        let doc = doc_with_paragraphs(&["Hello World Hello"]);
+        let matches_json = doc.search_matches("Hello", true).unwrap();
+
+        // Should find at least one match
+        assert!(
+            matches_json.starts_with('['),
+            "search result should be a JSON array, got: {}",
+            matches_json
+        );
+        // There are two "Hello" occurrences
+        let match_count = matches_json.matches("\"offset\"").count();
+        assert_eq!(
+            match_count, 2,
+            "should find 2 matches for 'Hello' in 'Hello World Hello'"
+        );
+    }
+
+    #[test]
+    fn test_search_matches_case_insensitive() {
+        let doc = doc_with_paragraphs(&["Hello HELLO hello"]);
+        let matches_json = doc.search_matches("hello", false).unwrap();
+
+        assert!(matches_json.starts_with('['));
+        let match_count = matches_json.matches("\"offset\"").count();
+        assert_eq!(
+            match_count, 3,
+            "case-insensitive search for 'hello' should find 3 matches"
+        );
+    }
+
+    #[test]
+    fn test_search_matches_no_results() {
+        let doc = doc_with_paragraphs(&["Hello World"]);
+        let matches_json = doc.search_matches("xyz", true).unwrap();
+
+        assert_eq!(
+            matches_json, "[]",
+            "searching for non-existent text should return empty array"
+        );
+    }
+
+    #[test]
+    fn test_search_matches_across_paragraphs() {
+        let doc = doc_with_paragraphs(&["First Hello", "Second Hello", "Third"]);
+        let matches_json = doc.search_matches("Hello", true).unwrap();
+
+        let match_count = matches_json.matches("\"offset\"").count();
+        assert_eq!(
+            match_count, 2,
+            "should find 2 'Hello' matches across paragraphs"
+        );
+    }
+
+    // ─── Canvas Edit Result JSON Structure ────────────────────────
+
+    #[test]
+    fn test_canvas_insert_text_returns_valid_edit_result() {
+        let mut doc = doc_with_paragraphs(&["Test"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let position = pos_json(text_id, 2);
+        let result = doc.canvas_insert_text(&position, "AB").unwrap();
+
+        // Verify structure of EditResult JSON
+        assert!(result.contains("\"document_revision\""));
+        assert!(result.contains("\"layout_revision\""));
+        assert!(result.contains("\"dirty_pages\""));
+        assert!(result.contains("\"selection\""));
+
+        // The selection should have offset 4 (original 2 + 2 inserted chars)
+        assert!(
+            result.contains("\"offset_utf16\":4"),
+            "cursor should be at offset 4 after inserting 2 chars at offset 2, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_canvas_delete_range_returns_collapsed_cursor() {
+        let mut doc = doc_with_paragraphs(&["Hello World"]);
+        let (_para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        let range = range_json(text_id, 2, text_id, 5);
+        let result = doc.canvas_delete_range(&range).unwrap();
+
+        // Cursor should collapse to start of deleted range (offset 2)
+        assert!(
+            result.contains("\"offset_utf16\":2"),
+            "cursor should collapse to start of deleted range, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_canvas_replace_range_cursor_after_inserted_text() {
+        let mut doc = doc_with_paragraphs(&["ABCDE"]);
+        let (para_id, _run_id, text_id) = first_para_text_ids(&doc);
+
+        // Replace "BCD" (1..4) with "XX"
+        let range = range_json(text_id, 1, text_id, 4);
+        let result = doc.canvas_replace_range(&range, "XX").unwrap();
+
+        let text = doc.get_paragraph_text(&nid_str(para_id)).unwrap();
+        assert_eq!(text, "AXXE");
+
+        // Cursor should be at offset 3 (1 + 2 inserted chars)
+        assert!(
+            result.contains("\"offset_utf16\":3"),
+            "cursor should be after inserted text, got: {}",
+            result
         );
     }
 }

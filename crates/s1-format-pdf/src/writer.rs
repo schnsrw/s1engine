@@ -1162,7 +1162,7 @@ fn render_line(
             content.end_text();
 
             // Draw underline
-            if run.underline {
+            if run.underline != "none" && !run.underline.is_empty() {
                 content.save_state();
                 content.set_stroke_rgb(
                     run.color.r as f32 / 255.0,

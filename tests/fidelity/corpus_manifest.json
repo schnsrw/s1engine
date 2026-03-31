@@ -104,7 +104,7 @@
       "id": "tier2_table_borders",
       "tier": "tier2",
       "title": "Tables with merged cells and complex borders",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "visual_objects",
       "gates": [
         "gate1",
@@ -125,7 +125,7 @@
       "id": "tier2_multisection_columns",
       "tier": "tier2",
       "title": "Multi-section and multi-column layout",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "core",
       "gates": [
         "gate1",
@@ -145,7 +145,7 @@
       "id": "tier2_links_bookmarks_lists",
       "tier": "tier2",
       "title": "Lists, bookmarks, and hyperlinks",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "core",
       "gates": [
         "gate2",
@@ -165,7 +165,7 @@
       "id": "tier3_inline_and_floating_images",
       "tier": "tier3",
       "title": "Inline and floating images",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "visual_objects",
       "gates": [
         "gate1",
@@ -186,7 +186,7 @@
       "id": "tier3_comments_review_anchors",
       "tier": "tier3",
       "title": "Comments and review anchors",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "visual_objects",
       "gates": [
         "gate4",
@@ -205,7 +205,7 @@
       "id": "tier4_large_multilingual",
       "tier": "tier4",
       "title": "Large multilingual document",
-      "status": "planned",
+      "status": "generated",
       "tolerance_profile": "stress",
       "gates": [
         "gate1",
@@ -225,8 +225,8 @@
     {
       "id": "tier4_font_fallback",
       "tier": "tier4",
-      "title": "Font fallback and mixed script text",
-      "status": "planned",
+      "title": "Font fallback and mixed script text (stress recovery)",
+      "status": "generated",
       "tolerance_profile": "stress",
       "gates": [
         "gate1",

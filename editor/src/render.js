@@ -13,6 +13,7 @@ import {
   setCanvasMode,
   initCanvasRenderer,
   renderDocumentCanvas,
+  renderDocumentScene,
   destroyCanvasRenderer,
 } from './canvas-render.js';
 
@@ -272,8 +273,14 @@ export function renderDocument() {
     try {
       const container = $('pageContainer');
       if (container) {
-        // Canvas mode replaces DOM content entirely
-        const ok = renderDocumentCanvas(container);
+        // Prefer scene API (higher fidelity) over legacy layout JSON
+        let ok = false;
+        if (typeof doc.scene_summary === 'function') {
+          ok = renderDocumentScene(container);
+        }
+        if (!ok) {
+          ok = renderDocumentCanvas(container);
+        }
         if (ok) {
           updateUndoRedo();
           updateStatusBar();
@@ -1530,7 +1537,7 @@ export function scheduleIdleLayout() {
 // F4.3: Canvas mode — re-export for external use
 // ═══════════════════════════════════════════════════
 
-export { canvasHitTest } from './canvas-render.js';
+export { canvasHitTest, repaintDirtyPages, repaintCaret, repaintSelection, initCanvasMouseEvents } from './canvas-render.js';
 
 // Re-export already-imported canvas mode functions so consumers of render.js
 // have a single import point for all rendering functionality.

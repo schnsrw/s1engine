@@ -176,6 +176,42 @@ Responsibilities:
 - map active selection and focus for assistive tech
 - keep the mirror synchronized with the current layout revision
 
+#### Synchronization strategy
+
+The a11y mirror updates in response to two triggers:
+
+1. **Layout revision change** (after edit or remote sync):
+   - Fetch scene summary for current visible pages.
+   - For each visible page, generate semantic DOM: `<p>`, `<h1>`–`<h6>`, `<table>`, `<li>`, `<a>`, `<img alt="...">`.
+   - Replace the mirror's content for changed pages only (diff by page index + layout revision).
+   - Debounce: 100ms after last edit to avoid screen reader chatter.
+
+2. **Selection/focus change** (after click, keyboard navigation, or remote cursor update):
+   - Update `aria-activedescendant` on the mirror container to point to the element nearest the caret position.
+   - If the caret moves to a different page, ensure that page's semantic content is in the mirror.
+
+#### Mirror DOM structure
+
+```html
+<div id="a11y-mirror" role="document" aria-label="Document content" style="position:absolute;clip:rect(0,0,0,0);width:1px;height:1px;overflow:hidden;">
+  <div role="region" aria-label="Page 1">
+    <h1>Document Title</h1>
+    <p>First paragraph text...</p>
+    <table role="table">
+      <tr><td>Cell 1</td><td>Cell 2</td></tr>
+    </table>
+  </div>
+  <!-- more pages as needed -->
+</div>
+```
+
+#### What the mirror does NOT do
+
+- Does not replicate visual positions or coordinates.
+- Does not handle pointer events (canvas handles those).
+- Does not contain images (uses `<img alt="description">` with empty src).
+- Does not maintain the full document — only visible pages plus one page of lookahead.
+
 ## State Ownership Plan
 
 | State category | Owner | Notes |
@@ -231,6 +267,102 @@ Move out over time:
 - canvas-specific visible-page and scene caches
 
 The target is not “one better global object”. The target is explicit state ownership per subsystem.
+
+### Reduction gates
+
+| Gate | When | What moves out | Prerequisite |
+|---|---|---|---|
+| Gate 1 | Phase 1 complete (read-only canvas) | `_layoutCache`, `_layoutDirty`, `_layoutDebounceTimer` → `canvas/scene-store.js` | Scene store fetches layout from WASM |
+| Gate 2 | Phase 2 complete (hit-test + caret) | DOM selection caches → removed; `pageMap` → `canvas/scene-store.js` | Selection is model-based |
+| Gate 3 | Phase 3 complete (typing) | `pagesRendered`, `pageElements` → `canvas/viewport.js` | Canvas manages page visibility |
+| Gate 4 | Phase 5 complete (common objects) | `nodeToPage` → removed (use `node_bounds()` from WASM) | WASM provides node geometry |
+| Gate 5 | Phase 7 complete (full parity) | Remove `state.js` entirely; remaining fields move to `document/session.js` | No DOM rendering path |
+
+Each gate is a checkpoint: do not move state until the prerequisite is met and verified by fidelity tests.
+
+## Feature Flag Strategy
+
+Canvas mode is activated via feature flags, allowing gradual rollout and instant rollback.
+
+### Flag definitions
+
+| Flag | Default | Controls |
+|---|---|---|
+| `canvas_render` | `false` | Use canvas for page rendering instead of DOM |
+| `canvas_input` | `false` | Route input through hidden textarea + WASM instead of contenteditable |
+| `canvas_selection` | `false` | Paint selection/caret from WASM geometry instead of DOM ranges |
+| `canvas_a11y_mirror` | `false` | Enable semantic a11y mirror (required when `canvas_render` is true) |
+| `legacy_dom_fallback` | `true` | Fall back to DOM rendering if canvas fails |
+
+### Activation rules
+
+- `canvas_input` requires `canvas_render` (cannot route input to canvas without canvas rendering).
+- `canvas_selection` requires `canvas_render`.
+- `canvas_a11y_mirror` is auto-enabled when `canvas_render` is true.
+- `legacy_dom_fallback` is disabled only at Phase 7 (full parity confirmed).
+
+### How flags are set
+
+Flags are set via URL query parameters for development and testing:
+
+```
+?canvas_render=true&canvas_input=true
+```
+
+For production, flags are set in `editor/src/config.js` with defaults that advance as phases complete.
+
+### Rollback
+
+If a canvas flag causes issues, disable it by toggling the flag. The DOM path remains functional as long as `legacy_dom_fallback` is true.
+
+## Event Delegation from Canvas to Shell
+
+Canvas pointer events must reach the editor shell for context menus, overlays, and toolbar interactions.
+
+### Event flow
+
+```
+canvas element
+  → pointerdown/pointermove/pointerup
+  → canvas/interaction/pointer.js (converts to world coordinates, hit-tests)
+  → if hit target is document content → selection/model-selection.js
+  → if right-click → overlay/context-menu.js (DOM context menu)
+  → if hit target is image/shape → overlay/handles.js (resize handles)
+  → if hit target is hyperlink → overlay/hyperlink-popup.js (link popup)
+  → if double-click on word → selection (word boundary selection)
+  → if triple-click → selection (paragraph selection)
+
+keyboard events
+  → input/bridge.js (hidden textarea captures)
+  → if shortcut (Ctrl+B, Ctrl+Z, etc.) → input/keyboard.js → document/session.js
+  → if character input → document/session.js → replace_range()
+  → if Tab in table → navigation.js → move to next cell
+  → if Escape → overlay/* (close active overlay)
+
+wheel events
+  → canvas/viewport.js (scroll)
+  → if Ctrl+wheel → canvas/viewport.js (zoom)
+
+clipboard events
+  → input/clipboard.js → document/session.js (copy_range_*, paste_html)
+```
+
+### Shell notifications
+
+When canvas state changes affect the shell UI, the canvas layer dispatches custom events:
+
+```js
+// After selection change → toolbar needs update
+document.dispatchEvent(new CustomEvent('editor:selection-changed', { detail: formattingState }));
+
+// After edit → dirty indicator needs update
+document.dispatchEvent(new CustomEvent('editor:document-changed', { detail: { revision, dirty } }));
+
+// After page change → page indicator needs update
+document.dispatchEvent(new CustomEvent('editor:page-changed', { detail: { currentPage, pageCount } }));
+```
+
+The toolbar, status bar, and page indicator listen for these events and update themselves.
 
 ## Event Flow for the New Path
 

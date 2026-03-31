@@ -16,7 +16,7 @@ use crate::property_parser::{
     parse_cell_properties, parse_row_properties, parse_run_properties, parse_table_properties,
 };
 use crate::section_parser::{parse_section_properties, RawSectionProperties};
-use crate::xml_util::{emu_to_points, get_attr, mime_for_extension};
+use crate::xml_util::{emu_to_points, get_attr, mime_for_extension, twips_to_points};
 
 /// Context passed through the parser for resolving images.
 struct ParseContext<'a> {
@@ -887,7 +887,20 @@ fn parse_table(
                     }
                 }
                 b"tblGrid" => {
-                    skip_element(reader)?;
+                    let col_widths = parse_tbl_grid(reader)?;
+                    if !col_widths.is_empty() {
+                        let widths_str = col_widths
+                            .iter()
+                            .map(|w| format!("{w}"))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        if let Some(node) = doc.node_mut(table_id) {
+                            node.attributes.set(
+                                AttributeKey::TableColumnWidths,
+                                AttributeValue::String(widths_str),
+                            );
+                        }
+                    }
                 }
                 b"tr" => {
                     parse_table_row(reader, doc, table_id, row_index, ctx)?;
@@ -3478,6 +3491,40 @@ fn capture_element_xml(
     Ok(xml)
 }
 
+/// Parse `<w:tblGrid>` — extract column widths from `<w:gridCol w:w="..."/>` children.
+///
+/// Returns a vector of column widths in points. Each `w:w` value is in twips (1/20 pt).
+fn parse_tbl_grid(reader: &mut Reader<&[u8]>) -> Result<Vec<f64>, DocxError> {
+    let mut widths = Vec::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"gridCol" => {
+                if let Some(w_str) = get_attr(&e, b"w") {
+                    if let Some(pts) = twips_to_points(&w_str) {
+                        widths.push(pts);
+                    }
+                }
+            }
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"gridCol" => {
+                // gridCol can sometimes appear as a start element (with children)
+                if let Some(w_str) = get_attr(&e, b"w") {
+                    if let Some(pts) = twips_to_points(&w_str) {
+                        widths.push(pts);
+                    }
+                }
+                skip_element(reader)?;
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == b"tblGrid" => break,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(format!("{e}"))),
+            _ => {}
+        }
+    }
+
+    Ok(widths)
+}
+
 /// Skip an element and all its children.
 fn skip_element(reader: &mut Reader<&[u8]>) -> Result<(), DocxError> {
     let mut depth = 1u32;
@@ -3777,6 +3824,19 @@ mod tests {
             Some(s1_model::Alignment::Center)
         );
 
+        // TableColumnWidths from tblGrid: two columns each 4680 twips = 234pt
+        let col_widths_str = table
+            .attributes
+            .get_string(&AttributeKey::TableColumnWidths)
+            .expect("TableColumnWidths should be set from tblGrid");
+        let col_widths: Vec<f64> = col_widths_str
+            .split(',')
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect();
+        assert_eq!(col_widths.len(), 2);
+        assert!((col_widths[0] - 234.0).abs() < 0.01);
+        assert!((col_widths[1] - 234.0).abs() < 0.01);
+
         // Cell width
         let row = doc.node(table.children[0]).unwrap();
         let cell = doc.node(row.children[0]).unwrap();
@@ -3786,6 +3846,45 @@ mod tests {
             }
             other => panic!("Expected CellWidth Fixed, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_tbl_grid_column_widths() {
+        let xml = wrap_doc(
+            r#"<w:tbl>
+            <w:tblPr><w:tblW w:w="14400" w:type="dxa"/></w:tblPr>
+            <w:tblGrid>
+                <w:gridCol w:w="2880"/>
+                <w:gridCol w:w="5760"/>
+                <w:gridCol w:w="5760"/>
+            </w:tblGrid>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>C</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            </w:tbl>"#,
+        );
+        let mut doc = DocumentModel::new();
+        parse_doc(&xml, &mut doc);
+
+        let body_id = doc.body_id().unwrap();
+        let body = doc.node(body_id).unwrap();
+        let table = doc.node(body.children[0]).unwrap();
+
+        // tblGrid: 2880 twips = 144pt, 5760 twips = 288pt, 5760 twips = 288pt
+        let col_widths_str = table
+            .attributes
+            .get_string(&AttributeKey::TableColumnWidths)
+            .expect("TableColumnWidths should be set");
+        let col_widths: Vec<f64> = col_widths_str
+            .split(',')
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect();
+        assert_eq!(col_widths.len(), 3);
+        assert!((col_widths[0] - 144.0).abs() < 0.01);
+        assert!((col_widths[1] - 288.0).abs() < 0.01);
+        assert!((col_widths[2] - 288.0).abs() < 0.01);
     }
 
     #[test]

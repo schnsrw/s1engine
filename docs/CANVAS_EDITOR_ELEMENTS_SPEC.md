@@ -335,18 +335,38 @@ DOM responsibilities:
 
 ### 17. Spellcheck
 
+**Decision:** Hybrid approach — start with browser-native spellcheck via hidden mirror, migrate to custom WASM spellcheck later.
+
+#### Phase 1 (hidden mirror)
+
 Rust responsibilities:
 
-- optional spellcheck diagnostics if custom spellcheck is used
+- none (browser handles detection)
 
 Canvas responsibilities:
 
-- underline marks and highlighted misspellings
+- paint red wavy underlines at misspelled word geometry (ranges obtained from hidden mirror)
 
 DOM responsibilities:
 
-- suggestion popups
-- temporary bridge if browser-native spellcheck is still used
+- hidden `<div contenteditable>` with paragraph text for browser spellcheck
+- suggestion popup positioned from word geometry via `selection_rects()`
+- read misspelled ranges from DOM and translate to model positions
+
+#### Phase 2 (custom spellcheck, future)
+
+Rust responsibilities:
+
+- WASM spellcheck engine with dictionary
+- return misspelled ranges and suggestions
+
+Canvas responsibilities:
+
+- paint underlines from Rust-provided ranges
+
+DOM responsibilities:
+
+- suggestion popup only (no hidden mirror)
 
 ### 18. Search Highlights
 
@@ -371,17 +391,36 @@ Rust responsibilities:
 
 - page dimensions and margin values
 - tab stops / indent markers if they are model-backed
+- column boundaries and gutter widths
 
 Canvas responsibilities:
 
-- ruler painting
-- guide lines
-- margin visuals
-- drag feedback for user adjustments
+- ruler painting (horizontal and vertical)
+- guide lines at margins
+- tab stop indicators on ruler
+- indent markers on ruler
+- drag feedback for user adjustments (margin drag, indent drag, tab stop drag)
 
 DOM responsibilities:
 
 - none unless specific controls are easier as overlays
+
+#### Ruler interaction model
+
+Rulers support direct manipulation for margins, indents, and tab stops:
+
+| Drag target | What changes | Undo support |
+|---|---|---|
+| Left margin handle | Section `MarginLeft` | Yes (transaction) |
+| Right margin handle | Section `MarginRight` | Yes (transaction) |
+| First-line indent marker | Paragraph `IndentFirstLine` | Yes (transaction) |
+| Left indent marker | Paragraph `IndentLeft` | Yes (transaction) |
+| Tab stop marker | Paragraph `TabStops` | Yes (transaction) |
+| Double-click on ruler | Add new tab stop at position | Yes (transaction) |
+
+All ruler adjustments go through `set_block_attrs()` or `set_section_attrs()` as transactions, so they participate in undo/redo.
+
+Canvas paints drag handles and snap guides during the drag. The final value is committed on mouse-up.
 
 ### 20. Toolbars, Dialogs, Context Menus
 
@@ -457,6 +496,36 @@ Editing should use anchor references plus object geometry.
 - shapes and text boxes
 - collaborative cursors and selections
 - advanced review UI parity
+
+## Collaborative Cursors and Selections
+
+### Cursor model
+
+Each remote peer has:
+
+- A `peer_id` (string, from awareness protocol)
+- A `display_name` (shown in cursor label)
+- A `color` (deterministic from `peer_id` hash, from a palette of 8 distinct colors)
+- A `position` (PositionRef) or `range` (RangeRef)
+
+### Canvas painting
+
+- Remote carets are painted as colored vertical lines (2px wide) with a small name label above.
+- Remote selections are painted as colored rectangles with 15% opacity fill.
+- Remote cursors are painted on a separate overlay layer, above document content but below local selection.
+- Remote cursors that are on non-visible pages are not painted (culled by viewport).
+
+### Synchronization
+
+- Remote cursor positions arrive via awareness protocol updates.
+- `selection/model-selection.js` stores remote cursors in a `Map<peer_id, { name, color, position, range }>`.
+- On awareness update, call `caret_rect()` or `selection_rects()` for each remote cursor to get paint geometry.
+- Debounce remote cursor repaints to 50ms to avoid excessive canvas updates.
+
+### Conflict with local selection
+
+- Local selection always paints on top of remote selections.
+- If local and remote selections overlap, the overlap region shows both colors blended.
 
 ## Acceptance Checklist
 

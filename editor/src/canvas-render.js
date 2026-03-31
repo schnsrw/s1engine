@@ -4,6 +4,7 @@
 // HTML5 Canvas elements using the structured layout JSON from the WASM engine.
 
 import { state, $ } from './state.js';
+import * as modelSelection from './selection/model-selection.js';
 
 // -------------------------------------------------------
 // Module state
@@ -12,6 +13,10 @@ import { state, $ } from './state.js';
 let _canvasMode = false;
 let _canvasPages = []; // Array of { canvas, ctx, pageData } per page
 let _lastLayoutJson = null; // Cached layout JSON for hit testing
+let _lastSceneSummary = null; // Cached scene summary
+let _scenePageCache = new Map(); // Map<pageIndex, { revision, scene }>
+let _caretState = null; // { pageIndex, x, y, width, height }
+let _selectionRects = []; // Array of { pageIndex, x, y, width, height }
 
 // -------------------------------------------------------
 // Public API
@@ -239,6 +244,12 @@ function renderBlock(ctx, block) {
     case 'image':
       renderImage(ctx, block);
       break;
+    case 'shape':
+      renderShape(ctx, block);
+      break;
+    case 'textBox':
+      renderTextBox(ctx, block);
+      break;
     default:
       break;
   }
@@ -457,8 +468,620 @@ function renderImage(ctx, block) {
   img.src = block.src;
 }
 
+/**
+ * Render a shape block (rectangle, ellipse, line, etc.).
+ */
+function renderShape(ctx, block) {
+  const b = block.bounds;
+  if (!b) return;
+
+  ctx.save();
+
+  // Apply rotation if specified
+  if (block.rotationDeg && block.rotationDeg !== 0) {
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((block.rotationDeg * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
+
+  // Apply flip transforms
+  if (block.flipH || block.flipV) {
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    ctx.translate(cx, cy);
+    ctx.scale(block.flipH ? -1 : 1, block.flipV ? -1 : 1);
+    ctx.translate(-cx, -cy);
+  }
+
+  const shapeType = block.shapeType || 'rect';
+
+  // Draw shape path
+  ctx.beginPath();
+  if (shapeType === 'ellipse') {
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    ctx.ellipse(cx, cy, b.width / 2, b.height / 2, 0, 0, Math.PI * 2);
+  } else if (shapeType === 'roundRect') {
+    const r = Math.min(b.width, b.height) * 0.1;
+    roundRect(ctx, b.x, b.y, b.width, b.height, r);
+  } else if (shapeType === 'line') {
+    ctx.moveTo(b.x, b.y + b.height / 2);
+    ctx.lineTo(b.x + b.width, b.y + b.height / 2);
+  } else if (shapeType === 'triangle') {
+    ctx.moveTo(b.x + b.width / 2, b.y);
+    ctx.lineTo(b.x + b.width, b.y + b.height);
+    ctx.lineTo(b.x, b.y + b.height);
+    ctx.closePath();
+  } else if (shapeType === 'diamond') {
+    ctx.moveTo(b.x + b.width / 2, b.y);
+    ctx.lineTo(b.x + b.width, b.y + b.height / 2);
+    ctx.lineTo(b.x + b.width / 2, b.y + b.height);
+    ctx.lineTo(b.x, b.y + b.height / 2);
+    ctx.closePath();
+  } else {
+    // Default: rectangle
+    ctx.rect(b.x, b.y, b.width, b.height);
+  }
+
+  // Fill
+  if (block.fillColor) {
+    ctx.fillStyle = block.fillColor;
+    ctx.fill();
+  }
+
+  // Stroke
+  if (block.strokeColor || shapeType !== 'line') {
+    ctx.strokeStyle = block.strokeColor || '#000000';
+    ctx.lineWidth = block.strokeWidth || 1;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Render a text box block (shape with embedded text content).
+ */
+function renderTextBox(ctx, block) {
+  const b = block.bounds;
+  if (!b) return;
+
+  ctx.save();
+
+  // Draw the text box frame
+  ctx.beginPath();
+  ctx.rect(b.x, b.y, b.width, b.height);
+
+  if (block.fillColor) {
+    ctx.fillStyle = block.fillColor;
+    ctx.fill();
+  }
+  if (block.strokeColor) {
+    ctx.strokeStyle = block.strokeColor;
+    ctx.lineWidth = block.strokeWidth || 0.5;
+    ctx.stroke();
+  }
+
+  // Render inner content blocks
+  for (const inner of block.blocks || []) {
+    renderBlock(ctx, inner);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Helper: draw a rounded rectangle path.
+ */
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+}
+
 // -------------------------------------------------------
-// Hit testing
+// Scene API integration
+// -------------------------------------------------------
+
+/**
+ * Render using the new scene API (page_scene) instead of to_layout_json().
+ * Falls back to legacy layout JSON if scene API is not available.
+ *
+ * @param {HTMLElement} container
+ * @returns {boolean}
+ */
+export function renderDocumentScene(container) {
+  const { doc, fontDb } = state;
+  if (!doc || !container) return false;
+
+  // Check if scene API is available
+  if (typeof doc.scene_summary !== 'function') {
+    return renderDocumentCanvas(container);
+  }
+
+  try {
+    // Use font-aware methods when fontDb is loaded (accurate text shaping)
+    const summaryStr = (fontDb && typeof doc.scene_summary_with_fonts === 'function')
+      ? doc.scene_summary_with_fonts(fontDb, '{}')
+      : doc.scene_summary('{}');
+    _lastSceneSummary = JSON.parse(summaryStr);
+  } catch (e) {
+    console.error('Scene render: failed to get scene summary:', e);
+    return renderDocumentCanvas(container);
+  }
+
+  const summary = _lastSceneSummary;
+  if (!summary || !summary.pages) return false;
+
+  const startPage = 0;
+  const endPage = summary.page_count;
+
+  try {
+    const scenesStr = (fontDb && typeof doc.visible_page_scenes_with_fonts === 'function')
+      ? doc.visible_page_scenes_with_fonts(fontDb, startPage, endPage)
+      : doc.visible_page_scenes(startPage, endPage);
+    const scenesData = JSON.parse(scenesStr);
+    renderScenesToCanvas(scenesData.pages || [], container);
+    return true;
+  } catch (e) {
+    console.error('Scene render: failed to get page scenes:', e);
+    return renderDocumentCanvas(container);
+  }
+}
+
+/**
+ * Render scene pages to canvas elements.
+ */
+function renderScenesToCanvas(scenes, container) {
+  _canvasPages.forEach(p => {
+    if (p.canvas.parentNode) p.canvas.parentNode.removeChild(p.canvas);
+  });
+  _canvasPages = [];
+  container.innerHTML = '';
+
+  const dpr = window.devicePixelRatio || 1;
+  const ptToPx = 96 / 72;
+
+  for (const scene of scenes) {
+    const bounds = scene.bounds_pt;
+    if (!bounds) continue;
+
+    const widthPx = bounds.width * ptToPx;
+    const heightPx = bounds.height * ptToPx;
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 's1-canvas-page';
+    canvas.style.width = widthPx + 'px';
+    canvas.style.height = heightPx + 'px';
+    canvas.style.margin = PAGE_GAP_PX + 'px auto';
+    canvas.style.display = 'block';
+    canvas.style.background = 'white';
+    canvas.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.08)';
+    canvas.style.borderRadius = '2px';
+    canvas.dataset.pageIndex = scene.page_index;
+
+    canvas.width = Math.ceil(widthPx * dpr);
+    canvas.height = Math.ceil(heightPx * dpr);
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // White background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, widthPx, heightPx);
+
+    // Draw scene items in order
+    ctx.save();
+    ctx.scale(ptToPx, ptToPx);
+    renderSceneItems(ctx, scene.items || []);
+
+    // Draw caret if on this page
+    if (_caretState && _caretState.pageIndex === scene.page_index) {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(_caretState.x, _caretState.y, _caretState.width, _caretState.height);
+    }
+
+    // Draw selection rects for this page
+    for (const sel of _selectionRects) {
+      if (sel.pageIndex === scene.page_index) {
+        ctx.fillStyle = 'rgba(51, 102, 204, 0.25)';
+        ctx.fillRect(sel.x, sel.y, sel.width, sel.height);
+      }
+    }
+
+    ctx.restore();
+
+    container.appendChild(canvas);
+    // Save backing buffer for fast caret blink (avoids full redraw)
+    const backingBuffer = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    _canvasPages.push({ canvas, ctx, pageData: scene, _backingBuffer: backingBuffer });
+  }
+}
+
+/**
+ * Render scene items (text runs, backgrounds, borders, images, shapes, etc.).
+ */
+function renderSceneItems(ctx, items) {
+  for (const item of items) {
+    switch (item.kind) {
+      case 'paragraph_background':
+        ctx.fillStyle = item.color || '#F0F0F0';
+        ctx.fillRect(item.bounds_pt.x, item.bounds_pt.y, item.bounds_pt.width, item.bounds_pt.height);
+        break;
+
+      case 'paragraph_border':
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(item.bounds_pt.x, item.bounds_pt.y, item.bounds_pt.width, item.bounds_pt.height);
+        break;
+
+      case 'list_marker':
+        ctx.fillStyle = item.color || '#000000';
+        ctx.font = (item.font_size_pt || 11) + 'pt serif';
+        ctx.fillText(item.marker_text, item.bounds_pt.x, item.bounds_pt.y + (item.font_size_pt || 11));
+        break;
+
+      case 'text_run':
+        renderSceneTextRun(ctx, item);
+        break;
+
+      case 'table_cell_background':
+        ctx.fillStyle = item.color || '#E8E8E8';
+        ctx.fillRect(item.bounds_pt.x, item.bounds_pt.y, item.bounds_pt.width, item.bounds_pt.height);
+        break;
+
+      case 'table_border_segment':
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(item.start_pt.x, item.start_pt.y);
+        ctx.lineTo(item.end_pt.x, item.end_pt.y);
+        ctx.stroke();
+        break;
+
+      case 'image':
+        renderSceneImage(ctx, item);
+        break;
+
+      case 'shape':
+        renderSceneShape(ctx, item);
+        break;
+
+      case 'text_box':
+        renderSceneTextBox(ctx, item);
+        break;
+
+      case 'comment_anchor':
+        ctx.fillStyle = item.color || 'rgba(255, 243, 205, 0.5)';
+        ctx.fillRect(item.bounds_pt.x, item.bounds_pt.y, item.bounds_pt.width, item.bounds_pt.height);
+        break;
+
+      case 'footnote_separator':
+        ctx.strokeStyle = '#999999';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(item.bounds_pt.x, item.bounds_pt.y);
+        ctx.lineTo(item.bounds_pt.x + item.bounds_pt.width, item.bounds_pt.y);
+        ctx.stroke();
+        break;
+
+      default:
+        break;
+    }
+  }
+}
+
+/**
+ * Render a text_run scene item.
+ */
+function renderSceneTextRun(ctx, item) {
+  const b = item.bounds_pt;
+  if (!b) return;
+
+  // Hidden text: skip rendering entirely
+  if (item.hidden) return;
+
+  // Resolve display text (caps/smallCaps transforms applied in layout,
+  // but we handle small_caps font size reduction here)
+  let displayText = item.text || '';
+  const fontSize = item.font_size_pt || 11;
+  let effectiveFontSize = fontSize;
+
+  // Small caps: render at ~70% size (text already uppercased by layout engine)
+  if (item.small_caps) {
+    effectiveFontSize = fontSize * 0.7;
+  }
+
+  const parts = [];
+  if (item.italic) parts.push('italic');
+  if (item.bold) parts.push('bold');
+  parts.push(effectiveFontSize + 'pt');
+  parts.push(item.font_family || 'serif');
+  ctx.font = parts.join(' ');
+
+  const baselineY = item.baseline_y || (b.y + fontSize);
+  let yOffset = 0;
+  if (item.superscript) yOffset = -(fontSize * 0.35);
+  if (item.subscript) yOffset = (fontSize * 0.2);
+  // Baseline shift (positive = up, in points)
+  if (item.baseline_shift) yOffset -= item.baseline_shift;
+
+  // Highlight background
+  if (item.highlight_color) {
+    ctx.fillStyle = item.highlight_color;
+    ctx.fillRect(b.x, b.y, b.width, b.height);
+  }
+
+  // Text color
+  ctx.fillStyle = item.color || '#000000';
+
+  // Strikethrough (single)
+  if (item.strikethrough) {
+    const midY = baselineY - fontSize * 0.3 + yOffset;
+    ctx.beginPath();
+    ctx.strokeStyle = item.color || '#000000';
+    ctx.lineWidth = Math.max(0.5, fontSize / 20);
+    ctx.moveTo(b.x, midY);
+    ctx.lineTo(b.x + b.width, midY);
+    ctx.stroke();
+  }
+
+  // Double strikethrough
+  if (item.double_strikethrough) {
+    const midY = baselineY - fontSize * 0.3 + yOffset;
+    const gap = Math.max(1.0, fontSize / 12);
+    ctx.beginPath();
+    ctx.strokeStyle = item.color || '#000000';
+    ctx.lineWidth = Math.max(0.5, fontSize / 24);
+    ctx.moveTo(b.x, midY - gap / 2);
+    ctx.lineTo(b.x + b.width, midY - gap / 2);
+    ctx.moveTo(b.x, midY + gap / 2);
+    ctx.lineTo(b.x + b.width, midY + gap / 2);
+    ctx.stroke();
+  }
+
+  // Inline image: render the image instead of text
+  if (item.inline_image && item.inline_image.src) {
+    const img = new Image();
+    const iw = item.inline_image.width || b.width;
+    const ih = item.inline_image.height || b.height;
+    const ix = b.x;
+    const iy = baselineY - ih + yOffset;
+    img.onload = () => ctx.drawImage(img, ix, iy, iw, ih);
+    img.onerror = () => {
+      ctx.strokeStyle = '#ccc';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(ix, iy, iw, ih);
+    };
+    img.src = item.inline_image.src;
+    return;
+  }
+
+  // Draw text
+  if (item.character_spacing && item.character_spacing !== 0) {
+    let cx = b.x;
+    for (const ch of displayText) {
+      ctx.fillText(ch, cx, baselineY + yOffset);
+      cx += ctx.measureText(ch).width + item.character_spacing;
+    }
+  } else {
+    ctx.fillText(displayText, b.x, baselineY + yOffset);
+  }
+
+  // Underline (all 6 styles)
+  const uStyle = item.underline;
+  if (uStyle && uStyle !== 'none') {
+    const underlineY = baselineY + 2 + yOffset;
+    ctx.beginPath();
+    ctx.strokeStyle = item.color || '#000000';
+
+    switch (uStyle) {
+      case 'double': {
+        const gap = Math.max(1.5, fontSize / 10);
+        ctx.lineWidth = Math.max(0.5, fontSize / 24);
+        ctx.moveTo(b.x, underlineY - gap / 2);
+        ctx.lineTo(b.x + b.width, underlineY - gap / 2);
+        ctx.moveTo(b.x, underlineY + gap / 2);
+        ctx.lineTo(b.x + b.width, underlineY + gap / 2);
+        break;
+      }
+      case 'thick':
+        ctx.lineWidth = Math.max(1.0, fontSize / 10);
+        ctx.moveTo(b.x, underlineY);
+        ctx.lineTo(b.x + b.width, underlineY);
+        break;
+      case 'dotted':
+        ctx.lineWidth = Math.max(0.5, fontSize / 20);
+        ctx.setLineDash([1, 2]);
+        ctx.moveTo(b.x, underlineY);
+        ctx.lineTo(b.x + b.width, underlineY);
+        ctx.setLineDash([]);
+        break;
+      case 'dashed':
+        ctx.lineWidth = Math.max(0.5, fontSize / 20);
+        ctx.setLineDash([4, 2]);
+        ctx.moveTo(b.x, underlineY);
+        ctx.lineTo(b.x + b.width, underlineY);
+        ctx.setLineDash([]);
+        break;
+      case 'wave': {
+        ctx.lineWidth = Math.max(0.5, fontSize / 20);
+        const amp = Math.max(1, fontSize / 12);
+        const period = Math.max(4, fontSize / 4);
+        let wx = b.x;
+        ctx.moveTo(wx, underlineY);
+        while (wx < b.x + b.width) {
+          ctx.quadraticCurveTo(wx + period / 4, underlineY - amp, wx + period / 2, underlineY);
+          ctx.quadraticCurveTo(wx + 3 * period / 4, underlineY + amp, wx + period, underlineY);
+          wx += period;
+        }
+        break;
+      }
+      default: // 'single'
+        ctx.lineWidth = Math.max(0.5, fontSize / 20);
+        ctx.moveTo(b.x, underlineY);
+        ctx.lineTo(b.x + b.width, underlineY);
+    }
+    ctx.stroke();
+  }
+}
+
+/**
+ * Render a scene image item.
+ */
+function renderSceneImage(ctx, item) {
+  const b = item.bounds_pt;
+  if (!b) return;
+
+  if (item.src_base64) {
+    const img = new Image();
+    img.onload = () => ctx.drawImage(img, b.x, b.y, b.width, b.height);
+    img.src = item.src_base64;
+  } else {
+    ctx.strokeStyle = '#cccccc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(b.x, b.y, b.width, b.height);
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(b.x, b.y, b.width, b.height);
+    ctx.fillStyle = '#999999';
+    ctx.font = '10pt sans-serif';
+    ctx.fillText('[Image]', b.x + 4, b.y + 14);
+  }
+}
+
+/**
+ * Render a scene shape item.
+ */
+function renderSceneShape(ctx, item) {
+  renderShape(ctx, {
+    bounds: item.bounds_pt,
+    shapeType: item.shape_type,
+    fillColor: item.fill_color,
+    strokeColor: item.stroke_color,
+    strokeWidth: item.stroke_width,
+    rotationDeg: item.rotation_deg,
+    flipH: item.flip_h,
+    flipV: item.flip_v,
+  });
+}
+
+/**
+ * Render a scene text box item.
+ */
+function renderSceneTextBox(ctx, item) {
+  const b = item.bounds_pt;
+  if (!b) return;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(b.x, b.y, b.width, b.height);
+  if (item.fill_color) {
+    ctx.fillStyle = item.fill_color;
+    ctx.fill();
+  }
+  if (item.stroke_color) {
+    ctx.strokeStyle = item.stroke_color;
+    ctx.lineWidth = item.stroke_width || 0.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// -------------------------------------------------------
+// Caret and selection painting (scene-mode)
+// -------------------------------------------------------
+
+/**
+ * Update the caret position from a WASM caret_rect result.
+ * @param {object} rectPt - { page_index, x, y, width, height }
+ */
+export function updateCaretFromRect(rectPt) {
+  if (!rectPt) {
+    _caretState = null;
+    return;
+  }
+  _caretState = {
+    pageIndex: rectPt.page_index,
+    x: rectPt.x,
+    y: rectPt.y,
+    width: rectPt.width || 1.0,
+    height: rectPt.height,
+  };
+}
+
+/**
+ * Update selection rectangles from WASM selection_rects result.
+ * @param {Array} rects - Array of { page_index, x, y, width, height }
+ */
+export function updateSelectionFromRects(rects) {
+  _selectionRects = (rects || []).map(r => ({
+    pageIndex: r.page_index,
+    x: r.x,
+    y: r.y,
+    width: r.width,
+    height: r.height,
+  }));
+}
+
+/**
+ * Perform a scene-based hit test using the WASM hit_test API.
+ * Falls back to client-side hit testing if not available.
+ *
+ * @param {number} clientX
+ * @param {number} clientY
+ * @param {HTMLElement} container
+ * @returns {object|null} Hit test result from WASM
+ */
+export function sceneHitTest(clientX, clientY, container) {
+  const { doc } = state;
+  if (!doc || typeof doc.hit_test !== 'function') {
+    return canvasHitTest(clientX, clientY, container);
+  }
+
+  const ptToPx = 96 / 72;
+  const rect = container.getBoundingClientRect();
+  const scrollX = container.scrollLeft;
+  const scrollY = container.scrollTop;
+  const cx = clientX - rect.left + scrollX;
+  const cy = clientY - rect.top + scrollY;
+
+  // Find which page canvas was clicked
+  let pageTopPx = PAGE_GAP_PX;
+  for (const entry of _canvasPages) {
+    const pageIdx = parseInt(entry.canvas.dataset.pageIndex || '0');
+    const pageW = parseFloat(entry.canvas.style.width);
+    const pageH = parseFloat(entry.canvas.style.height);
+    const containerWidth = container.clientWidth;
+    const pageLeftPx = Math.max(PAGE_GAP_PX, (containerWidth - pageW) / 2);
+
+    if (cy >= pageTopPx && cy < pageTopPx + pageH &&
+        cx >= pageLeftPx && cx < pageLeftPx + pageW) {
+      const localXPt = (cx - pageLeftPx) / ptToPx;
+      const localYPt = (cy - pageTopPx) / ptToPx;
+
+      try {
+        const resultStr = doc.hit_test(pageIdx, localXPt, localYPt);
+        return JSON.parse(resultStr);
+      } catch (e) {
+        console.error('Scene hit test failed:', e);
+        return null;
+      }
+    }
+    pageTopPx += pageH + PAGE_GAP_PX;
+  }
+  return null;
+}
+
+// -------------------------------------------------------
+// Hit testing (legacy layout JSON)
 // -------------------------------------------------------
 
 /**
@@ -539,4 +1162,275 @@ export function destroyCanvasRenderer() {
   });
   _canvasPages = [];
   _lastLayoutJson = null;
+  _stopCaretBlink();
+}
+
+// -------------------------------------------------------
+// Canvas mouse event wiring
+// -------------------------------------------------------
+
+let _mouseDown = false;
+let _caretBlinkTimer = null;
+let _caretVisible = true;
+
+/**
+ * Wire mouse events on the canvas container for click-to-place-caret,
+ * drag-to-select, and double-click-to-select-word.
+ *
+ * @param {HTMLElement} container - The page scroll container
+ */
+export function initCanvasMouseEvents(container) {
+  if (!container) return;
+
+  // Focus the hidden textarea so it captures keyboard input.
+  // Uses direct DOM access to avoid circular import issues.
+  function focusCanvasInput() {
+    const ta = document.getElementById('s1-canvas-input');
+    if (ta) ta.focus({ preventScroll: true });
+  }
+
+  container.addEventListener('mousedown', (e) => {
+    if (!_canvasMode || !state.doc) return;
+    if (e.button !== 0) return;
+    const target = e.target;
+    if (!target.classList || !target.classList.contains('s1-canvas-page')) return;
+
+    e.preventDefault(); // prevent focus from going to the canvas element
+    _mouseDown = true;
+    const hit = sceneHitTest(e.clientX, e.clientY, container);
+    if (!hit || !hit.position) return;
+
+    if (e.shiftKey) {
+      modelSelection.extendFocus(hit.position);
+      repaintSelection();
+    } else {
+      modelSelection.setFromHitTest(hit);
+      repaintCaret();
+    }
+
+    focusCanvasInput();
+  });
+
+  container.addEventListener('mousemove', (e) => {
+    if (!_mouseDown || !_canvasMode || !state.doc) return;
+    const hit = sceneHitTest(e.clientX, e.clientY, container);
+    if (!hit || !hit.position) return;
+
+    modelSelection.extendFocus(hit.position);
+    repaintSelection();
+  });
+
+  const upHandler = () => { _mouseDown = false; };
+  container.addEventListener('mouseup', upHandler);
+  document.addEventListener('mouseup', upHandler);
+
+  // Double-click: select word
+  container.addEventListener('dblclick', (e) => {
+    if (!_canvasMode || !state.doc) return;
+    const target = e.target;
+    if (!target.classList || !target.classList.contains('s1-canvas-page')) return;
+
+    const hit = sceneHitTest(e.clientX, e.clientY, container);
+    if (!hit || !hit.position) return;
+
+    try {
+      const rangeStr = state.doc.word_boundary(JSON.stringify(hit.position));
+      const range = JSON.parse(rangeStr);
+      modelSelection.setRange(range);
+      repaintSelection();
+    } catch (_) {}
+
+    focusCanvasInput();
+  });
+}
+
+// -------------------------------------------------------
+// Dirty-page repaint
+// -------------------------------------------------------
+
+/**
+ * Re-render only the pages that changed after an edit.
+ *
+ * @param {{ start: number, end: number }} dirtyPages
+ */
+export function repaintDirtyPages(dirtyPages) {
+  if (!_canvasMode || !state.doc) return;
+
+  const container = document.getElementById('pageContainer');
+  if (!container) return;
+
+  // Full re-render for correctness. Individual page re-render is possible
+  // but requires careful handling of page count changes.
+  try {
+    if (typeof state.doc.scene_summary === 'function') {
+      renderDocumentScene(container);
+    } else {
+      renderDocumentCanvas(container);
+    }
+    // Re-focus the hidden textarea after repaint so typing continues to work
+    const ta = document.getElementById('s1-canvas-input');
+    if (ta) ta.focus({ preventScroll: true });
+  } catch (e) {
+    console.error('[canvas] repaintDirtyPages failed:', e);
+  }
+}
+
+// -------------------------------------------------------
+// Caret rendering
+// -------------------------------------------------------
+
+/**
+ * Repaint the caret at the current selection position.
+ * Fetches the caret rect from WASM and draws it on the appropriate page canvas.
+ */
+export function repaintCaret() {
+  if (!_canvasMode || !state.doc) return;
+
+  const posJson = modelSelection.getPositionJson();
+  if (!posJson) { _stopCaretBlink(); return; }
+
+  try {
+    const rectStr = state.doc.caret_rect(posJson);
+    const rect = JSON.parse(rectStr);
+    updateCaretFromRect(rect);
+    _startCaretBlink();
+    _drawCaret();
+  } catch (e) {
+    console.error('[canvas] repaintCaret failed:', e);
+  }
+}
+
+/**
+ * Repaint selection highlight rectangles.
+ */
+export function repaintSelection() {
+  if (!_canvasMode || !state.doc) return;
+
+  const rangeJson = modelSelection.getRangeJson();
+  if (!rangeJson || modelSelection.isCollapsed()) {
+    _selectionRects = [];
+    repaintCaret();
+    return;
+  }
+
+  try {
+    const rectsStr = state.doc.selection_rects(rangeJson);
+    const rects = JSON.parse(rectsStr);
+    updateSelectionFromRects(rects);
+    _stopCaretBlink();
+
+    // Redraw pages with selection highlight overlay
+    _drawSelectionOverlay();
+  } catch (e) {
+    console.error('[canvas] repaintSelection failed:', e);
+  }
+}
+
+function _startCaretBlink() {
+  _stopCaretBlink();
+  _caretVisible = true;
+  _caretBlinkTimer = setInterval(() => {
+    _caretVisible = !_caretVisible;
+    _drawCaret();
+  }, 530);
+}
+
+function _stopCaretBlink() {
+  if (_caretBlinkTimer) {
+    clearInterval(_caretBlinkTimer);
+    _caretBlinkTimer = null;
+  }
+  _caretVisible = false;
+}
+
+function _drawCaret() {
+  if (!_caretState) return;
+  const entry = _canvasPages[_caretState.pageIndex];
+  if (!entry) return;
+
+  const ptToPx = 96 / 72;
+  const dpr = window.devicePixelRatio || 1;
+  const { ctx, canvas } = entry;
+
+  // Use backing buffer: save page pixels once, restore on each blink toggle.
+  // This avoids re-fetching the full scene from WASM on every 530ms blink.
+  if (!entry._backingBuffer) {
+    entry._backingBuffer = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  }
+  // Restore the clean page (without caret)
+  ctx.putImageData(entry._backingBuffer, 0, 0);
+
+  if (_caretVisible) {
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.scale(ptToPx, ptToPx);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(
+      _caretState.x,
+      _caretState.y,
+      _caretState.width,
+      _caretState.height
+    );
+    ctx.restore();
+  }
+}
+
+function _drawSelectionOverlay() {
+  // Group rects by page
+  const byPage = {};
+  for (const r of _selectionRects) {
+    if (!byPage[r.pageIndex]) byPage[r.pageIndex] = [];
+    byPage[r.pageIndex].push(r);
+  }
+
+  const ptToPx = 96 / 72;
+
+  const dpr = window.devicePixelRatio || 1;
+  for (const [pi, rects] of Object.entries(byPage)) {
+    const entry = _canvasPages[parseInt(pi)];
+    if (!entry) continue;
+
+    // Restore clean page from backing buffer (fast, no WASM call)
+    if (entry._backingBuffer) {
+      entry.ctx.putImageData(entry._backingBuffer, 0, 0);
+    }
+
+    // Draw selection rects
+    const { ctx } = entry;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.scale(ptToPx, ptToPx);
+    ctx.fillStyle = 'rgba(66, 133, 244, 0.3)';
+    for (const r of rects) {
+      ctx.fillRect(r.x, r.y, r.width, r.height);
+    }
+    ctx.restore();
+  }
+}
+
+/**
+ * Re-render a single page canvas from a parsed scene object.
+ */
+function _redrawPageFromScene(entry, scene) {
+  const { ctx, canvas } = entry;
+  const dpr = window.devicePixelRatio || 1;
+  const ptToPx = 96 / 72;
+  const widthPx = parseFloat(canvas.style.width);
+  const heightPx = parseFloat(canvas.style.height);
+
+  // Clear
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  // Render scene items
+  ctx.save();
+  ctx.scale(ptToPx, ptToPx);
+  if (scene.items) {
+    renderSceneItems(ctx, scene.items);
+  }
+  ctx.restore();
+
+  // Update backing buffer so caret blink uses the fresh page
+  entry._backingBuffer = ctx.getImageData(0, 0, canvas.width, canvas.height);
 }

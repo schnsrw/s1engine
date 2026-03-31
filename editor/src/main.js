@@ -18,6 +18,8 @@ import { trackEvent } from './analytics.js';
 import { recordError } from './error-tracking.js';
 import { initShapes } from './shapes.js';
 import { initPropertiesPanel } from './properties-panel.js';
+import { initCanvasBridge } from './input/bridge.js';
+import { initCanvasMouseEvents } from './canvas-render.js';
 import { initFonts, ensureDocumentFonts } from './fonts.js';
 import { initAIPanel } from './ai-panel.js';
 import { initAIInline } from './ai-inline.js';
@@ -119,6 +121,10 @@ async function boot() {
     }
     gateElement($('miFootnote'), 'canInsertFootnote', 'Footnotes');
     gateElement($('miEndnote'), 'canInsertEndnote', 'Endnotes');
+
+    // Canvas editing bridge and mouse events
+    initCanvasBridge($('pageContainer'));
+    initCanvasMouseEvents($('pageContainer'));
 
     initTouch();
     initPinchToZoom();

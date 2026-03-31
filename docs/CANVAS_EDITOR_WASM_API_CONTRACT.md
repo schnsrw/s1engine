@@ -134,23 +134,239 @@ Fields:
   "layout_revision": 11,
   "bounds_pt": { "x": 0.0, "y": 0.0, "width": 612.0, "height": 792.0 },
   "content_rect_pt": { "x": 72.0, "y": 72.0, "width": 468.0, "height": 648.0 },
-  "items": [
-    {
-      "item_id": "run_991",
-      "kind": "text_run",
-      "z_index": 70,
-      "node_id": "n_1042",
-      "bounds_pt": { "x": 84.0, "y": 102.0, "width": 120.0, "height": 14.0 },
-      "text": "Hello world",
-      "font": {
-        "family": "Noto Sans",
-        "size_pt": 11.0,
-        "weight": 400,
-        "style": "normal"
-      },
-      "fill": "#111111"
-    }
-  ]
+  "header_rect_pt": { "x": 72.0, "y": 36.0, "width": 468.0, "height": 24.0 },
+  "footer_rect_pt": { "x": 72.0, "y": 732.0, "width": 468.0, "height": 24.0 },
+  "items": [ "..." ]
+}
+```
+
+### SceneItem Types
+
+Every item in `PageScene.items` has a `kind` field. The complete set of item kinds:
+
+#### `text_run`
+
+A shaped text run at an exact position. The primary rendering primitive.
+
+```json
+{
+  "kind": "text_run",
+  "node_id": "0:42",
+  "bounds_pt": { "x": 84.0, "y": 102.0, "width": 120.0, "height": 14.0 },
+  "baseline_y": 112.0,
+  "text": "Hello world",
+  "font_family": "Noto Sans",
+  "font_size_pt": 11.0,
+  "bold": false,
+  "italic": false,
+  "underline": "none",
+  "strikethrough": false,
+  "color": "#111111",
+  "highlight_color": null,
+  "hyperlink_url": null,
+  "superscript": false,
+  "subscript": false,
+  "character_spacing": 0.0,
+  "revision_type": null,
+  "revision_author": null
+}
+```
+
+#### `paragraph_background`
+
+Background fill for a paragraph block.
+
+```json
+{
+  "kind": "paragraph_background",
+  "node_id": "0:40",
+  "bounds_pt": { "x": 72.0, "y": 100.0, "width": 468.0, "height": 28.0 },
+  "color": "#F0F0F0"
+}
+```
+
+#### `paragraph_border`
+
+Border segments around a paragraph.
+
+```json
+{
+  "kind": "paragraph_border",
+  "node_id": "0:40",
+  "bounds_pt": { "x": 72.0, "y": 100.0, "width": 468.0, "height": 28.0 },
+  "border_top": { "width": 1.0, "style": "solid", "color": "#000000" },
+  "border_bottom": null,
+  "border_left": null,
+  "border_right": null
+}
+```
+
+#### `list_marker`
+
+Bullet or number glyph for a list item.
+
+```json
+{
+  "kind": "list_marker",
+  "node_id": "0:45",
+  "bounds_pt": { "x": 84.0, "y": 130.0, "width": 12.0, "height": 14.0 },
+  "marker_text": "\u2022",
+  "font_family": "Symbol",
+  "font_size_pt": 11.0,
+  "color": "#000000",
+  "list_level": 0
+}
+```
+
+#### `table_cell_background`
+
+Fill for a table cell.
+
+```json
+{
+  "kind": "table_cell_background",
+  "node_id": "0:80",
+  "bounds_pt": { "x": 72.0, "y": 200.0, "width": 234.0, "height": 40.0 },
+  "color": "#E8E8E8"
+}
+```
+
+#### `table_border_segment`
+
+A single resolved border segment of a table.
+
+```json
+{
+  "kind": "table_border_segment",
+  "node_id": "0:78",
+  "start_pt": { "x": 72.0, "y": 200.0 },
+  "end_pt": { "x": 306.0, "y": 200.0 },
+  "width": 1.0,
+  "style": "solid",
+  "color": "#000000"
+}
+```
+
+#### `image`
+
+An inline or floating image.
+
+```json
+{
+  "kind": "image",
+  "node_id": "0:90",
+  "bounds_pt": { "x": 72.0, "y": 300.0, "width": 200.0, "height": 150.0 },
+  "media_id": 1,
+  "content_type": "image/png",
+  "src_base64": "iVBOR...",
+  "wrap_type": "none",
+  "is_floating": false
+}
+```
+
+#### `shape`
+
+A vector shape (rectangle, ellipse, line, etc.).
+
+```json
+{
+  "kind": "shape",
+  "node_id": "0:95",
+  "bounds_pt": { "x": 300.0, "y": 400.0, "width": 150.0, "height": 100.0 },
+  "shape_type": "rect",
+  "fill_color": "#4472C4",
+  "stroke_color": "#2F5496",
+  "stroke_width": 1.0,
+  "rotation_deg": 0.0,
+  "flip_h": false,
+  "flip_v": false,
+  "is_floating": true,
+  "wrap_type": "square",
+  "has_text_frame": false
+}
+```
+
+#### `text_box`
+
+A shape with an embedded text frame. Contains nested text runs.
+
+```json
+{
+  "kind": "text_box",
+  "node_id": "0:96",
+  "bounds_pt": { "x": 300.0, "y": 400.0, "width": 150.0, "height": 100.0 },
+  "shape_type": "textBox",
+  "fill_color": "#FFFFFF",
+  "stroke_color": "#000000",
+  "stroke_width": 0.5,
+  "text_margins": { "top": 4.0, "bottom": 4.0, "left": 4.0, "right": 4.0 },
+  "text_vertical_align": "top",
+  "text_runs": [ "..." ]
+}
+```
+
+#### `header_footer_anchor`
+
+Marks the region for a header or footer.
+
+```json
+{
+  "kind": "header_footer_anchor",
+  "region": "header",
+  "bounds_pt": { "x": 72.0, "y": 36.0, "width": 468.0, "height": 24.0 }
+}
+```
+
+#### `footnote_separator`
+
+The line separating footnotes from body content.
+
+```json
+{
+  "kind": "footnote_separator",
+  "bounds_pt": { "x": 72.0, "y": 650.0, "width": 120.0, "height": 1.0 }
+}
+```
+
+#### `comment_anchor`
+
+A highlight marking a comment's anchor range.
+
+```json
+{
+  "kind": "comment_anchor",
+  "node_id": "0:110",
+  "comment_id": "c_1",
+  "bounds_pt": { "x": 100.0, "y": 102.0, "width": 60.0, "height": 14.0 },
+  "color": "#FFF3CD"
+}
+```
+
+#### `bookmark_anchor`
+
+A non-visual marker for a bookmark position.
+
+```json
+{
+  "kind": "bookmark_anchor",
+  "node_id": "0:115",
+  "bookmark_name": "section_start",
+  "position_pt": { "x": 84.0, "y": 102.0 }
+}
+```
+
+#### `inline_image`
+
+An image embedded within a text run (e.g., emoji, icon).
+
+```json
+{
+  "kind": "inline_image",
+  "node_id": "0:120",
+  "bounds_pt": { "x": 200.0, "y": 102.0, "width": 14.0, "height": 14.0 },
+  "media_id": 2,
+  "content_type": "image/png",
+  "src_base64": "..."
 }
 ```
 
@@ -202,6 +418,123 @@ Possible `kind` values:
     }
   }
 }
+```
+
+### FormattingState
+
+Returned by `selection_formatting()` to drive toolbar state.
+
+```json
+{
+  "bold": true,
+  "italic": false,
+  "underline": "none",
+  "strikethrough": false,
+  "superscript": false,
+  "subscript": false,
+  "font_family": "Times New Roman",
+  "font_size_pt": 12.0,
+  "color": "#000000",
+  "highlight_color": null,
+  "alignment": "left",
+  "line_spacing": "single",
+  "list_format": null,
+  "style_id": "Normal",
+  "indent_left_pt": 0.0,
+  "indent_right_pt": 0.0,
+  "indent_first_line_pt": 0.0,
+  "spacing_before_pt": 0.0,
+  "spacing_after_pt": 0.0
+}
+```
+
+For mixed-formatting selections, individual fields are `null` (indeterminate).
+
+### CompositionState
+
+Returned by `begin_composition()` and `update_composition()`.
+
+```json
+{
+  "active": true,
+  "preview_text": "composing",
+  "preview_range": {
+    "anchor": { "node_id": "0:42", "offset_utf16": 10, "affinity": "downstream" },
+    "focus": { "node_id": "0:42", "offset_utf16": 19, "affinity": "downstream" }
+  },
+  "underline_rects": [
+    { "page_index": 0, "x": 150.0, "y": 102.0, "width": 80.0, "height": 14.0 }
+  ],
+  "caret_rect": { "page_index": 0, "x": 230.0, "y": 102.0, "width": 1.0, "height": 14.0 }
+}
+```
+
+## Error Handling Contract
+
+### Error response shape
+
+All WASM methods that can fail return a JSON object with an `error` field instead of the normal result:
+
+```json
+{
+  "error": {
+    "code": "invalid_position",
+    "message": "Node 0:999 does not exist in the document",
+    "context": {
+      "method": "hit_test",
+      "node_id": "0:999"
+    }
+  }
+}
+```
+
+### Error codes
+
+| Code | Meaning | When |
+|---|---|---|
+| `invalid_position` | The `PositionRef` refers to a non-existent node or out-of-range offset | Any method accepting `PositionRef` |
+| `invalid_range` | The `RangeRef` has invalid anchor or focus | Any method accepting `RangeRef` |
+| `invalid_page_index` | Page index is out of range | `page_scene()`, `hit_test()` |
+| `invalid_node_id` | Node ID does not exist | `node_bounds()`, `set_block_attrs()` |
+| `layout_not_ready` | Layout has not been computed yet | Scene/geometry methods before first layout |
+| `composition_active` | Cannot start a new composition while one is active | `begin_composition()` |
+| `no_active_composition` | Cannot update/commit without active composition | `update_composition()`, `commit_composition()` |
+| `read_only` | Document is in read-only mode | Any editing method |
+| `invalid_argument` | General argument validation failure | Any method |
+
+### JS-side handling
+
+```js
+const result = JSON.parse(doc.hit_test(pageIdx, x, y, '{}'));
+if (result.error) {
+  console.warn(`WASM error [${result.error.code}]: ${result.error.message}`);
+  return null;
+}
+// use result normally
+```
+
+### Panics
+
+WASM methods must never panic. All Rust `Result::Err` values are caught and serialized as error responses. If an unexpected panic occurs, `wasm_bindgen`'s default panic hook converts it to a JS exception — this indicates a bug and should be reported.
+
+## Mark Types for `toggle_mark()`
+
+The `mark` parameter in `toggle_mark(range, mark)` accepts these string values:
+
+| Mark | Effect | Toggle behavior |
+|---|---|---|
+| `"bold"` | Bold weight | On if any part of range is not bold |
+| `"italic"` | Italic style | On if any part of range is not italic |
+| `"underline"` | Single underline | On/off toggle |
+| `"strikethrough"` | Strikethrough | On/off toggle |
+| `"superscript"` | Superscript | On/off toggle; clears subscript |
+| `"subscript"` | Subscript | On/off toggle; clears superscript |
+| `"code"` | Monospace font | On/off toggle |
+
+For parametric formatting (font size, color, font family), use `set_run_attrs(range, attrs)` instead:
+
+```json
+{ "font_size_pt": 14.0, "color": "#FF0000", "font_family": "Arial" }
 ```
 
 ## Proposed `WasmDocument` Additions
@@ -257,8 +590,11 @@ Recommended enums:
 | `replace_range(range, text)` | `JsValue`, `string` | `JsValue` | Primary typing path |
 | `delete_range(range)` | `JsValue` | `JsValue` | Explicit range deletion |
 | `insert_paragraph_break(position)` | `JsValue` | `JsValue` | Enter key |
-| `toggle_mark(range, mark)` | `JsValue`, `string` | `JsValue` | Bold/italic/etc |
+| `toggle_mark(range, mark)` | `JsValue`, `string` | `JsValue` | See Mark Types table |
+| `set_run_attrs(range, attrs)` | `JsValue`, `JsValue` | `JsValue` | Parametric run formatting |
 | `set_block_attrs(node_id, attrs)` | `string`, `JsValue` | `JsValue` | Alignment, spacing, list attrs |
+| `selection_formatting(range)` | `JsValue` | `JsValue` | Returns FormattingState for toolbar |
+| `paste_html(position, html)` | `JsValue`, `string` | `JsValue` | Rich paste from clipboard |
 | `insert_image(anchor, spec)` | `JsValue`, `JsValue` | `JsValue` | Phase 5+ |
 | `insert_table(anchor, spec)` | `JsValue`, `JsValue` | `JsValue` | Phase 6 |
 

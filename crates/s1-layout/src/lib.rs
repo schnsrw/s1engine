@@ -29,5 +29,5 @@ pub use style_resolver::{
 pub use types::{
     GlyphRun, InlineImage, LayoutAnnotation, LayoutAnnotationType, LayoutBlock, LayoutBlockKind,
     LayoutBookmark, LayoutCache, LayoutDocument, LayoutLine, LayoutPage, LayoutTableCell,
-    LayoutTableRow, PageLayout, Rect,
+    LayoutTableRow, PageLayout, Rect, TextBoxMargins,
 };

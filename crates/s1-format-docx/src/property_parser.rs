@@ -626,6 +626,19 @@ pub fn parse_table_properties(reader: &mut Reader<&[u8]>) -> Result<AttributeMap
                             }
                         }
                     }
+                    b"shd" | b"tblShd" => {
+                        // Table-level shading/background color
+                        if let Some(fill) = get_attr(&e, b"fill") {
+                            if fill != "auto" {
+                                if let Some(color) = Color::from_hex(&fill) {
+                                    attrs.set(
+                                        AttributeKey::Background,
+                                        AttributeValue::Color(color),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1672,6 +1685,28 @@ mod tests {
         );
         // Cell width should still be parsed
         assert!(attrs.get(&AttributeKey::CellWidth).is_some());
+    }
+
+    #[test]
+    fn parse_table_shading() {
+        let xml = r#"<w:tblPr><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tblPr>"#;
+        let mut reader = Reader::from_str(xml);
+        skip_to_start(&mut reader, b"tblPr");
+        let attrs = parse_table_properties(&mut reader).unwrap();
+        assert_eq!(
+            attrs.get_color(&AttributeKey::Background),
+            Some(Color::from_hex("F2F2F2").unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_table_shading_auto_ignored() {
+        let xml = r#"<w:tblPr><w:shd w:val="clear" w:color="auto" w:fill="auto"/></w:tblPr>"#;
+        let mut reader = Reader::from_str(xml);
+        skip_to_start(&mut reader, b"tblPr");
+        let attrs = parse_table_properties(&mut reader).unwrap();
+        // "auto" fill should not set a Background color
+        assert_eq!(attrs.get_color(&AttributeKey::Background), None);
     }
 
     #[test]
