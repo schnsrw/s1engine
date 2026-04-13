@@ -97,11 +97,12 @@ function buildParagraph(logicDoc, wasmDoc, paraInfo) {
     para.Pr.PStyle = paraInfo.styleId;
   }
 
-  // Paragraph layout properties — control page break behavior
-  if (paraInfo.pageBreakBefore === true) para.Pr.PageBreakBefore = true;
-  if (paraInfo.keepWithNext === true) para.Pr.KeepNext = true;
-  if (paraInfo.keepLinesTogether === true) para.Pr.KeepLines = true;
-  if (paraInfo.widowControl === true) para.Pr.WidowControl = true;
+  // Paragraph layout properties — set explicit defaults to override template
+  // Default: allow paragraphs to split across pages, enable widow/orphan control
+  para.Pr.KeepLines = paraInfo.keepLinesTogether === true;
+  para.Pr.KeepNext = paraInfo.keepWithNext === true;
+  para.Pr.PageBreakBefore = paraInfo.pageBreakBefore === true;
+  para.Pr.WidowControl = paraInfo.widowControl !== false; // default true
 
   // Build runs from children (must call Correct_Content after all runs added)
   if (paraInfo.children && paraInfo.children.length > 0) {

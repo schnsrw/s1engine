@@ -16,19 +16,25 @@ The s1engine document engine is complete and production-ready.
 
 ## Web Editor (IN PROGRESS)
 
-**Approach**: Integrate OnlyOffice sdkjs as the editor frontend, with s1engine WASM as the document backend.
+**Approach**: Integrate OnlyOffice Web as the editor shell and input/rendering runtime, with `s1engine-wasm` providing document import/export and future structural interoperability.
 
 ```
 Phase 16: OnlyOffice Integration  ░░░░░░░░░░░░░░░░░░░░  IN PROGRESS
 ```
 
-### Phase 16: OnlyOffice sdkjs + s1engine WASM
+### Phase 16: OnlyOffice Web + s1engine WASM
 
-**Goal**: Production-quality web document editor using OnlyOffice's battle-tested rendering/input system backed by our Rust document engine.
+**Current Goal**: Stand up a working OnlyOffice-based web editor path, then expand the bridge from text-only DOCX handling into structural fidelity.
 
-1. Set up OnlyOffice sdkjs in `web/` directory
-2. Build adapter layer between sdkjs API and s1engine WASM
-3. Document open: DOCX bytes → s1engine WASM parse → sdkjs document model
-4. Document save: sdkjs model → s1engine WASM export → DOCX bytes
-5. Collaboration: sdkjs ↔ s1engine CRDT ↔ WebSocket relay
-6. Server integration: Axum server + relay.js
+Current status:
+1. `web/` hosts the active web client
+2. `web/adapter.js` provides a text-only DOCX open/save bridge
+3. `web/pkg/` contains generated `s1engine-wasm` artifacts
+
+Next required steps:
+1. Serve `web/` by default from the Axum server
+2. Replace text-only import with structural import
+3. Replace text-only export with structural export
+4. Define model ownership for editing and undo/redo
+5. Rebuild fidelity validation around the current `web/` architecture
+6. Integrate collaboration only after the model boundary is clear
