@@ -269,16 +269,27 @@ export function saveDocx(api) {
       try { newDoc.set_alignment(paraId, paraData.alignment); } catch(e) {}
     }
 
-    // Insert line breaks at correct positions
-    // Process in reverse order so offsets stay valid
+    // Apply run-level formatting via range APIs
+    if (paraData.runs) {
+      for (var r = 0; r < paraData.runs.length; r++) {
+        var rd = paraData.runs[r];
+        try {
+          if (rd.bold) newDoc.set_bold_range(paraId, rd.start, paraId, rd.end, true);
+          if (rd.italic) newDoc.set_italic_range(paraId, rd.start, paraId, rd.end, true);
+          if (rd.underline) newDoc.set_underline_range(paraId, rd.start, paraId, rd.end, true);
+          if (rd.fontSize) newDoc.set_font_size_range(paraId, rd.start, paraId, rd.end, rd.fontSize);
+          if (rd.fontName) newDoc.set_font_family_range(paraId, rd.start, paraId, rd.end, rd.fontName);
+          if (rd.color && rd.color !== '#000000') newDoc.set_color_range(paraId, rd.start, paraId, rd.end, rd.color);
+        } catch(e) {}
+      }
+    }
+
+    // Insert line breaks and tabs at correct positions (reverse order for stable offsets)
     for (var b = paraData.breaks.length - 1; b >= 0; b--) {
       var brk = paraData.breaks[b];
       try {
-        if (brk.type === 'line') {
-          newDoc.insert_line_break(paraId, brk.offset);
-        } else if (brk.type === 'tab') {
-          newDoc.insert_tab(paraId, brk.offset);
-        }
+        if (brk.type === 'line') newDoc.insert_line_break(paraId, brk.offset);
+        else if (brk.type === 'tab') newDoc.insert_tab(paraId, brk.offset);
       } catch(e) {}
     }
   }
@@ -290,62 +301,77 @@ export function saveDocx(api) {
 
 /**
  * Extract structured data from an OnlyOffice Paragraph.
- * Returns: { text, alignment, headingLevel, breaks: [{type, offset}] }
+ * Returns: { text, alignment, headingLevel, breaks, runs }
+ * runs: [{start, end, bold, italic, underline, strikeout, fontName, fontSize, color}]
  */
 function extractParagraph(para) {
   var text = '';
-  var breaks = []; // {type: 'line'|'tab'|'page', offset: charIndex}
+  var breaks = [];
+  var runs = []; // run formatting spans with char offsets
   var alignment = 'left';
   var headingLevel = 0;
 
-  // Get compiled paragraph properties
+  // Paragraph properties
   var compiledPr = para.Get_CompiledPr2 ? para.Get_CompiledPr2(false) : null;
   var paraPr = compiledPr ? compiledPr.ParaPr : para.Pr;
 
-  // Alignment (sdkjs: 0=Right, 1=Left, 2=Center, 3=Justify)
   if (paraPr && paraPr.Jc !== undefined) {
     var alignMap = { 0: 'right', 1: 'left', 2: 'center', 3: 'justify' };
     alignment = alignMap[paraPr.Jc] || 'left';
   }
 
-  // Heading level from style
   if (paraPr && paraPr.OutlineLvl !== undefined && paraPr.OutlineLvl >= 0) {
-    headingLevel = paraPr.OutlineLvl + 1; // OutlineLvl is 0-based
+    headingLevel = paraPr.OutlineLvl + 1;
   } else if (paraPr && paraPr.PStyle) {
-    var style = paraPr.PStyle;
-    var match = style.match(/[Hh]eading\s*(\d)/);
+    var match = paraPr.PStyle.match(/[Hh]eading\s*(\d)/);
     if (match) headingLevel = parseInt(match[1]);
   }
 
-  // Extract runs
+  // Extract runs with formatting
   for (var j = 0; j < para.Content.length; j++) {
     var run = para.Content[j];
     if (!run || !run.Content) continue;
+
+    var runStart = text.length;
+    var rPr = run.Pr || {};
 
     for (var k = 0; k < run.Content.length; k++) {
       var item = run.Content[k];
       if (!item) continue;
 
       if (item.Value !== undefined && item.Value !== null) {
-        // CRunText or CRunSpace
         text += String.fromCharCode(item.Value);
       } else if (item.IsSpace && item.IsSpace()) {
         text += ' ';
       } else if (item.IsTab && item.IsTab()) {
         breaks.push({ type: 'tab', offset: text.length });
-        text += '\t'; // placeholder
+        text += '\t';
       } else if (item.IsBreak && item.IsBreak()) {
-        if (item.BreakType === 1) { // break_Line
-          breaks.push({ type: 'line', offset: text.length });
-        } else if (item.BreakType === 2) { // break_Page
-          breaks.push({ type: 'page', offset: text.length });
-        }
+        if (item.BreakType === 1) breaks.push({ type: 'line', offset: text.length });
+        else if (item.BreakType === 2) breaks.push({ type: 'page', offset: text.length });
       }
-      // Skip paragraph mark and other non-text elements
+    }
+
+    var runEnd = text.length;
+    if (runEnd > runStart) {
+      var runData = { start: runStart, end: runEnd };
+      if (rPr.Bold === true) runData.bold = true;
+      if (rPr.Italic === true) runData.italic = true;
+      if (rPr.Underline === true) runData.underline = true;
+      if (rPr.Strikeout === true) runData.strikeout = true;
+      if (rPr.FontSize !== undefined) runData.fontSize = rPr.FontSize;
+      if (rPr.RFonts && rPr.RFonts.Ascii && rPr.RFonts.Ascii.Name) {
+        runData.fontName = rPr.RFonts.Ascii.Name;
+      }
+      if (rPr.Color && rPr.Color.r !== undefined) {
+        var c = rPr.Color;
+        runData.color = '#' + ((1<<24)+(c.r<<16)+(c.g<<8)+c.b).toString(16).slice(1);
+      }
+      runs.push(runData);
     }
   }
 
-  return { text: text, alignment: alignment, headingLevel: headingLevel, breaks: breaks };
+  return { text: text, alignment: alignment, headingLevel: headingLevel, breaks: breaks, runs: runs };
 }
 
 export function downloadFile(data, filename) {
