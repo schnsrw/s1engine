@@ -15,6 +15,7 @@
 </head>
 <body>
   <button id="file-input" onclick="document.getElementById('file-picker').click()">Open DOCX</button>
+  <button id="save-btn" style="position:fixed;top:10px;right:150px;z-index:10000;padding:8px 16px;background:#34a853;color:white;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:none" onclick="window.rudra_save()">Save DOCX</button>
   <input type="file" id="file-picker" accept=".docx" style="display:none">
 
   <div id="editor_sdk" tabindex="-1"></div>
@@ -114,6 +115,19 @@
         console.error('[rudra] Init failed:', e);
       }
 
+      // Save button handler
+      window.rudra_save = async function() {
+        try {
+          var adapter = await import('./adapter.js');
+          var docxBytes = adapter.saveDocx(window._api);
+          adapter.downloadFile(docxBytes, 'document.docx');
+          console.log('[rudra] Document saved');
+        } catch(err) {
+          console.error('[rudra] Save failed:', err);
+          alert('Save failed: ' + err.message);
+        }
+      };
+
       // File picker — opens DOCX via s1engine WASM adapter
       document.getElementById('file-picker').addEventListener('change', async function(e) {
         var file = e.target.files[0];
@@ -130,6 +144,7 @@
             console.log('[rudra] Opening ' + file.name + ' (' + bytes.length + ' bytes)');
             try {
               await adapter.openDocx(bytes, window._api);
+              document.getElementById('save-btn').style.display = 'block';
             } catch(err) {
               console.error('[rudra] Open failed:', err);
               alert('Failed to open document: ' + err.message);

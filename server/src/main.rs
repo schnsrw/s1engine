@@ -89,7 +89,7 @@ async fn main() {
     // Static editor files directory — check common locations for local dev
     let static_dir = std::env::var("S1_STATIC_DIR").unwrap_or_else(|_| {
         // Try repo-aware paths first for local dev convenience
-        for candidate in &["./public", "./editor", "./editor/dist"] {
+        for candidate in &["./web", "./public", "./editor", "./editor/dist"] {
             if std::path::Path::new(candidate).join("index.html").exists() {
                 return candidate.to_string();
             }
