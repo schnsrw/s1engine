@@ -67,6 +67,10 @@ export async function openDocx(docxBytes, api) {
   // Re-enable and render
   logicDoc.TurnOn_InterfaceEvents(false);
   logicDoc.TurnOn_Recalculate(false);
+
+  // Rebuild section info so page layout (margins, size) works correctly
+  if (logicDoc.UpdateAllSectionsInfo) logicDoc.UpdateAllSectionsInfo();
+
   logicDoc.MoveCursorToStartPos(false);
   logicDoc.Recalculate();
   api.Resize();
