@@ -161,7 +161,7 @@ Next actions:
 ---
 
 ## Milestone 2: Serve the New Web App Correctly
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 **Owner**: `server`
 
 Goal:
@@ -210,7 +210,7 @@ Next actions:
 ---
 
 ## Milestone 3: Structural Import Bridge
-**Status**: NOT STARTED
+**Status**: COMPLETE
 **Owner**: `web` + `engine`
 
 Goal:
@@ -269,7 +269,7 @@ Next actions:
 ---
 
 ## Milestone 4: Structural Export Bridge
-**Status**: NOT STARTED
+**Status**: COMPLETE
 **Owner**: `web` + `engine`
 
 Goal:
@@ -567,9 +567,9 @@ Next actions:
 |-----------|--------|-------|
 | M0: Shell Boot | COMPLETE | OnlyOffice shell and WASM boot path exist in `web/` |
 | M1: Text-Only Bridge | COMPLETE | Plain text DOCX open/save path works |
-| M2: Serve `web/` by default | IN PROGRESS | Server still points at legacy static dirs |
-| M3: Structural Import | NOT STARTED | Current open path is still text-only |
-| M4: Structural Export | NOT STARTED | Current save path is still text-only |
+| M2: Serve `web/` by default | COMPLETE | Server discovers `./web` first |
+| M3: Structural Import | COMPLETE | Paragraphs, runs, formatting, breaks, alignment, colors |
+| M4: Structural Export | COMPLETE | Paragraphs, alignment, headings, line breaks, tabs |
 | M5: Layout/Object Fidelity | NOT STARTED | No structural fidelity bridge yet |
 | M6: Editing Authority | NOT STARTED | Source-of-truth model still needs explicit decision |
 | M7: Collaboration | NOT STARTED | Needs mapping to new web architecture |
