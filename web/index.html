@@ -22,6 +22,21 @@
 
   <script>
     window['AscNotLoadAllScript'] = true;
+
+    // Fix Chrome passive event listener warnings from OnlyOffice mousewheel handler.
+    // sdkjs sets document.body.onmousewheel which Chrome treats as passive,
+    // then calls preventDefault() inside it, causing console spam.
+    // Intercept the assignment to re-register as non-passive.
+    var _wheelHandler = null;
+    Object.defineProperty(HTMLElement.prototype, 'onmousewheel', {
+      configurable: true,
+      get: function() { return _wheelHandler; },
+      set: function(fn) {
+        if (_wheelHandler) this.removeEventListener('wheel', _wheelHandler);
+        _wheelHandler = fn;
+        if (fn) this.addEventListener('wheel', fn, {passive: false});
+      }
+    });
   </script>
 
   <script src="onlyoffice-sdkjs/vendor/polyfill.js"></script>
