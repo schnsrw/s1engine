@@ -1,10 +1,11 @@
 /**
  * adapter.js — Text-only DOCX bridge (M1/M2)
  *
- * Open: DOCX → s1engine WASM → plain text → sdkjs editor
- * Save: sdkjs editor → plain text → s1engine WASM → DOCX
+ * Open: DOCX → s1engine WASM → to_plain_text() → split by \n → AddToParagraph per char
+ * Save: sdkjs Content[] → Paragraph.GetText() per paragraph → s1engine → export DOCX
  *
- * Formatting fidelity is not preserved in this version.
+ * Formatting is not preserved. This is explicitly a text-only bridge.
+ * See docs/INTEGRATION_MILESTONES.md M3/M4 for structural fidelity.
  */
 
 import init, { WasmEngine } from './pkg/s1engine_wasm.js';
@@ -20,28 +21,36 @@ export async function initWasm() {
   console.log('[adapter] WASM ready');
 }
 
+/**
+ * Open DOCX: parse with s1engine, extract plain text, insert into sdkjs editor.
+ */
 export async function openDocx(docxBytes, api) {
   if (!wasmReady) await initWasm();
 
-  // Parse DOCX and get ALL text at once
+  // Step 1: Parse DOCX and extract all text
   var doc = wasmEngine.open(docxBytes);
   var fullText = doc.to_plain_text();
-  console.log('[adapter] Extracted ' + fullText.length + ' chars');
 
   if (!fullText || fullText.length === 0) {
-    throw new Error('Document has no text content');
+    throw new Error('Document contains no text');
   }
 
+  console.log('[adapter] open: ' + fullText.length + ' chars extracted');
+
+  // Step 2: Access sdkjs document model
   var logicDoc = api.WordControl.m_oLogicDocument;
   if (!logicDoc) throw new Error('No logic document');
 
-  // Clear editor
+  // Step 3: Clear existing editor content
   logicDoc.SelectAll();
   logicDoc.Remove(1, true, false, true);
   logicDoc.RemoveSelection();
   try { api.put_TextPrUnderline(false); } catch(e) {}
 
-  // Split into paragraphs and insert
+  // Step 4: Disable recalculation during bulk insert for speed
+  logicDoc.TurnOff_Recalculate();
+
+  // Step 5: Split text into paragraphs, insert via AddToParagraph
   var paragraphs = fullText.split('\n');
   var isFirst = true;
   for (var i = 0; i < paragraphs.length; i++) {
@@ -51,72 +60,61 @@ export async function openDocx(docxBytes, api) {
     if (text) {
       for (var j = 0; j < text.length; j++) {
         var c = text.charCodeAt(j);
-        if (c === 13) continue;
+        if (c === 13) continue; // skip \r
         if (c === 9) logicDoc.AddToParagraph(new AscWord.CRunTab());
         else logicDoc.AddToParagraph(new AscWord.CRunText(c));
       }
     }
   }
 
+  // Step 6: Re-enable recalculation and render
+  logicDoc.TurnOn_Recalculate(false);
   logicDoc.MoveCursorToStartPos(false);
   logicDoc.Recalculate();
   api.Resize();
-  console.log('[adapter] Loaded ' + paragraphs.length + ' paragraphs');
+
+  console.log('[adapter] open: loaded ' + paragraphs.length + ' paragraphs');
 }
 
+/**
+ * Save DOCX: extract text from sdkjs paragraphs, build new doc, export.
+ *
+ * Uses Paragraph.GetText() per paragraph — the sdkjs API for paragraph text.
+ * See Paragraph.js:16730 for implementation.
+ */
 export function saveDocx(api) {
   if (!wasmReady) throw new Error('WASM not initialized');
 
   var logicDoc = api.WordControl.m_oLogicDocument;
   if (!logicDoc) throw new Error('No logic document');
 
-  // Extract all text at once using GetSelectedText with no selection
-  var allText = logicDoc.GetSelectedText(false, {
-    ParaSeparator: '\n',
-    Numbering: false,
-    Math: false,
-    TabSymbol: '\t',
-    NewLineSeparator: '\n'
-  }) || '';
-
-  // Fallback: manual extraction if GetSelectedText returns empty
-  if (!allText) {
-    for (var i = 0; i < logicDoc.Content.length; i++) {
-      var el = logicDoc.Content[i];
-      if (!el || !el.Content) continue;
-      var paraText = '';
-      for (var j = 0; j < el.Content.length; j++) {
-        var run = el.Content[j];
-        if (!run || !run.Content) continue;
-        for (var k = 0; k < run.Content.length; k++) {
-          var item = run.Content[k];
-          if (item && item.Value !== undefined && item.Value !== null) {
-            paraText += String.fromCharCode(item.Value);
-          }
-        }
-      }
-      allText += paraText + '\n';
+  // Extract text from each sdkjs paragraph using GetText API
+  var paragraphs = [];
+  for (var i = 0; i < logicDoc.Content.length; i++) {
+    var el = logicDoc.Content[i];
+    if (el && el.IsParagraph && el.IsParagraph()) {
+      var text = el.GetText({ ParaSeparator: '' }) || '';
+      paragraphs.push(text);
     }
   }
 
-  var paragraphs = allText.split('\n');
-  // Remove trailing empty paragraph if present
-  while (paragraphs.length > 1 && paragraphs[paragraphs.length - 1] === '') {
-    paragraphs.pop();
-  }
+  console.log('[adapter] save: ' + paragraphs.length + ' paragraphs, first="' + (paragraphs[0] || '').substring(0, 60) + '"');
 
-  console.log('[adapter] Saving ' + paragraphs.length + ' paragraphs, ' + allText.length + ' chars');
-
-  // Build new document and export
+  // Build new s1engine document
   var newDoc = wasmEngine.create();
   for (var i = 0; i < paragraphs.length; i++) {
     newDoc.append_paragraph(paragraphs[i]);
   }
+
+  // Export as DOCX
   var bytes = newDoc.export('docx');
-  console.log('[adapter] Exported ' + bytes.length + ' bytes');
+  console.log('[adapter] save: exported ' + bytes.length + ' bytes');
   return bytes;
 }
 
+/**
+ * Trigger browser download of bytes as a file.
+ */
 export function downloadFile(data, filename) {
   var blob = new Blob([data], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
