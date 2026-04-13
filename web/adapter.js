@@ -80,7 +80,8 @@ export async function openDocx(docxBytes, api) {
 function buildParagraph(logicDoc, wasmDoc, paraInfo) {
   var para = new AscWord.Paragraph(logicDoc, false);
 
-  // Apply paragraph properties
+  // Apply paragraph properties — set explicit defaults first to override template
+  para.Pr.Jc = 0; // default: left-aligned
   if (paraInfo.alignment) {
     var alignMap = { 'left': 0, 'center': 1, 'right': 2, 'justify': 3, 'both': 3 };
     if (alignMap[paraInfo.alignment] !== undefined) {
@@ -117,11 +118,11 @@ function buildParagraph(logicDoc, wasmDoc, paraInfo) {
 function buildRun(para, wasmDoc, runInfo) {
   var run = new AscWord.ParaRun(para, false);
 
-  // Apply run formatting — fields are TOP-LEVEL on runInfo, not nested
-  if (runInfo.bold === true) run.Pr.Bold = true;
-  if (runInfo.italic === true) run.Pr.Italic = true;
-  if (runInfo.underline === true) run.Pr.Underline = true;
-  if (runInfo.strikethrough === true) run.Pr.Strikeout = true;
+  // Apply run formatting — explicit defaults to override document template
+  run.Pr.Bold = runInfo.bold === true;
+  run.Pr.Italic = runInfo.italic === true;
+  run.Pr.Underline = runInfo.underline === true;
+  run.Pr.Strikeout = runInfo.strikethrough === true;
 
   if (runInfo.fontSize !== undefined && runInfo.fontSize !== null) {
     run.Pr.FontSize = runInfo.fontSize;
@@ -132,6 +133,15 @@ function buildRun(para, wasmDoc, runInfo) {
     run.Pr.RFonts.HAnsi = { Name: runInfo.fontFamily, Index: -1 };
     run.Pr.RFonts.CS = { Name: runInfo.fontFamily, Index: -1 };
     run.Pr.RFonts.EastAsia = { Name: runInfo.fontFamily, Index: -1 };
+  }
+
+  // Color — node_info_json returns "#rrggbb" format
+  if (runInfo.color && runInfo.color !== '#000000') {
+    var hex = runInfo.color.substring(1);
+    var r = parseInt(hex.substring(0, 2), 16);
+    var g = parseInt(hex.substring(2, 4), 16);
+    var b = parseInt(hex.substring(4, 6), 16);
+    run.Pr.Color = { r: r, g: g, b: b, Auto: false };
   }
 
   // Add text content from run's children

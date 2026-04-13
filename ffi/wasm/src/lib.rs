@@ -11017,6 +11017,9 @@ fn node_to_json(model: &DocumentModel, nid: NodeId, node: &Node) -> String {
     if let Some(font) = node.attributes.get_string(&AttributeKey::FontFamily) {
         json.push_str(&format!(",\"fontFamily\":\"{}\"", escape_json(font)));
     }
+    if let Some(AttributeValue::Color(c)) = node.attributes.get(&AttributeKey::Color) {
+        json.push_str(&format!(",\"color\":\"#{:02x}{:02x}{:02x}\"", c.r, c.g, c.b));
+    }
     if let Some(AttributeValue::Alignment(a)) = node.attributes.get(&AttributeKey::Alignment) {
         let s = match a {
             Alignment::Left => "left",
