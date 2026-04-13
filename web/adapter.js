@@ -81,9 +81,10 @@ function buildParagraph(logicDoc, wasmDoc, paraInfo) {
   var para = new AscWord.Paragraph(logicDoc, false);
 
   // Apply paragraph properties — set explicit defaults first to override template
-  para.Pr.Jc = 0; // default: left-aligned
+  // sdkjs alignment: 0=Right, 1=Left, 2=Center, 3=Justify (commonDefines.js:734)
+  para.Pr.Jc = 1; // default: left-aligned
   if (paraInfo.alignment) {
-    var alignMap = { 'left': 0, 'center': 1, 'right': 2, 'justify': 3, 'both': 3 };
+    var alignMap = { 'left': 1, 'center': 2, 'right': 0, 'justify': 3, 'both': 3 };
     if (alignMap[paraInfo.alignment] !== undefined) {
       para.Pr.Jc = alignMap[paraInfo.alignment];
     }
