@@ -141,7 +141,7 @@ function buildRun(para, wasmDoc, runInfo) {
     var r = parseInt(hex.substring(0, 2), 16);
     var g = parseInt(hex.substring(2, 4), 16);
     var b = parseInt(hex.substring(4, 6), 16);
-    run.Pr.Color = { r: r, g: g, b: b, Auto: false };
+    run.Pr.Color = new AscCommonWord.CDocumentColor(r, g, b, false);
   }
 
   // Add text content from run's children
