@@ -423,7 +423,7 @@ Next actions:
 ---
 
 ## Milestone 7: Collaboration and Server Workflow
-**Status**: NOT STARTED
+**Status**: COMPLETE
 **Owner**: `server` + `architecture`
 
 Goal:
@@ -572,7 +572,7 @@ Next actions:
 | M4: Structural Export | COMPLETE | Paragraphs, alignment, headings, line breaks, tabs |
 | M5: Layout/Object Fidelity | COMPLETE | Run formatting, tables, images, hyperlinks |
 | M6: Editing Authority | COMPLETE | ADR-001: s1engine-first |
-| M7: Collaboration | NOT STARTED | Needs mapping to new web architecture |
+| M7: Collaboration | COMPLETE | collab.js + s1-crdt WASM + relay.js wired |
 | M8: Fidelity Validation | COMPLETE | 29 tests, 2 fixture files, round-trip validation |
 | M9: Production Packaging | COMPLETE | Makefile updated, server serves web/, WASM builds to web/pkg |
 
