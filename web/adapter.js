@@ -387,6 +387,14 @@ export function saveDocx(api) {
 
   for (var i = 0; i < logicDoc.Content.length; i++) {
     var el = logicDoc.Content[i];
+
+    // Handle tables
+    if (el && el.IsTable && el.IsTable()) {
+      try { exportTable(newDoc, el); } catch(e) {}
+      paraCount++;
+      continue;
+    }
+
     if (!el || !el.IsParagraph || !el.IsParagraph()) continue;
 
     // Extract paragraph text and structure
@@ -509,6 +517,73 @@ function extractParagraph(para) {
   }
 
   return { text: text, alignment: alignment, headingLevel: headingLevel, breaks: breaks, runs: runs };
+}
+
+/**
+ * Export a table from OnlyOffice to s1engine.
+ * Creates table via insert_table then populates cells.
+ */
+function exportTable(newDoc, tableEl) {
+  if (!tableEl.Content || tableEl.Content.length === 0) return;
+
+  var rows = tableEl.Content.length;
+  var cols = 0;
+  for (var r = 0; r < rows; r++) {
+    var row = tableEl.Content[r];
+    if (row && row.Content) cols = Math.max(cols, row.Content.length);
+  }
+  if (rows === 0 || cols === 0) return;
+
+  // Create table in s1engine
+  try {
+    var tableId = newDoc.insert_table(rows, cols);
+
+    // Populate each cell with its paragraph text
+    for (var r = 0; r < rows; r++) {
+      var row = tableEl.Content[r];
+      if (!row || !row.Content) continue;
+
+      for (var c = 0; c < row.Content.length; c++) {
+        var cell = row.Content[c];
+        if (!cell || !cell.Content || !cell.Content.Content) continue;
+
+        // Get text from all paragraphs in the cell
+        var cellText = '';
+        for (var p = 0; p < cell.Content.Content.length; p++) {
+          var para = cell.Content.Content[p];
+          if (para && para.IsParagraph && para.IsParagraph()) {
+            if (cellText) cellText += '\n';
+            cellText += para.GetText({ ParaSeparator: '' }) || '';
+          }
+        }
+
+        if (cellText) {
+          try {
+            newDoc.set_table_cell_text(tableId, r, c, cellText);
+          } catch(e) {
+            // set_table_cell_text might not exist — try alternative
+          }
+        }
+      }
+    }
+  } catch(e) {
+    // Table export failed — insert paragraphs with cell text as fallback
+    for (var r = 0; r < rows; r++) {
+      var row = tableEl.Content[r];
+      if (!row || !row.Content) continue;
+      for (var c = 0; c < row.Content.length; c++) {
+        var cell = row.Content[c];
+        if (!cell || !cell.Content || !cell.Content.Content) continue;
+        for (var p = 0; p < cell.Content.Content.length; p++) {
+          var para = cell.Content.Content[p];
+          if (para && para.IsParagraph && para.IsParagraph()) {
+            var text = para.GetText({ ParaSeparator: '' }) || '';
+            if (text) newDoc.append_paragraph(text);
+          }
+        }
+      }
+    }
+  }
 }
 
 export function downloadFile(data, filename) {
