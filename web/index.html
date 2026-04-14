@@ -180,8 +180,9 @@
 
         api.asc_registerCallback('asc_onDocumentContentReady', function() {
           console.log('[rudra] Document content ready');
-          // Fix: empty doc template has underline in default style — turn it off
           try { api.put_TextPrUnderline(false); } catch(e) {}
+          // Resize after toolbar changes available height
+          setTimeout(function() { api.Resize(); }, 100);
         });
 
         api.asc_registerCallback('asc_onError', function(id, level) {

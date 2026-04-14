@@ -183,6 +183,72 @@ fn m4_metadata_accessible_after_export() {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// M5: Run-level formatting, line breaks
+// ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn m5_bold_attribute_survives_round_trip() {
+    let engine = engine();
+    let doc = engine.open_as(b"**Bold text** normal", Format::Md).unwrap();
+    let bytes = doc.export(Format::Docx).unwrap();
+    let doc2 = engine.open(&bytes).unwrap();
+    let model = doc2.model();
+    let body = model.node(model.body_id().unwrap()).unwrap();
+    let para = model.node(body.children[0]).unwrap();
+
+    // Find a run with bold attribute
+    let has_bold = para.children.iter().any(|cid| {
+        model.node(*cid).map_or(false, |n| {
+            n.node_type == NodeType::Run && n.attributes.get_bool(&AttributeKey::Bold) == Some(true)
+        })
+    });
+    assert!(has_bold, "Bold attribute should survive DOCX round-trip");
+}
+
+#[test]
+fn m5_italic_attribute_survives_round_trip() {
+    let engine = engine();
+    let doc = engine.open_as(b"*Italic text* normal", Format::Md).unwrap();
+    let bytes = doc.export(Format::Docx).unwrap();
+    let doc2 = engine.open(&bytes).unwrap();
+    let model = doc2.model();
+    let body = model.node(model.body_id().unwrap()).unwrap();
+    let para = model.node(body.children[0]).unwrap();
+
+    let has_italic = para.children.iter().any(|cid| {
+        model.node(*cid).map_or(false, |n| {
+            n.node_type == NodeType::Run && n.attributes.get_bool(&AttributeKey::Italic) == Some(true)
+        })
+    });
+    assert!(has_italic, "Italic attribute should survive DOCX round-trip");
+}
+
+#[test]
+fn m5_multiple_runs_in_paragraph() {
+    let engine = engine();
+    let doc = engine.open_as(b"Normal **bold** *italic*", Format::Md).unwrap();
+    let model = doc.model();
+    let body = model.node(model.body_id().unwrap()).unwrap();
+    let para = model.node(body.children[0]).unwrap();
+    let run_count = para.children.iter()
+        .filter(|cid| model.node(**cid).map_or(false, |n| n.node_type == NodeType::Run))
+        .count();
+    assert!(run_count >= 3, "Paragraph with mixed formatting should have multiple runs, got {}", run_count);
+}
+
+#[test]
+fn m5_line_break_in_text() {
+    let engine = engine();
+    // Create a doc with text, export, check plain text has content
+    let doc = engine.open_as(b"Line one\nLine two", Format::Txt).unwrap();
+    let bytes = doc.export(Format::Docx).unwrap();
+    let doc2 = engine.open(&bytes).unwrap();
+    let text = doc2.to_plain_text();
+    assert!(text.contains("Line one"));
+    assert!(text.contains("Line two"));
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Scope guards: explicitly document what is NOT supported yet
 // ──────────────────────────────────────────────────────────────────
 
