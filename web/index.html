@@ -323,6 +323,8 @@
           // WordControl.OnResize(true) recalculates editor div position, ruler
           // offsets, canvas dimensions, and cached coordinate offsets.
           setTimeout(function() {
+            // Start word/paragraph count statistics after document is ready
+            try { api.startGetDocInfo(); } catch(e) {}
             if (api.WordControl) {
               api.WordControl.OnResize(true);
             } else {
@@ -389,8 +391,7 @@
           var zoomSelect = document.getElementById('tb-zoom');
           if (zoomSelect) zoomSelect.value = zoom;
         });
-        // Start statistics collection
-        api.startGetDocInfo();
+        // startGetDocInfo is called inside asc_onDocumentContentReady
 
         // Open blank document in offline mode
         var docInfo = new Asc.asc_CDocInfo();
