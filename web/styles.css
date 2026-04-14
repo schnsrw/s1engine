@@ -51,7 +51,7 @@ html, body { height: 100%; overflow: hidden; font-family: 'Google Sans', Roboto,
   position: fixed; top: 48px; left: 0; right: 0; height: 40px;
   display: flex; align-items: center; gap: 2px; padding: 0 8px;
   background: #edf2fa; border-radius: 0 0 0 0;
-  z-index: 10000; user-select: none; overflow-x: auto;
+  z-index: 10000; user-select: none; overflow: visible;
 }
 .tb { display: flex; align-items: center; gap: 1px; }
 
