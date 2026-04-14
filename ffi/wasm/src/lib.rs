@@ -11030,6 +11030,20 @@ fn node_to_json(model: &DocumentModel, nid: NodeId, node: &Node) -> String {
     if node.attributes.get_bool(&AttributeKey::WidowControl) == Some(true) {
         json.push_str(",\"widowControl\":true");
     }
+    // List info
+    if let Some(AttributeValue::ListInfo(li)) = node.attributes.get(&AttributeKey::ListInfo) {
+        let fmt_name = match li.num_format {
+            ListFormat::Bullet => "bullet",
+            ListFormat::Decimal => "decimal",
+            ListFormat::LowerAlpha => "lowerAlpha",
+            ListFormat::UpperAlpha => "upperAlpha",
+            ListFormat::LowerRoman => "lowerRoman",
+            ListFormat::UpperRoman => "upperRoman",
+            _ => "bullet",
+        };
+        json.push_str(&format!(",\"listFormat\":\"{}\"", fmt_name));
+        json.push_str(&format!(",\"listLevel\":{}", li.level));
+    }
     // Hyperlink
     if let Some(url) = node.attributes.get_string(&AttributeKey::HyperlinkUrl) {
         json.push_str(&format!(",\"hyperlinkUrl\":\"{}\"", escape_json(url)));

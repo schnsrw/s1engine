@@ -141,6 +141,17 @@ function buildParagraph(logicDoc, wasmDoc, paraInfo) {
     para.Pr.PStyle = paraInfo.styleId;
   }
 
+  // List format — apply numbering/bullets if present
+  if (paraInfo.listFormat) {
+    var listType = paraInfo.listFormat === 'bullet' ? 0 : 1; // 0=bullet, 1=numbered
+    var listLevel = paraInfo.listLevel || 0;
+    // sdkjs list API: put_ListType(type, subtype)
+    // Apply via paragraph NumPr property
+    if (para.Pr) {
+      para.Pr.NumPr = { NumId: listType + 1, Lvl: listLevel };
+    }
+  }
+
   // Paragraph layout properties — set explicit defaults to override template
   // Default: allow paragraphs to split across pages, enable widow/orphan control
   para.Pr.KeepLines = paraInfo.keepLinesTogether === true;
