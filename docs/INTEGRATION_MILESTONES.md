@@ -565,16 +565,16 @@ Next actions:
 
 | Milestone | Status | Notes |
 |-----------|--------|-------|
-| M0: Shell Boot | COMPLETE | OnlyOffice shell and WASM boot path exist in `web/` |
-| M1: Text-Only Bridge | COMPLETE | Plain text DOCX open/save path works |
-| M2: Serve `web/` by default | COMPLETE | Server discovers `./web` first |
-| M3: Structural Import | COMPLETE | Paragraphs, runs, formatting, breaks, alignment, colors |
-| M4: Structural Export | COMPLETE | Paragraphs, alignment, headings, line breaks, tabs |
-| M5: Layout/Object Fidelity | COMPLETE | Run formatting, tables, images, hyperlinks |
+| M0: Shell Boot | COMPLETE | Editor boots, WASM loads, blank doc works |
+| M1: Text-Only Bridge | COMPLETE | Plain text DOCX open/save round-trip |
+| M2: Serve web/ | COMPLETE | Server discovers ./web, 0 server tests |
+| M3: Structural Import | PARTIAL | Paragraphs/runs/formatting work. Missing: lists, headers/footers, footnotes, comments, sections, bookmarks, TOC, shapes, equations |
+| M4: Structural Export | PARTIAL | Text/alignment/headings/breaks. Missing: tables, images, lists, indentation, spacing, styles beyond headings |
+| M5: Layout/Object Fidelity | PARTIAL | Basic tables/images import. Missing: cell merging, image export, headers/footers, sections, comments, footnotes, drawings |
 | M6: Editing Authority | COMPLETE | ADR-001: s1engine-first |
-| M7: Collaboration | COMPLETE | collab.js + s1-crdt WASM + relay.js wired |
-| M8: Fidelity Validation | COMPLETE | 29 tests, 2 fixture files, round-trip validation |
-| M9: Production Packaging | COMPLETE | Makefile updated, server serves web/, WASM builds to web/pkg |
+| M7: Collaboration | SCAFFOLDING | collab.js exists but not integrated with adapter, 0 tests, not functional |
+| M8: Fidelity Validation | PARTIAL | 29 Rust tests. Missing: 0 browser tests, 0 server tests, no test corpus |
+| M9: Production Packaging | PARTIAL | Makefile works. Missing: license/attribution, only 3 fonts, 21MB WASM unoptimized |
 
 ---
 
