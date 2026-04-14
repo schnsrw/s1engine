@@ -86,13 +86,37 @@ export async function openDocx(docxBytes, api) {
 
   logicDoc.MoveCursorToStartPos(false);
   logicDoc.Recalculate();
-  api.Resize();
 
-  // Sync cursor with canvas after recalculate
+  // Recalculate page drawing positions on canvas.
+  // Recalculate() updates the document model (mm coordinates).
+  // CalculateDocumentSize + OnCalculatePagesPlace update where pages
+  // are drawn on the canvas (pixel coordinates).
+  // Without both, click coordinates and rendered page positions disagree.
+  var wc = api.WordControl;
+  if (wc) {
+    if (wc.CalculateDocumentSize) wc.CalculateDocumentSize();
+    if (wc.OnCalculatePagesPlace) wc.OnCalculatePagesPlace();
+    if (wc.checkBodyOffset) wc.checkBodyOffset();
+    if (wc.OnResize) wc.OnResize(true);
+    else api.Resize();
+  } else {
+    api.Resize();
+  }
+
+  // Sync caret/selection overlays after layout and offset refresh.
   logicDoc.Document_UpdateSelectionState();
   logicDoc.Document_UpdateInterfaceState();
-  if (api.WordControl.m_oDrawingDocument) {
+  if (api.WordControl && api.WordControl.m_oDrawingDocument) {
     api.WordControl.m_oDrawingDocument.UpdateTargetFromPaint = true;
+    if (api.WordControl.m_oDrawingDocument.UpdateTargetNoAttack) {
+      api.WordControl.m_oDrawingDocument.UpdateTargetNoAttack();
+    }
+  }
+
+  // Recompute the logical caret position from the rebuilt document model.
+  // Without this, the visual target can keep a stale Y from the previous doc state.
+  if (logicDoc.RecalculateCurPos) {
+    logicDoc.RecalculateCurPos();
   }
 
   console.log('[adapter] open: ' + contentIndex + ' elements loaded');

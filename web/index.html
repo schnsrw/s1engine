@@ -207,15 +207,17 @@
           var _convertDbg = 0;
           dd.ConvertCoordsFromCursor2 = function(x, y, zoomVal, isRulers) {
             api.WordControl.checkBodyOffset();
-            if (_convertDbg < 5) {
+            // Only log clicks inside document area (y > toolbar+ruler)
+            if (_convertDbg < 10 && y > 80 && AscCommon.global_mouseEvent.Type === 1) {
               var wc = api.WordControl;
               var off = dd.GetMainOffset();
-              var rect = document.getElementById('editor_sdk').getBoundingClientRect();
-              console.log('[cursor] input y=' + y + ' wc.Y=' + wc.Y +
-                ' mainOff.y=' + off.y.toFixed(1) + ' rect.top=' + rect.top.toFixed(1) +
-                ' pageYOff=' + window.pageYOffset +
-                ' finalY=' + (y - wc.Y - off.y).toFixed(1));
+              var totalOff = wc.Y + off.y;
+              var result = _origConvert(x, y, zoomVal, isRulers);
+              console.log('[cursor] mouseY=' + y + ' offset=' + totalOff.toFixed(1) +
+                ' canvasY=' + (y - totalOff).toFixed(1) +
+                ' → page=' + result.Page + ' docY=' + result.Y.toFixed(1) + 'mm');
               _convertDbg++;
+              return result;
             }
             return _origConvert(x, y, zoomVal, isRulers);
           };
