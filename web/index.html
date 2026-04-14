@@ -405,15 +405,6 @@
         // Initialize menu bar
         import('./menubar.js').then(function(m) { m.createMenuBar(api); }).catch(function() {});
 
-        // Status bar updates
-        api.asc_registerCallback('asc_onCountPages', function(count) {
-          document.getElementById('sb-page').textContent = 'Pages: ' + count;
-        });
-        api.asc_registerCallback('asc_onCurrentPage', function(page) {
-          var total = api.asc_getCountPages ? api.asc_getCountPages() : '?';
-          document.getElementById('sb-page').textContent = 'Page ' + (page + 1) + ' of ' + total;
-        });
-
         // Image picker handler
         document.getElementById('img-picker').addEventListener('change', function(ev) {
           var file = ev.target.files[0];
