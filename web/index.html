@@ -25,12 +25,12 @@
     <div class="tb">
       <button onclick="window._api&&window._api.Undo()" title="Undo (Ctrl+Z)"><span class="mi">undo</span></button>
       <button onclick="window._api&&window._api.Redo()" title="Redo (Ctrl+Y)"><span class="mi">redo</span></button>
-      <button onclick="window._api&&window._api.asc_Print()" title="Print (Ctrl+P)"><span class="mi">print</span></button>
+      <button onclick="window.print()" title="Print (Ctrl+P)"><span class="mi">print</span></button>
       <button onclick="document.getElementById('file-picker').click()" title="Open file"><span class="mi">folder_open</span></button>
       <button id="save-btn" onclick="window.rudra_save()" title="Save (Ctrl+S)" style="display:none"><span class="mi">save</span></button>
     </div>
     <div class="sep"></div>
-    <select id="tb-zoom" onchange="window._api&&window._api.asc_setZoom(parseFloat(this.value)/100)" title="Zoom" style="width:60px">
+    <select id="tb-zoom" onchange="if(window._api){var z=parseFloat(this.value);window._api.WordControl.m_nZoomValue=z;window._api.WordControl.zoom_Fire(0,null)}" title="Zoom" style="width:60px">
       <option value="50">50%</option><option value="75">75%</option><option value="100" selected>100%</option>
       <option value="125">125%</option><option value="150">150%</option><option value="200">200%</option>
     </select>
@@ -55,7 +55,7 @@
     </select>
     <div class="tb">
       <button onclick="var s=document.getElementById('tb-size');var v=parseFloat(s.value)-1;if(v>=6){s.value=v;window._api&&window._api.put_TextPrFontSize(v)}" title="Decrease font size" style="font-size:11px">−</button>
-      <select id="tb-size" onchange="window._api&&window._api.put_TextPrFontSize(parseFloat(this.value))" title="Font size" style="width:40px;text-align:center">
+      <select id="tb-size" onchange="window._api&&window._api.put_TextPrFontSize(parseFloat(this.value))" title="Font size" style="width:48px;text-align:center">
         <option>8</option><option>9</option><option>10</option><option selected>11</option>
         <option>12</option><option>14</option><option>16</option><option>18</option>
         <option>20</option><option>24</option><option>28</option><option>36</option>
@@ -69,7 +69,7 @@
       <button id="tb-italic" onclick="window._api&&window._api.put_TextPrItalic(undefined)" title="Italic (Ctrl+I)"><span class="mi">format_italic</span></button>
       <button id="tb-underline" onclick="window._api&&window._api.put_TextPrUnderline(undefined)" title="Underline (Ctrl+U)"><span class="mi">format_underlined</span></button>
       <label title="Font color" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">format_color_text</span><input type="color" value="#000000" onchange="window._api&&window._api.put_TextColor(AscCommon.CreateAscColor(parseInt(this.value.substr(1,2),16),parseInt(this.value.substr(3,2),16),parseInt(this.value.substr(5,2),16)))" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
-      <label title="Highlight" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">ink_highlighter</span><input type="color" value="#ffff00" onchange="window._api&&window._api.put_PrHighlight(3)" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
+      <label title="Highlight" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">ink_highlighter</span><input type="color" value="#ffff00" onchange="if(window._api){var c=this.value;window._api.put_TextColor(AscCommon.CreateAscColor(parseInt(c.substr(1,2),16),parseInt(c.substr(3,2),16),parseInt(c.substr(5,2),16)))}" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
     </div>
     <div class="sep"></div>
     <div class="tb">
@@ -83,7 +83,7 @@
       <button data-align="2" onclick="window._api&&window._api.put_PrAlign(2)" title="Center"><span class="mi">format_align_center</span></button>
       <button data-align="0" onclick="window._api&&window._api.put_PrAlign(0)" title="Right align"><span class="mi">format_align_right</span></button>
       <button data-align="3" onclick="window._api&&window._api.put_PrAlign(3)" title="Justify"><span class="mi">format_align_justify</span></button>
-      <button onclick="window._api&&window._api.put_LineSpacing(1.15)" title="Line spacing"><span class="mi">format_line_spacing</span></button>
+      <button onclick="window._api&&window._api.put_PrLineSpacing(1,1.15)" title="Line & paragraph spacing"><span class="mi">format_line_spacing</span></button>
     </div>
     <div class="sep"></div>
     <div class="tb">

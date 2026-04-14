@@ -38,13 +38,13 @@ export function createMenuBar(api) {
       { label: 'Show ruler', icon: 'straighten', action: function() { /* toggle ruler */ }, toggle: true },
       { label: 'Show non-printing', icon: 'space_bar', shortcut: '⌘⇧P', action: function() { api.ShowParaMarks = !api.ShowParaMarks; api.Resize(); } },
       { sep: true },
-      { label: 'Zoom in', icon: 'zoom_in', shortcut: '⌘+', action: function() { var z = api.asc_getZoom(); api.asc_setZoom(Math.min(z + 0.1, 3)); } },
-      { label: 'Zoom out', icon: 'zoom_out', shortcut: '⌘-', action: function() { var z = api.asc_getZoom(); api.asc_setZoom(Math.max(z - 0.1, 0.3)); } },
-      { label: 'Fit to width', icon: 'fit_screen', action: function() { api.zoomFitToWidth && api.zoomFitToWidth(); } },
+      { label: 'Zoom in', icon: 'zoom_in', shortcut: '⌘+', action: function() { if(api.zoomIn) api.zoomIn(); } },
+      { label: 'Zoom out', icon: 'zoom_out', shortcut: '⌘-', action: function() { if(api.zoomOut) api.zoomOut(); } },
+      { label: 'Fit to width', icon: 'fit_screen', action: function() { if(api.zoomFitToWidth) api.zoomFitToWidth(); } },
     ],
     'Insert': [
       { label: 'Image', icon: 'image', action: function() { document.getElementById('img-picker').click(); } },
-      { label: 'Table', icon: 'table', action: function() { api.asc_AddTableSimple && api.asc_AddTableSimple(3, 3); } },
+      { label: 'Table', icon: 'table', action: function() { api.put_Table && api.put_Table(3, 3); } },
       { label: 'Link', icon: 'link', shortcut: '⌘K', action: function() { var u = prompt('URL:'); if (u) api.add_Hyperlink({ Value: u, Text: u }); } },
       { sep: true },
       { label: 'Comment', icon: 'comment', shortcut: '⌘⌥M', action: function() { api.asc_addComment && api.asc_addComment(); } },
@@ -104,7 +104,7 @@ export function createMenuBar(api) {
 
       var row = document.createElement('div');
       row.className = 'menu-row';
-      row.innerHTML = '<span class="mso" style="font-size:16px;width:20px">' + (item.icon || '') + '</span>' +
+      row.innerHTML = '<span class="mi" style="font-size:16px;width:20px">' + (item.icon || '') + '</span>' +
         '<span class="menu-label">' + item.label + '</span>' +
         (item.shortcut ? '<span class="menu-shortcut">' + item.shortcut + '</span>' : '');
       row.onclick = function(e) {
