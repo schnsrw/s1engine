@@ -69,7 +69,7 @@
       <button id="tb-italic" onclick="window._api&&window._api.put_TextPrItalic(!window._fmtState.italic)" title="Italic (Ctrl+I)"><span class="mi">format_italic</span></button>
       <button id="tb-underline" onclick="window._api&&window._api.put_TextPrUnderline(!window._fmtState.underline)" title="Underline (Ctrl+U)"><span class="mi">format_underlined</span></button>
       <label title="Font color" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">format_color_text</span><input type="color" value="#000000" onchange="if(window._api){var h=this.value;var c=new Asc.asc_CColor();c.asc_putR(parseInt(h.substr(1,2),16));c.asc_putG(parseInt(h.substr(3,2),16));c.asc_putB(parseInt(h.substr(5,2),16));c.asc_putA(255);window._api.put_TextColor(c)}" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
-      <label title="Highlight color" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">ink_highlighter</span><input type="color" value="#ffff00" onchange="if(window._api){var h=this.value;window._api.put_LineHighLight(true,parseInt(h.substr(1,2),16),parseInt(h.substr(3,2),16),parseInt(h.substr(5,2),16))}" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
+      <button onclick="if(window._api)window._api.put_LineHighLight(true,255,255,0)" title="Highlight yellow"><span class="mi" style="font-size:18px;background:#ff0;border-radius:2px">ink_highlighter</span></button>
     </div>
     <div class="sep"></div>
     <div class="tb">
