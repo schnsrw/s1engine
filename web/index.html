@@ -4,66 +4,27 @@
   <meta charset="utf-8">
   <title>Rudra Office</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; overflow: hidden; }
-    #toolbar {
-      position: fixed; top: 0; left: 0; right: 0;
-      background: #f8f9fa; border-bottom: 1px solid #dadce0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 13px; z-index: 10000; user-select: none;
-    }
-    .tb-row { display: flex; align-items: center; gap: 2px; padding: 2px 8px; }
-    .tb-row:first-child { border-bottom: 1px solid #eee; padding: 4px 8px; }
-    .tb-group { display: flex; align-items: center; gap: 1px; }
-    #toolbar button {
-      padding: 4px 6px; border: none; border-radius: 3px;
-      background: transparent; cursor: pointer; font-size: 13px; min-width: 26px;
-      height: 28px; display: flex; align-items: center; justify-content: center;
-      color: #444; font-family: inherit;
-    }
-    #toolbar button:hover { background: #e0e0e0; }
-    #toolbar button.active { background: #d2e3fc; color: #1a73e8; }
-    #toolbar button.tb-file { gap: 4px; padding: 4px 10px; font-size: 12px; }
-    #toolbar select {
-      padding: 3px 4px; border: 1px solid transparent; border-radius: 3px;
-      font-size: 12px; background: transparent; height: 28px;
-    }
-    #toolbar select:hover { border-color: #dadce0; background: #e8eaed; }
-    #toolbar input[type="color"] {
-      width: 28px; height: 24px; border: 1px solid #dadce0; border-radius: 3px;
-      padding: 1px; cursor: pointer; background: transparent;
-    }
-    .sep { width: 1px; height: 20px; background: #dadce0; margin: 0 3px; }
-    #statusbar {
-      position: fixed; bottom: 0; left: 0; right: 0; height: 22px;
-      background: #f8f9fa; border-top: 1px solid #dadce0;
-      display: flex; align-items: center; padding: 0 12px;
-      font-size: 11px; color: #666; z-index: 10000;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    #statusbar span { margin-right: 16px; }
-    #editor_sdk { position: fixed; top: 66px; left: 0; right: 0; bottom: 22px; overflow: hidden; }
-  </style>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="toolbar">
-    <!-- Row 1: File + Edit -->
+    <!-- Row 1: File, Edit, Styles, Zoom -->
     <div class="tb-row">
       <div class="tb-group">
-        <button class="tb-file" onclick="document.getElementById('file-picker').click()" title="Open (Ctrl+O)">Open</button>
-        <button id="save-btn" class="tb-file" onclick="window.rudra_save()" title="Save (Ctrl+S)" style="display:none">Save</button>
-        <button class="tb-file" onclick="window.rudra_export_pdf&&window.rudra_export_pdf()" title="Export PDF">PDF</button>
-        <button class="tb-file" onclick="window.print&&window._api&&window._api.asc_Print()" title="Print (Ctrl+P)">Print</button>
+        <button class="tb-file" onclick="document.getElementById('file-picker').click()" title="Open file"><span class="mso">folder_open</span> Open</button>
+        <button id="save-btn" class="tb-file" onclick="window.rudra_save()" title="Save as DOCX (Ctrl+S)" style="display:none"><span class="mso">save</span> Save</button>
+        <button class="tb-file" onclick="window.rudra_export_pdf&&window.rudra_export_pdf()" title="Export as PDF"><span class="mso">picture_as_pdf</span></button>
+        <button class="tb-file" onclick="window._api&&window._api.asc_Print()" title="Print (Ctrl+P)"><span class="mso">print</span></button>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <button onclick="window._api&&window._api.Undo()" title="Undo (Ctrl+Z)">↩</button>
-        <button onclick="window._api&&window._api.Redo()" title="Redo (Ctrl+Y)">↪</button>
+        <button onclick="window._api&&window._api.Undo()" title="Undo (Ctrl+Z)"><span class="mso">undo</span></button>
+        <button onclick="window._api&&window._api.Redo()" title="Redo (Ctrl+Y)"><span class="mso">redo</span></button>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <select id="tb-style" onchange="window._api&&window._api.put_Style(this.value)" title="Paragraph Style" style="width:130px">
+        <select id="tb-style" onchange="window._api&&window._api.put_Style(this.value)" title="Paragraph Style" style="width:120px">
           <option value="Normal">Normal</option>
           <option value="Heading 1">Heading 1</option>
           <option value="Heading 2">Heading 2</option>
@@ -71,18 +32,18 @@
           <option value="Heading 4">Heading 4</option>
           <option value="Heading 5">Heading 5</option>
           <option value="Heading 6">Heading 6</option>
-          <option value="No Spacing">No Spacing</option>
+          <option value="Title">Title</option>
           <option value="Subtitle">Subtitle</option>
           <option value="Quote">Quote</option>
-          <option value="Title">Title</option>
+          <option value="No Spacing">No Spacing</option>
         </select>
-        <select id="tb-font" onchange="window._api&&window._api.put_TextPrFontName(this.value)" title="Font" style="width:130px">
+        <select id="tb-font" onchange="window._api&&window._api.put_TextPrFontName(this.value)" title="Font Family" style="width:120px">
           <option>Arial</option><option>Calibri</option><option>Cambria</option>
           <option>Comic Sans MS</option><option>Courier New</option><option>Georgia</option>
           <option>Impact</option><option>Tahoma</option><option>Times New Roman</option>
           <option>Trebuchet MS</option><option>Verdana</option>
         </select>
-        <select id="tb-size" onchange="window._api&&window._api.put_TextPrFontSize(parseFloat(this.value))" title="Font Size" style="width:50px">
+        <select id="tb-size" onchange="window._api&&window._api.put_TextPrFontSize(parseFloat(this.value))" title="Font Size" style="width:48px">
           <option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option>
           <option>14</option><option>16</option><option>18</option><option>20</option><option>24</option>
           <option>28</option><option>36</option><option>48</option><option>72</option>
@@ -90,67 +51,71 @@
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <label title="Zoom">
-          <select id="tb-zoom" onchange="window._api&&window._api.asc_setZoom(parseFloat(this.value)/100)" style="width:60px">
-            <option value="50">50%</option><option value="75">75%</option><option value="100" selected>100%</option>
-            <option value="125">125%</option><option value="150">150%</option><option value="200">200%</option>
-          </select>
-        </label>
+        <select id="tb-zoom" onchange="window._api&&window._api.asc_setZoom(parseFloat(this.value)/100)" title="Zoom" style="width:58px">
+          <option value="50">50%</option><option value="75">75%</option><option value="100" selected>100%</option>
+          <option value="125">125%</option><option value="150">150%</option><option value="200">200%</option>
+        </select>
       </div>
     </div>
-    <!-- Row 2: Formatting -->
+    <!-- Row 2: Formatting, Colors, Alignment, Lists, Insert -->
     <div class="tb-row">
       <div class="tb-group">
-        <button onclick="window._api&&window._api.put_TextPrBold(undefined)" title="Bold (Ctrl+B)" style="font-weight:bold">B</button>
-        <button onclick="window._api&&window._api.put_TextPrItalic(undefined)" title="Italic (Ctrl+I)" style="font-style:italic">I</button>
-        <button onclick="window._api&&window._api.put_TextPrUnderline(undefined)" title="Underline (Ctrl+U)" style="text-decoration:underline">U</button>
-        <button onclick="window._api&&window._api.put_TextPrStrikeout(undefined)" title="Strikethrough" style="text-decoration:line-through">S</button>
-        <button onclick="window._api&&window._api.put_TextPrSuperscript()" title="Superscript" style="font-size:10px;vertical-align:super">x²</button>
-        <button onclick="window._api&&window._api.put_TextPrSubscript()" title="Subscript" style="font-size:10px;vertical-align:sub">x₂</button>
+        <button id="tb-bold" onclick="window._api&&window._api.put_TextPrBold(undefined)" title="Bold (Ctrl+B)"><span class="mso">format_bold</span></button>
+        <button id="tb-italic" onclick="window._api&&window._api.put_TextPrItalic(undefined)" title="Italic (Ctrl+I)"><span class="mso">format_italic</span></button>
+        <button id="tb-underline" onclick="window._api&&window._api.put_TextPrUnderline(undefined)" title="Underline (Ctrl+U)"><span class="mso">format_underlined</span></button>
+        <button id="tb-strike" onclick="window._api&&window._api.put_TextPrStrikeout(undefined)" title="Strikethrough"><span class="mso">strikethrough_s</span></button>
+        <button onclick="window._api&&window._api.put_TextPrSuperscript()" title="Superscript"><span class="mso">superscript</span></button>
+        <button onclick="window._api&&window._api.put_TextPrSubscript()" title="Subscript"><span class="mso">subscript</span></button>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <label title="Font Color">A<input type="color" id="tb-fontcolor" value="#000000" onchange="window._api&&window._api.put_TextColor(AscCommon.CreateAscColor(parseInt(this.value.substring(1,3),16),parseInt(this.value.substring(3,5),16),parseInt(this.value.substring(5,7),16)))"></label>
-        <label title="Highlight" style="background:#ff0;padding:2px 4px;border-radius:3px;cursor:pointer" onclick="window._api&&window._api.put_PrHighlight(3)">H</label>
+        <label title="Font Color" style="display:flex;align-items:center;cursor:pointer"><span class="mso" style="font-size:16px">format_color_text</span><input type="color" id="tb-fontcolor" value="#000000" onchange="window._api&&window._api.put_TextColor(AscCommon.CreateAscColor(parseInt(this.value.substring(1,3),16),parseInt(this.value.substring(3,5),16),parseInt(this.value.substring(5,7),16)))" style="width:20px;height:20px"></label>
+        <label title="Highlight Color" style="display:flex;align-items:center;cursor:pointer"><span class="mso" style="font-size:16px">highlight</span><input type="color" id="tb-highlight" value="#ffff00" onchange="window._api&&window._api.put_PrHighlight(3)" style="width:20px;height:20px"></label>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <button onclick="window._api&&window._api.put_PrAlign(1)" title="Left">☰</button>
-        <button onclick="window._api&&window._api.put_PrAlign(2)" title="Center">☰</button>
-        <button onclick="window._api&&window._api.put_PrAlign(0)" title="Right">☰</button>
-        <button onclick="window._api&&window._api.put_PrAlign(3)" title="Justify">☰</button>
+        <button data-align="1" onclick="window._api&&window._api.put_PrAlign(1)" title="Align Left"><span class="mso">format_align_left</span></button>
+        <button data-align="2" onclick="window._api&&window._api.put_PrAlign(2)" title="Center"><span class="mso">format_align_center</span></button>
+        <button data-align="0" onclick="window._api&&window._api.put_PrAlign(0)" title="Align Right"><span class="mso">format_align_right</span></button>
+        <button data-align="3" onclick="window._api&&window._api.put_PrAlign(3)" title="Justify"><span class="mso">format_align_justify</span></button>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <button onclick="window._api&&window._api.put_ListType(1,1)" title="Numbered List">1.</button>
-        <button onclick="window._api&&window._api.put_ListType(0,1)" title="Bulleted List">•</button>
-        <button onclick="window._api&&window._api.IncreaseIndent()" title="Increase Indent">→|</button>
-        <button onclick="window._api&&window._api.DecreaseIndent()" title="Decrease Indent">|←</button>
+        <button onclick="window._api&&window._api.put_ListType(0,1)" title="Bulleted List"><span class="mso">format_list_bulleted</span></button>
+        <button onclick="window._api&&window._api.put_ListType(1,1)" title="Numbered List"><span class="mso">format_list_numbered</span></button>
+        <button onclick="window._api&&window._api.DecreaseIndent()" title="Decrease Indent"><span class="mso">format_indent_decrease</span></button>
+        <button onclick="window._api&&window._api.IncreaseIndent()" title="Increase Indent"><span class="mso">format_indent_increase</span></button>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <button onclick="window._api&&window._api.put_LineSpacing(1.0)" title="Line Spacing 1.0" style="font-size:10px">1.0</button>
-        <button onclick="window._api&&window._api.put_LineSpacing(1.15)" title="Line Spacing 1.15" style="font-size:10px">1.15</button>
-        <button onclick="window._api&&window._api.put_LineSpacing(1.5)" title="Line Spacing 1.5" style="font-size:10px">1.5</button>
-        <button onclick="window._api&&window._api.put_LineSpacing(2.0)" title="Line Spacing 2.0" style="font-size:10px">2.0</button>
+        <select onchange="if(this.value){window._api&&window._api.put_LineSpacing(parseFloat(this.value));this.selectedIndex=0}" title="Line Spacing" style="width:48px">
+          <option value="" disabled selected>↕</option>
+          <option value="1.0">1.0</option>
+          <option value="1.15">1.15</option>
+          <option value="1.5">1.5</option>
+          <option value="2.0">2.0</option>
+          <option value="2.5">2.5</option>
+          <option value="3.0">3.0</option>
+        </select>
       </div>
       <div class="sep"></div>
       <div class="tb-group">
-        <button onclick="window._api&&window._api.asc_AddTableSimple(3,3)" title="Insert Table">⊞</button>
-        <button onclick="document.getElementById('img-picker').click()" title="Insert Image">🖼</button>
-        <button onclick="var u=prompt('URL:');u&&window._api&&window._api.add_Hyperlink({Value:u,Text:u})" title="Insert Link">🔗</button>
-        <button onclick="window._api&&window._api.put_AddPageBreak()" title="Page Break">⏎</button>
+        <button onclick="window._api&&window._api.asc_AddTableSimple(3,3)" title="Insert Table"><span class="mso">table</span></button>
+        <button onclick="document.getElementById('img-picker').click()" title="Insert Image"><span class="mso">image</span></button>
+        <button onclick="var u=prompt('Enter URL:');u&&window._api&&window._api.add_Hyperlink({Value:u,Text:u||'Link'})" title="Insert Link"><span class="mso">link</span></button>
+        <button onclick="window._api&&window._api.put_AddPageBreak()" title="Insert Page Break"><span class="mso">insert_page_break</span></button>
+        <button onclick="window._api&&window._api.asc_addComment()" title="Insert Comment"><span class="mso">comment</span></button>
       </div>
     </div>
   </div>
-  <input type="file" id="file-picker" accept=".docx,.doc,.odt,.txt,.rtf" style="display:none">
+  <input type="file" id="file-picker" accept=".docx,.doc,.odt,.txt,.rtf,.md" style="display:none">
   <input type="file" id="img-picker" accept="image/*" style="display:none">
 
   <div id="editor_sdk" tabindex="-1"></div>
 
   <div id="statusbar">
     <span id="sb-page">Page 1</span>
-    <span id="sb-words">Words: 0</span>
+    <span id="sb-words"></span>
     <span style="flex:1"></span>
     <span>Rudra Office</span>
   </div>

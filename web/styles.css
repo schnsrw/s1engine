@@ -1,0 +1,68 @@
+/* Rudra Office — Editor Styles */
+
+/* Material Symbols icon helper */
+.mso {
+  font-family: 'Material Symbols Outlined';
+  font-size: 18px;
+  font-variation-settings: 'FILL' 0;
+  line-height: 1;
+}
+.mso.filled { font-variation-settings: 'FILL' 1; }
+
+/* Reset */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+
+/* Toolbar */
+#toolbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  background: #f8f9fa; border-bottom: 1px solid #dadce0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px; z-index: 10000; user-select: none;
+}
+.tb-row {
+  display: flex; align-items: center; gap: 2px; padding: 2px 8px;
+  flex-wrap: wrap;
+}
+.tb-row:first-child { border-bottom: 1px solid #eee; padding: 4px 8px; }
+.tb-group { display: flex; align-items: center; gap: 1px; }
+
+#toolbar button {
+  padding: 4px 6px; border: none; border-radius: 3px;
+  background: transparent; cursor: pointer; font-size: 13px; min-width: 26px;
+  height: 28px; display: flex; align-items: center; justify-content: center;
+  color: #444; font-family: inherit;
+}
+#toolbar button:hover { background: #e0e0e0; }
+#toolbar button.active { background: #d2e3fc; color: #1a73e8; }
+#toolbar button.tb-file { gap: 4px; padding: 4px 10px; font-size: 12px; }
+#toolbar button .mso { font-size: 18px; }
+
+#toolbar select {
+  padding: 3px 4px; border: 1px solid transparent; border-radius: 3px;
+  font-size: 12px; background: transparent; height: 28px;
+}
+#toolbar select:hover { border-color: #dadce0; background: #e8eaed; }
+
+#toolbar input[type="color"] {
+  width: 28px; height: 24px; border: 1px solid #dadce0; border-radius: 3px;
+  padding: 1px; cursor: pointer; background: transparent;
+}
+
+.sep { width: 1px; height: 20px; background: #dadce0; margin: 0 3px; }
+
+/* Editor canvas area */
+#editor_sdk {
+  position: fixed; top: 66px; left: 0; right: 0; bottom: 22px;
+  overflow: hidden;
+}
+
+/* Status bar */
+#statusbar {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 22px;
+  background: #f8f9fa; border-top: 1px solid #dadce0;
+  display: flex; align-items: center; padding: 0 12px;
+  font-size: 11px; color: #666; z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+#statusbar span { margin-right: 16px; }
