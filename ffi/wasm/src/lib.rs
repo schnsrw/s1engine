@@ -11030,6 +11030,13 @@ fn node_to_json(model: &DocumentModel, nid: NodeId, node: &Node) -> String {
     if node.attributes.get_bool(&AttributeKey::WidowControl) == Some(true) {
         json.push_str(",\"widowControl\":true");
     }
+    // Hyperlink
+    if let Some(url) = node.attributes.get_string(&AttributeKey::HyperlinkUrl) {
+        json.push_str(&format!(",\"hyperlinkUrl\":\"{}\"", escape_json(url)));
+    }
+    if let Some(tip) = node.attributes.get_string(&AttributeKey::HyperlinkTooltip) {
+        json.push_str(&format!(",\"hyperlinkTooltip\":\"{}\"", escape_json(tip)));
+    }
     // Image dimensions
     if let Some(w) = node.attributes.get_f64(&AttributeKey::ImageWidth) {
         json.push_str(&format!(",\"imageWidth\":{}", w));

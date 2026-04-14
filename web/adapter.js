@@ -239,8 +239,14 @@ function buildRun(para, wasmDoc, runInfo) {
     run.Pr.RFonts.EastAsia = { Name: runInfo.fontFamily, Index: -1 };
   }
 
+  // Hyperlink — mark as blue underlined text (full hyperlink objects are M5+ scope)
+  if (runInfo.hyperlinkUrl) {
+    run.Pr.Underline = true;
+    run.Pr.Color = new AscCommonWord.CDocumentColor(0, 0, 255, false);
+  }
+
   // Color — node_info_json returns "#rrggbb" format
-  if (runInfo.color && runInfo.color !== '#000000') {
+  if (runInfo.color && runInfo.color !== '#000000' && !runInfo.hyperlinkUrl) {
     var hex = runInfo.color.substring(1);
     var r = parseInt(hex.substring(0, 2), 16);
     var g = parseInt(hex.substring(2, 4), 16);
