@@ -570,8 +570,8 @@ Next actions:
 | M2: Serve `web/` by default | COMPLETE | Server discovers `./web` first |
 | M3: Structural Import | COMPLETE | Paragraphs, runs, formatting, breaks, alignment, colors |
 | M4: Structural Export | COMPLETE | Paragraphs, alignment, headings, line breaks, tabs |
-| M5: Layout/Object Fidelity | NOT STARTED | No structural fidelity bridge yet |
-| M6: Editing Authority | NOT STARTED | Source-of-truth model still needs explicit decision |
+| M5: Layout/Object Fidelity | IN PROGRESS | Run formatting export works; tables/images pending |
+| M6: Editing Authority | COMPLETE | ADR-001: s1engine-first |
 | M7: Collaboration | NOT STARTED | Needs mapping to new web architecture |
 | M8: Fidelity Validation | NOT STARTED | Current tests do not reflect the new web path |
 | M9: Production Packaging | NOT STARTED | Packaging and defaults still need cleanup |
