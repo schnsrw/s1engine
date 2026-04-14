@@ -30,7 +30,7 @@
       <button id="save-btn" onclick="window.rudra_save()" title="Save (Ctrl+S)" style="display:none"><span class="mi">save</span></button>
     </div>
     <div class="sep"></div>
-    <select id="tb-zoom" onchange="if(window._api){var z=parseFloat(this.value);window._api.WordControl.m_nZoomValue=z;window._api.WordControl.zoom_Fire(0,null)}" title="Zoom" style="width:60px">
+    <select id="tb-zoom" onchange="if(window._api&&window._api.WordControl){var wc=window._api.WordControl;var old=wc.m_nZoomValue;wc.m_nZoomValue=parseFloat(this.value);wc.zoom_Fire(0,old)}" title="Zoom" style="width:60px">
       <option value="50">50%</option><option value="75">75%</option><option value="100" selected>100%</option>
       <option value="125">125%</option><option value="150">150%</option><option value="200">200%</option>
     </select>
@@ -115,10 +115,16 @@
   <div id="editor_sdk" tabindex="-1"></div>
 
   <div id="statusbar">
-    <span id="sb-page">Page 1</span>
-    <span id="sb-words"></span>
+    <span id="sb-page">Page 1 of 1</span>
+    <span id="sb-words">Words: 0</span>
+    <span id="sb-paras">Paragraphs: 0</span>
     <span style="flex:1"></span>
-    <span>Rudra Office</span>
+    <button onclick="window._api&&window._api.zoomOut()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#666" title="Zoom out">−</button>
+    <span id="sb-zoom" style="min-width:36px;text-align:center">100%</span>
+    <button onclick="window._api&&window._api.zoomIn()" style="background:none;border:none;cursor:pointer;font-size:14px;color:#666" title="Zoom in">+</button>
+    <button onclick="window._api&&window._api.zoomFitToWidth()" style="background:none;border:none;cursor:pointer;font-size:11px;color:#666;margin-left:8px" title="Fit to width">Fit</button>
+    <button onclick="window._api&&window._api.zoomFitToPage()" style="background:none;border:none;cursor:pointer;font-size:11px;color:#666" title="Fit to page">Page</button>
+    <span style="margin-left:12px;color:#999">Rudra Office</span>
   </div>
 
   <script>
@@ -361,6 +367,30 @@
           var el = document.getElementById('tb-size');
           if (el && s) el.value = s;
         });
+
+        // Page/word/paragraph statistics
+        api.asc_registerCallback('asc_onDocInfo', function(info) {
+          if (info) {
+            var pages = info.get_PageCount();
+            var words = info.get_WordsCount();
+            var paras = info.get_ParagraphCount();
+            if (pages >= 0) document.getElementById('sb-page').textContent = 'Page ' + (api.WordControl.m_oDrawingDocument ? (api.WordControl.m_oDrawingDocument.m_lCurrentPage + 1) : 1) + ' of ' + pages;
+            if (words >= 0) document.getElementById('sb-words').textContent = 'Words: ' + words;
+            if (paras >= 0) document.getElementById('sb-paras').textContent = 'Paragraphs: ' + paras;
+          }
+        });
+        api.asc_registerCallback('asc_onCurrentPage', function(page) {
+          var total = api.WordControl.m_oLogicDocument ? api.WordControl.m_oLogicDocument.Pages.length : '?';
+          document.getElementById('sb-page').textContent = 'Page ' + (page + 1) + ' of ' + total;
+        });
+        // Zoom sync
+        api.asc_registerCallback('asc_onZoomChange', function(zoom) {
+          document.getElementById('sb-zoom').textContent = zoom + '%';
+          var zoomSelect = document.getElementById('tb-zoom');
+          if (zoomSelect) zoomSelect.value = zoom;
+        });
+        // Start statistics collection
+        api.startGetDocInfo();
 
         // Open blank document in offline mode
         var docInfo = new Asc.asc_CDocInfo();
