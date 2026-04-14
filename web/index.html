@@ -68,8 +68,20 @@
       <button id="tb-bold" onclick="window._api&&window._api.put_TextPrBold(!window._fmtState.bold)" title="Bold (Ctrl+B)"><span class="mi">format_bold</span></button>
       <button id="tb-italic" onclick="window._api&&window._api.put_TextPrItalic(!window._fmtState.italic)" title="Italic (Ctrl+I)"><span class="mi">format_italic</span></button>
       <button id="tb-underline" onclick="window._api&&window._api.put_TextPrUnderline(!window._fmtState.underline)" title="Underline (Ctrl+U)"><span class="mi">format_underlined</span></button>
-      <label title="Font color" style="display:flex;align-items:center;cursor:pointer;position:relative"><span class="mi" style="font-size:18px">format_color_text</span><input type="color" value="#000000" onchange="if(window._api){var h=this.value;var c=new Asc.asc_CColor();c.asc_putR(parseInt(h.substr(1,2),16));c.asc_putG(parseInt(h.substr(3,2),16));c.asc_putB(parseInt(h.substr(5,2),16));c.asc_putA(255);window._api.put_TextColor(c)}" style="position:absolute;bottom:-2px;left:2px;width:16px;height:6px;padding:0;border:none;cursor:pointer"></label>
-      <button onclick="if(window._api)window._api.put_LineHighLight(true,255,255,0)" title="Highlight yellow"><span class="mi" style="font-size:18px;background:#ff0;border-radius:2px">ink_highlighter</span></button>
+      <div class="tb" style="position:relative">
+        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'grid':'none'" title="Font color"><span class="mi" style="font-size:18px">format_color_text</span><span id="fc-bar" style="display:block;height:3px;width:16px;background:#000;margin-top:-2px"></span></button>
+        <div class="color-palette" style="display:none" onmousedown="event.preventDefault()">
+          <div data-fn="textcolor" data-c="#000000"></div><div data-fn="textcolor" data-c="#434343"></div><div data-fn="textcolor" data-c="#666666"></div><div data-fn="textcolor" data-c="#999999"></div><div data-fn="textcolor" data-c="#b7b7b7"></div><div data-fn="textcolor" data-c="#cccccc"></div><div data-fn="textcolor" data-c="#d9d9d9"></div><div data-fn="textcolor" data-c="#efefef"></div><div data-fn="textcolor" data-c="#f3f3f3"></div><div data-fn="textcolor" data-c="#ffffff" style="border:1px solid #ddd"></div>
+          <div data-fn="textcolor" data-c="#980000"></div><div data-fn="textcolor" data-c="#ff0000"></div><div data-fn="textcolor" data-c="#ff9900"></div><div data-fn="textcolor" data-c="#ffff00"></div><div data-fn="textcolor" data-c="#00ff00"></div><div data-fn="textcolor" data-c="#00ffff"></div><div data-fn="textcolor" data-c="#4a86e8"></div><div data-fn="textcolor" data-c="#0000ff"></div><div data-fn="textcolor" data-c="#9900ff"></div><div data-fn="textcolor" data-c="#ff00ff"></div>
+        </div>
+      </div>
+      <div class="tb" style="position:relative">
+        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'grid':'none'" title="Highlight color"><span class="mi" style="font-size:18px">ink_highlighter</span><span id="hl-bar" style="display:block;height:3px;width:16px;background:#ff0;margin-top:-2px"></span></button>
+        <div class="color-palette" style="display:none" onmousedown="event.preventDefault()">
+          <div data-fn="highlight" data-c="#ffff00"></div><div data-fn="highlight" data-c="#00ff00"></div><div data-fn="highlight" data-c="#00ffff"></div><div data-fn="highlight" data-c="#ff00ff"></div><div data-fn="highlight" data-c="#0000ff"></div><div data-fn="highlight" data-c="#ff0000"></div><div data-fn="highlight" data-c="#ff9900"></div><div data-fn="highlight" data-c="#000000"></div><div data-fn="highlight" data-c="#ffffff" style="border:1px solid #ddd"></div>
+          <div data-fn="highlight" data-c="" style="background:linear-gradient(135deg,#fff 45%,#f00 50%,#fff 55%);border:1px solid #ddd" title="No highlight"></div>
+        </div>
+      </div>
     </div>
     <div class="sep"></div>
     <div class="tb">
@@ -122,6 +134,34 @@
     });
     document.getElementById('titlebar').addEventListener('mousedown', function(e) {
       if (e.target.tagName !== 'INPUT' && !e.target.classList.contains('doc-name')) e.preventDefault();
+    });
+
+    // Initialize color palette swatches (CSS attr() doesn't work for backgrounds)
+    document.querySelectorAll('.color-palette div[data-c]').forEach(function(el) {
+      if (el.dataset.c) el.style.backgroundColor = el.dataset.c;
+      el.onclick = function(e) {
+        e.stopPropagation();
+        var hex = this.dataset.c;
+        var fn = this.dataset.fn;
+        this.closest('.color-palette').style.display = 'none';
+        if (!window._api || !hex) {
+          if (fn === 'highlight') window._api.put_LineHighLight(false);
+          return;
+        }
+        var r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
+        if (fn === 'textcolor') {
+          var c = new Asc.asc_CColor(); c.asc_putR(r); c.asc_putG(g); c.asc_putB(b); c.asc_putA(255);
+          window._api.put_TextColor(c);
+          document.getElementById('fc-bar').style.background = hex;
+        } else if (fn === 'highlight') {
+          window._api.put_LineHighLight(true, r, g, b);
+          document.getElementById('hl-bar').style.background = hex;
+        }
+      };
+    });
+    // Close palettes on outside click
+    document.addEventListener('click', function() {
+      document.querySelectorAll('.color-palette').forEach(function(p) { p.style.display = 'none'; });
     });
 
     // Fix Chrome passive event listener warnings from OnlyOffice mousewheel handler.
