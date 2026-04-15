@@ -212,12 +212,13 @@ pub struct MainTableState {
     pub count: u8,
 }
 
-// PropLenType constants (matching Serialize2.js c_oSerPropLenType)
-const PROP_LEN_BYTE: u8 = 0;
-const _PROP_LEN_SHORT: u8 = 1;
-const PROP_LEN_LONG: u8 = 2;
-const PROP_LEN_DOUBLE: u8 = 3;
-const PROP_LEN_VARIABLE: u8 = 4;
+// PropLenType constants (from Serialize2.js c_oSerPropLenType)
+// Null=0, Byte=1, Short=2, Three=3, Long=4, Double=5, Variable=6
+const PROP_LEN_BYTE: u8 = 1;
+const _PROP_LEN_SHORT: u8 = 2;
+const PROP_LEN_LONG: u8 = 4;
+const PROP_LEN_DOUBLE: u8 = 5;
+const PROP_LEN_VARIABLE: u8 = 6;
 
 const MAX_TABLES: u8 = 128;
 
@@ -250,7 +251,7 @@ mod tests {
     fn write_prop_bool() {
         let mut w = DocyWriter::new();
         w.write_prop_bool(7, true);
-        assert_eq!(w.as_bytes(), &[7, PROP_LEN_BYTE, 1]);
+        assert_eq!(w.as_bytes(), &[7, 1, 1]); // type=7, lenType=Byte(1), value=1
     }
 
     #[test]
@@ -260,8 +261,8 @@ mod tests {
             w.write_byte(0xFF);
             w.write_byte(0xAA);
         });
-        // [type:5][lenType:Variable][length:2,0,0,0][0xFF][0xAA]
-        assert_eq!(w.as_bytes(), &[5, PROP_LEN_VARIABLE, 2, 0, 0, 0, 0xFF, 0xAA]);
+        // [type:5][lenType:Variable(6)][length:2,0,0,0][0xFF][0xAA]
+        assert_eq!(w.as_bytes(), &[5, 6, 2, 0, 0, 0, 0xFF, 0xAA]);
     }
 
     #[test]
