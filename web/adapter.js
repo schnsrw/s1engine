@@ -13,6 +13,7 @@ import init, { WasmEngine } from './pkg/s1engine_wasm.js';
 
 let wasmEngine = null;
 let wasmReady = false;
+const ENABLE_DOCY_OPEN = true;
 
 export async function initWasm() {
   if (wasmReady) return;
@@ -32,18 +33,29 @@ export async function openDocx(docxBytes, api) {
   // Parse DOCX with s1engine.
   var doc = wasmEngine.open(docxBytes);
 
-  // DOCY path — CustomXmlManager.Write_ToBinary2 patched in index.html
-  try {
-    var docy = doc.to_docy();
-    if (docy && docy.length > 20) {
-      console.log('[adapter] DOCY (' + docy.length + ' chars)');
-      api.OpenDocumentFromBin('', docy);
-      console.log('[adapter] Opened via DOCY');
-      return doc;
+  // DOCY open is still experimental. When sdkjs rejects the payload it can
+  // leave the editor in a broken state, so keep it disabled by default.
+  if (ENABLE_DOCY_OPEN) {
+    try {
+      var docy = doc.to_docy();
+      if (docy && docy.length > 20) {
+        console.log('[adapter] DOCY (' + docy.length + ' chars)');
+        // Disable history during load — sdkjs classes missing Write_ToBinary2
+        // cause crashes if history tries to serialize during document construction.
+        AscCommon.History.TurnOff();
+        AscCommon.g_oIdCounter.Set_Load(true);
+        try {
+          api.OpenDocumentFromBin('', docy);
+        } finally {
+          AscCommon.g_oIdCounter.Set_Load(false);
+          AscCommon.History.TurnOn();
+        }
+        console.log('[adapter] Opened via DOCY');
+        return doc;
+      }
+    } catch(e) {
+      console.warn('[adapter] DOCY failed:', e.message);
     }
-  } catch(e) {
-    console.warn('[adapter] DOCY failed:', e.message);
-    try { api.OpenDocumentFromBin('', AscCommon.getEmpty()); } catch(e2) {}
   }
 
   // Manual construction fallback
@@ -94,6 +106,10 @@ export async function openDocx(docxBytes, api) {
     contentIndex = 1;
   }
 
+  if (!Array.isArray(logicDoc.Pages)) {
+    logicDoc.Pages = [];
+  }
+
   // Re-enable and render
   logicDoc.TurnOn_InterfaceEvents(false);
   logicDoc.TurnOn_Recalculate(false);
@@ -137,6 +153,7 @@ export async function openDocx(docxBytes, api) {
   }
 
   console.log('[adapter] open: ' + contentIndex + ' elements loaded');
+  return doc;
 }
 
 /**
