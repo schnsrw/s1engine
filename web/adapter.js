@@ -34,21 +34,12 @@ export async function openDocx(docxBytes, api) {
   // headers, footers, images, tables, TOC, comments, footnotes, etc.
   var doc = wasmEngine.open(docxBytes);
 
-  // DOCY path: convert s1engine model → DOCY binary → sdkjs native rendering
-  try {
-    var docy = doc.to_docy();
-    if (docy && docy.length > 20) {
-      console.log('[adapter] DOCY path (' + docy.length + ' chars)');
-      // OpenDocumentFromBin calls BeforeOpenDocument → InitEditor → BinaryFileReader.Read
-      api.OpenDocumentFromBin('', docy);
-      console.log('[adapter] Document opened via DOCY');
-      return doc;
-    }
-  } catch(e) {
-    console.warn('[adapter] DOCY failed:', e.message, '— using manual path');
-  }
+  // DOCY path disabled — binary structure has issues beyond PropLenType.
+  // OpenDocumentFromBin corrupts editor state on failure, preventing fallback.
+  // Needs byte-level validation: generate minimal DOCY, test each table type.
+  // The s1-format-docy crate is built (1887 lines) but output needs debugging.
 
-  // Manual paragraph-by-paragraph construction (fallback)
+  // Manual paragraph-by-paragraph construction (working path)
   var bodyChildrenJson = doc.body_children_json();
   var bodyChildren = JSON.parse(bodyChildrenJson);
 
