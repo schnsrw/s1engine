@@ -234,13 +234,18 @@
 
       // --- Patches for standalone offline mode ---
 
-      // Patch: CustomXmlManager missing Write_ToBinary2/Read_FromBinary2.
-      // Required by g_oTableId.Add (CChangesTableIdAdd) for history serialization.
-      // Without this, OpenDocumentFromBin crashes for any DOCY input.
-      var CXM = (window.AscWord && AscWord.CustomXmlManager) || (window.AscCommonWord && AscCommonWord.CustomXmlManager);
-      if (CXM && !CXM.prototype.Write_ToBinary2) {
-        CXM.prototype.Write_ToBinary2 = function(Writer) { Writer.WriteLong(0); };
-        CXM.prototype.Read_FromBinary2 = function(Reader) { Reader.GetLong(); };
+      // Patch: Multiple sdkjs classes register with g_oTableId but lack
+      // Write_ToBinary2/Read_FromBinary2 (CustomXmlManager, CDocProtect, etc).
+      // Instead of patching each class, intercept g_oTableId.Add to auto-fix.
+      if (AscCommon && AscCommon.g_oTableId) {
+        var origAdd = AscCommon.g_oTableId.Add.bind(AscCommon.g_oTableId);
+        AscCommon.g_oTableId.Add = function(obj, id) {
+          if (obj && !obj.Write_ToBinary2) {
+            obj.Write_ToBinary2 = function(Writer) { Writer.WriteLong(0); };
+            obj.Read_FromBinary2 = function(Reader) { Reader.GetLong(); };
+          }
+          return origAdd(obj, id);
+        };
       }
 
       // Patch 0: Fix mouse-to-cursor coordinate sync.
