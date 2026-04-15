@@ -5,7 +5,7 @@ WASM_PACK := wasm-pack
 WASM_CRATE := ffi/wasm
 WASM_OUT := web/pkg
 
-.PHONY: help build test clippy fmt check wasm wasm-release server relay web clean
+.PHONY: help build test clippy fmt check wasm wasm-release server relay web web-dist clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,11 @@ wasm-release: ## Build WASM (release mode) → web/pkg/
 web: wasm ## Build WASM and prepare web app
 	@echo "Web app ready at web/"
 	@echo "Run: make server  or  python3 -m http.server 8080 --directory web"
+
+web-dist: wasm ## Build packaged web dist → web/dist/
+	node scripts/build-web-dist.js
+	@echo "Production web app ready at web/dist/"
+	@echo "Run: python3 -m http.server 8080 --directory web/dist"
 
 # ─── Server ───────────────────────────────────────────
 
