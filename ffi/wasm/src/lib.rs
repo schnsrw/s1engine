@@ -295,6 +295,15 @@ impl WasmDocument {
         Ok(doc.to_plain_text())
     }
 
+    /// Convert to OnlyOffice DOCY binary format.
+    ///
+    /// Returns the DOCY string: `DOCY;v5;{size};{base64_data}`
+    /// Ready for `sdkjs OpenDocumentFromBin()`.
+    pub fn to_docy(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        Ok(s1_format_docy::write(doc.model()))
+    }
+
     /// Export the document to the specified format.
     ///
     /// Format should be one of: "docx", "odt", "txt", "pdf".
