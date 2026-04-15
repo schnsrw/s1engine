@@ -50,6 +50,18 @@ export async function openDocx(docxBytes, api) {
           AscCommon.g_oIdCounter.Set_Load(false);
           AscCommon.History.TurnOn();
         }
+        // Trigger rendering after DOCY load
+        var logicDoc = api.WordControl.m_oLogicDocument;
+        if (logicDoc) {
+          logicDoc.MoveCursorToStartPos(false);
+          logicDoc.Recalculate();
+        }
+        if (api.WordControl) {
+          if (api.WordControl.CalculateDocumentSize) api.WordControl.CalculateDocumentSize();
+          if (api.WordControl.OnCalculatePagesPlace) api.WordControl.OnCalculatePagesPlace();
+          if (api.WordControl.checkBodyOffset) api.WordControl.checkBodyOffset();
+          api.WordControl.OnResize(true);
+        }
         console.log('[adapter] Opened via DOCY');
         return doc;
       }
