@@ -124,17 +124,17 @@ impl DocyWriter {
         self.write_string(value);
     }
 
-    /// Begin a variable-length item: [type:1][lenType:Variable][length:4][...content...]
+    /// Begin a complex item: [type:1][length:4][...content...]
+    /// NO lenType byte — matches sdkjs WriteItem pattern.
     /// Returns the position where length should be patched.
     pub fn begin_item(&mut self, prop_type: u8) -> usize {
         self.buf.push(prop_type);
-        self.buf.push(PROP_LEN_VARIABLE);
         let len_pos = self.buf.len();
         self.write_long(0); // placeholder for length
         len_pos
     }
 
-    /// End a variable-length item by patching the length at the given position.
+    /// End an item by patching the length at the given position.
     pub fn end_item(&mut self, len_pos: usize) {
         let content_len = (self.buf.len() - len_pos - 4) as u32;
         let bytes = content_len.to_le_bytes();
@@ -144,7 +144,9 @@ impl DocyWriter {
         self.buf[len_pos + 3] = bytes[3];
     }
 
-    /// Write a complete item with content from a closure.
+    /// Write a complex item with content from a closure.
+    /// Pattern: [type:1][length:4][content:N]
+    /// This matches sdkjs WriteItem (NOT property writes which have lenType).
     pub fn write_item<F: FnOnce(&mut DocyWriter)>(&mut self, prop_type: u8, f: F) {
         let len_pos = self.begin_item(prop_type);
         f(self);
@@ -265,8 +267,8 @@ mod tests {
             w.write_byte(0xFF);
             w.write_byte(0xAA);
         });
-        // [type:5][lenType:Variable(6)][length:2,0,0,0][0xFF][0xAA]
-        assert_eq!(w.as_bytes(), &[5, 6, 2, 0, 0, 0, 0xFF, 0xAA]);
+        // [type:5][length:2,0,0,0][0xFF][0xAA] — NO lenType byte
+        assert_eq!(w.as_bytes(), &[5, 2, 0, 0, 0, 0xFF, 0xAA]);
     }
 
     #[test]

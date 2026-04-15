@@ -32,8 +32,7 @@ export async function openDocx(docxBytes, api) {
   // Parse DOCX with s1engine.
   var doc = wasmEngine.open(docxBytes);
 
-  // DOCY binary path — table serialization rewritten to match sdkjs contract.
-  // Images disabled in DOCY until drawing format matches.
+  // DOCY path — write_item fixed (removed extra lenType byte)
   try {
     var docy = doc.to_docy();
     if (docy && docy.length > 20) {
@@ -44,10 +43,7 @@ export async function openDocx(docxBytes, api) {
     }
   } catch(e) {
     console.warn('[adapter] DOCY failed:', e.message);
-    // Editor state may be corrupted — reload the blank doc
-    try {
-      api.OpenDocumentFromBin('', AscCommon.getEmpty());
-    } catch(e2) {}
+    try { api.OpenDocumentFromBin('', AscCommon.getEmpty()); } catch(e2) {}
   }
 
   // Manual construction fallback
