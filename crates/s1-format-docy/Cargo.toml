@@ -1,0 +1,10 @@
+[package]
+name = "s1-format-docy"
+version = "1.0.0"
+edition = "2021"
+description = "OnlyOffice DOCY binary format writer for s1engine document model"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+s1-model = { path = "../s1-model" }
+base64 = "0.22"
