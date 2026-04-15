@@ -32,10 +32,19 @@ export async function openDocx(docxBytes, api) {
   // Parse DOCX with s1engine.
   var doc = wasmEngine.open(docxBytes);
 
-  // DOCY path not safe for live editor yet.
-  // OpenDocumentFromBin corrupts state on failure — no recovery possible.
-  // Fixes applied: PropLenType, UTF-16LE, no lenType in write_item, table structure.
-  // Needs standalone test harness (separate sdkjs instance) for debugging.
+  // DOCY path — CustomXmlManager.Write_ToBinary2 patched in index.html
+  try {
+    var docy = doc.to_docy();
+    if (docy && docy.length > 20) {
+      console.log('[adapter] DOCY (' + docy.length + ' chars)');
+      api.OpenDocumentFromBin('', docy);
+      console.log('[adapter] Opened via DOCY');
+      return doc;
+    }
+  } catch(e) {
+    console.warn('[adapter] DOCY failed:', e.message);
+    try { api.OpenDocumentFromBin('', AscCommon.getEmpty()); } catch(e2) {}
+  }
 
   // Manual construction fallback
   var bodyChildrenJson = doc.body_children_json();

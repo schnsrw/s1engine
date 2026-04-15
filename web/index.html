@@ -131,6 +131,19 @@
     window['AscNotLoadAllScript'] = true;
 
     // Track current formatting state for toggle buttons
+    // Patch: CustomXmlManager missing Write_ToBinary2/Read_FromBinary2.
+    // These are required by g_oTableId.Add (CChangesTableIdAdd) for history.
+    // Without them, OpenDocumentFromBin crashes with "Write_ToBinary2 is not a function".
+    if (window.AscCommonWord && AscCommonWord.CustomXmlManager) {
+      var CXM = AscCommonWord.CustomXmlManager;
+      if (!CXM.prototype.Write_ToBinary2) {
+        CXM.prototype.Write_ToBinary2 = function(Writer) { Writer.WriteLong(0); };
+      }
+      if (!CXM.prototype.Read_FromBinary2) {
+        CXM.prototype.Read_FromBinary2 = function(Reader) { Reader.GetLong(); };
+      }
+    }
+
     window._fmtState = { bold: false, italic: false, underline: false, strikeout: false };
 
     // Prevent toolbar/menubar clicks from stealing focus from editor canvas.
