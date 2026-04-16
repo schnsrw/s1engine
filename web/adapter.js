@@ -40,34 +40,21 @@ export async function openDocx(docxBytes, api) {
       var docy = doc.to_docy();
       if (docy && docy.length > 20) {
         console.log('[adapter] DOCY (' + docy.length + ' chars)');
-        // Disable history during load — sdkjs classes missing Write_ToBinary2
-        // cause crashes if history tries to serialize during document construction.
+        // Disable history during load — sdkjs develop build has classes
+        // without Write_ToBinary2 that crash during history serialization.
         AscCommon.History.TurnOff();
         AscCommon.g_oIdCounter.Set_Load(true);
         try {
+          // OpenDocumentFromBin handles full lifecycle:
+          // BeforeOpenDocument → InitEditor → BinaryFileReader.Read → AfterOpenDocument
+          // AfterOpenDocument triggers font loading → rendering pipeline
           api.OpenDocumentFromBin('', docy);
         } finally {
           AscCommon.g_oIdCounter.Set_Load(false);
           AscCommon.History.TurnOn();
         }
-        // Debug: check what OpenDocumentFromBin created
         var logicDoc = api.WordControl.m_oLogicDocument;
-        console.log('[adapter] DOCY logicDoc.Content.length:', logicDoc ? logicDoc.Content.length : 'null');
-        if (logicDoc && logicDoc.Content.length > 0) {
-          var firstPara = logicDoc.Content[0];
-          console.log('[adapter] First element type:', firstPara ? firstPara.constructor.name : 'null');
-        }
-        // Trigger rendering after DOCY load
-        if (logicDoc) {
-          logicDoc.MoveCursorToStartPos(false);
-          logicDoc.Recalculate();
-        }
-        if (api.WordControl) {
-          if (api.WordControl.CalculateDocumentSize) api.WordControl.CalculateDocumentSize();
-          if (api.WordControl.OnCalculatePagesPlace) api.WordControl.OnCalculatePagesPlace();
-          if (api.WordControl.checkBodyOffset) api.WordControl.checkBodyOffset();
-          api.WordControl.OnResize(true);
-        }
+        console.log('[adapter] DOCY loaded:', logicDoc ? logicDoc.Content.length + ' elements' : 'null');
         console.log('[adapter] Opened via DOCY');
         return doc;
       }
