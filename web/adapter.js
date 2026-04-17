@@ -53,8 +53,22 @@ export async function openDocx(docxBytes, api) {
           AscCommon.g_oIdCounter.Set_Load(false);
           AscCommon.History.TurnOn();
         }
+        // Ensure rendering pipeline completes
+        api.ServerIdWaitComplete = true;
+        api.ServerImagesWaitComplete = true;
+        api.DocumentType = 2;
+
         var logicDoc = api.WordControl.m_oLogicDocument;
         console.log('[adapter] DOCY loaded:', logicDoc ? logicDoc.Content.length + ' elements' : 'null');
+
+        // Force recalculate and render
+        if (logicDoc) {
+          logicDoc.MoveCursorToStartPos(false);
+          logicDoc.Recalculate();
+        }
+        if (api.WordControl) {
+          api.WordControl.OnResize(true);
+        }
         console.log('[adapter] Opened via DOCY');
         return doc;
       }
