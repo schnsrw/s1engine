@@ -6032,6 +6032,35 @@ export class WasmDocument {
         }
     }
     /**
+     * Convert to OnlyOffice DOCY binary format.
+     *
+     * Returns the wrapped DOCY payload string: `DOCY;v5;{size};{base64_data}`.
+     *
+     * This is currently a debug/export surface only. The current DOCY writer
+     * is not yet structurally compatible with OnlyOffice for general open.
+     * @returns {string}
+     */
+    to_docy() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
+            _assertNum(this.__wbg_ptr);
+            const ret = wasm.wasmdocument_to_docy(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * Export the document as EPUB bytes.
      *
      * Generates an EPUB 3 file from the document content.

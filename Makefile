@@ -5,7 +5,7 @@ WASM_PACK := wasm-pack
 WASM_CRATE := ffi/wasm
 WASM_OUT := web/pkg
 
-.PHONY: help build test clippy fmt check wasm wasm-release server relay web web-dist clean
+.PHONY: help build test clippy fmt check wasm wasm-release server relay web web-dist docy-smoke clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -46,6 +46,9 @@ web-dist: wasm ## Build packaged web dist → web/dist/
 	node scripts/build-web-dist.js
 	@echo "Production web app ready at web/dist/"
 	@echo "Run: python3 -m http.server 8080 --directory web/dist"
+
+docy-smoke: wasm ## Run browser DOCY smoke validation against web/index.html
+	npx -p playwright node scripts/docy_browser_smoke.js
 
 # ─── Server ───────────────────────────────────────────
 

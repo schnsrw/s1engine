@@ -31,10 +31,10 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel) {
 fn write_style(w: &mut DocyWriter, s: &s1_model::Style) {
     w.write_item(style::STYLE, |w| {
         // Style ID
-        w.write_prop_string2(style::STYLE_ID, &s.id);
+        w.write_string_item(style::STYLE_ID, &s.id);
 
         // Style name
-        w.write_prop_string2(style::STYLE_NAME, &s.name);
+        w.write_string_item(style::STYLE_NAME, &s.name);
 
         // Type (1=Char, 2=Num, 3=Para, 4=Tbl)
         let type_byte = match s.style_type {
@@ -47,12 +47,12 @@ fn write_style(w: &mut DocyWriter, s: &s1_model::Style) {
 
         // Based on
         if let Some(ref parent) = s.parent_id {
-            w.write_prop_string2(style::STYLE_BASED_ON, parent);
+            w.write_string_item(style::STYLE_BASED_ON, parent);
         }
 
         // Next style
         if let Some(ref next) = s.next_style_id {
-            w.write_prop_string2(style::STYLE_NEXT, next);
+            w.write_string_item(style::STYLE_NEXT, next);
         }
 
         // Default flag

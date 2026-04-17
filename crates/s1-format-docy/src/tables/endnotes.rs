@@ -1,7 +1,7 @@
 use crate::constants::notes;
 use crate::writer::DocyWriter;
 use crate::content;
-use s1_model::{DocumentModel, NodeType, NodeId};
+use s1_model::{DocumentModel, NodeType};
 
 pub fn has_content(model: &DocumentModel) -> bool {
     let root = match model.root_node() {

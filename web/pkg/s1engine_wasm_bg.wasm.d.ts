@@ -249,6 +249,7 @@ export const wasmdocument_split_paragraph: (a: number, b: number, c: number, d: 
 export const wasmdocument_split_run: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const wasmdocument_supports_password_protection: (a: number) => number;
 export const wasmdocument_text_to_table: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+export const wasmdocument_to_docy: (a: number) => [number, number, number, number];
 export const wasmdocument_to_epub: (a: number) => [number, number, number, number];
 export const wasmdocument_to_html: (a: number) => [number, number, number, number];
 export const wasmdocument_to_layout_json: (a: number) => [number, number, number, number];

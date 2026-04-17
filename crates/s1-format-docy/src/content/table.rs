@@ -78,7 +78,7 @@ fn write_table_props(w: &mut DocyWriter, table: &s1_model::Node) {
 
     // Table width — uses WriteW format: type=7(TABLE_W), Variable, [Type byte + value long]
     if let Some(AttributeValue::TableWidth(tw)) = table.attributes.get(&AttributeKey::TableWidth) {
-        w.write_item(tbl_pr::TABLE_W, |w| {
+        w.write_prop_item(tbl_pr::TABLE_W, |w| {
             match tw {
                 s1_model::TableWidth::Auto => {
                     w.write_byte(0); // type: auto
@@ -113,7 +113,10 @@ fn write_row(w: &mut DocyWriter, model: &DocumentModel, row_id: NodeId) {
             w.write_prop_bool(row_pr::TABLE_HEADER, true);
         }
         if let Some(h) = row.attributes.get_f64(&AttributeKey::RowHeight) {
-            w.write_prop_long(row_pr::HEIGHT, pts_to_twips(h) as u32);
+            w.write_prop_item(row_pr::HEIGHT, |w| {
+                w.write_prop_byte(row_pr::HEIGHT_RULE, 1);
+                w.write_prop_long(row_pr::HEIGHT_VALUE_TWIPS, pts_to_twips(h) as u32);
+            });
         }
     });
 
@@ -161,7 +164,7 @@ fn write_cell(w: &mut DocyWriter, model: &DocumentModel, cell_id: NodeId) {
 
         // Cell width
         if let Some(AttributeValue::TableWidth(tw)) = cell.attributes.get(&AttributeKey::CellWidth) {
-            w.write_item(cell_pr::CELL_W, |w| {
+            w.write_prop_item(cell_pr::CELL_W, |w| {
                 match tw {
                     s1_model::TableWidth::Auto => { w.write_byte(0); w.write_long(0); }
                     s1_model::TableWidth::Fixed(v) => { w.write_byte(3); w.write_long(pts_to_twips(*v) as u32); }
@@ -184,7 +187,7 @@ fn write_cell(w: &mut DocyWriter, model: &DocumentModel, cell_id: NodeId) {
 
         // Cell background
         if let Some(AttributeValue::Color(c)) = cell.attributes.get(&AttributeKey::CellBackground) {
-            w.write_item(cell_pr::SHD, |w| {
+            w.write_prop_item(cell_pr::SHD, |w| {
                 w.write_byte(color::RGB);
                 w.write_color_rgb(c.r, c.g, c.b);
             });

@@ -2073,6 +2073,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "s1-format-docy"
+version = "1.0.0"
+dependencies = [
+ "base64",
+ "s1-model",
+ "s1engine",
+]
+
+[[package]]
 name = "s1-format-html"
 version = "1.0.1"
 dependencies = [
@@ -2265,6 +2274,7 @@ version = "1.0.1"
 dependencies = [
  "js-sys",
  "s1-crdt",
+ "s1-format-docy",
  "s1-format-pdf",
  "s1-format-xlsx",
  "s1-layout",

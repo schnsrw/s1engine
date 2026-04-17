@@ -18,13 +18,13 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // Indentation (points → twips)
     if let Some(v) = attrs.get_f64(&AttributeKey::IndentLeft) {
-        w.write_prop_long_signed(ppr::IND_LEFT, pts_to_twips(v));
+        w.write_prop_long_signed(ppr::IND_LEFT_TWIPS, pts_to_twips(v));
     }
     if let Some(v) = attrs.get_f64(&AttributeKey::IndentRight) {
-        w.write_prop_long_signed(ppr::IND_RIGHT, pts_to_twips(v));
+        w.write_prop_long_signed(ppr::IND_RIGHT_TWIPS, pts_to_twips(v));
     }
     if let Some(v) = attrs.get_f64(&AttributeKey::IndentFirstLine) {
-        w.write_prop_long_signed(ppr::IND_FIRST_LINE, pts_to_twips(v));
+        w.write_prop_long_signed(ppr::IND_FIRST_LINE_TWIPS, pts_to_twips(v));
     }
 
     // Spacing
@@ -33,7 +33,7 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
         || attrs.get(&AttributeKey::LineSpacing).is_some();
 
     if has_spacing {
-        w.write_item(ppr::SPACING, |w| {
+        w.write_prop_item(ppr::SPACING, |w| {
             if let Some(v) = attrs.get_f64(&AttributeKey::SpacingBefore) {
                 w.write_prop_long_signed(spacing::BEFORE, pts_to_twips(v));
             }
@@ -93,9 +93,9 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // List/numbering
     if let Some(AttributeValue::ListInfo(li)) = attrs.get(&AttributeKey::ListInfo) {
-        w.write_item(ppr::NUM_PR, |w| {
-            w.write_prop_long(0, li.num_id); // NumId
-            w.write_prop_long(1, li.level as u32); // Ilvl
+        w.write_prop_item(ppr::NUM_PR, |w| {
+            w.write_prop_long(ppr::NUM_PR_LVL, li.level as u32);
+            w.write_prop_long(ppr::NUM_PR_ID, li.num_id);
         });
     }
 
@@ -118,7 +118,7 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // Background/shading
     if let Some(AttributeValue::Color(c)) = attrs.get(&AttributeKey::Background) {
-        w.write_item(ppr::SHD, |w| {
+        w.write_prop_item(ppr::SHD, |w| {
             w.write_byte(color::RGB);
             w.write_color_rgb(c.r, c.g, c.b);
         });
@@ -128,12 +128,12 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 /// Write default paragraph properties from document defaults.
 pub fn write_defaults(w: &mut DocyWriter, defaults: &DocumentDefaults) {
     if let Some(v) = defaults.space_after {
-        w.write_item(ppr::SPACING, |w| {
+        w.write_prop_item(ppr::SPACING, |w| {
             w.write_prop_long_signed(spacing::AFTER, pts_to_twips(v));
         });
     }
     if let Some(v) = defaults.line_spacing_multiple {
-        w.write_item(ppr::SPACING, |w| {
+        w.write_prop_item(ppr::SPACING, |w| {
             w.write_prop_long(spacing::LINE, (v * 240.0) as u32);
             w.write_prop_byte(spacing::LINE_RULE, 0);
         });

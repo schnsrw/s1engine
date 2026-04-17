@@ -297,8 +297,10 @@ impl WasmDocument {
 
     /// Convert to OnlyOffice DOCY binary format.
     ///
-    /// Returns the DOCY string: `DOCY;v5;{size};{base64_data}`
-    /// Ready for `sdkjs OpenDocumentFromBin()`.
+    /// Returns the wrapped DOCY payload string: `DOCY;v5;{size};{base64_data}`.
+    ///
+    /// This is currently a debug/export surface only. The current DOCY writer
+    /// is not yet structurally compatible with OnlyOffice for general open.
     pub fn to_docy(&self) -> Result<String, JsError> {
         let doc = self.doc()?;
         Ok(s1_format_docy::write(doc.model()))

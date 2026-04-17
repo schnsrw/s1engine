@@ -55,11 +55,11 @@ impl DocyWriter {
         self.buf.extend_from_slice(&v.to_le_bytes());
     }
 
-    /// Write string in DOCY format: 4-byte char count + UTF-16LE characters.
-    /// This matches sdkjs CMemory.WriteString2.
+    /// Write string in DOCY format: 4-byte byte length + UTF-16LE characters.
+    /// This matches sdkjs `CMemory.WriteString2`.
     pub fn write_string(&mut self, s: &str) {
         let utf16: Vec<u16> = s.encode_utf16().collect();
-        self.write_long(utf16.len() as u32); // char count (not byte count)
+        self.write_long((utf16.len() * 2) as u32);
         for ch in &utf16 {
             self.buf.extend_from_slice(&ch.to_le_bytes());
         }
@@ -117,11 +117,40 @@ impl DocyWriter {
         self.buf.extend_from_slice(&value.to_le_bytes());
     }
 
-    /// Write a string property (variable length): [type:1][data written by closure]
-    /// This is the "String2" pattern — type byte then raw string.
-    pub fn write_prop_string2(&mut self, prop_type: u8, value: &str) {
+    /// Write a string item for Read1-style blocks: [type:1][utf16_byte_len:4][utf16le:N]
+    pub fn write_string_item(&mut self, prop_type: u8, value: &str) {
         self.buf.push(prop_type);
         self.write_string(value);
+    }
+
+    /// Write a string property for Read2-style property blocks:
+    /// [type:1][lenType:1=Variable][byte_len:4][utf16le:N]
+    /// Note: This does NOT use write_string() because PROP_LEN_VARIABLE
+    /// expects the BYTE length of the payload, whereas WriteString2 (Read1)
+    /// expects the CHARACTER length.
+    pub fn write_prop_string2(&mut self, prop_type: u8, value: &str) {
+        self.write_prop_item(prop_type, |w| {
+            let utf16: Vec<u16> = value.encode_utf16().collect();
+            for ch in &utf16 {
+                w.buf.extend_from_slice(&ch.to_le_bytes());
+            }
+        });
+    }
+
+    /// Write a variable-length property for Read2-style property blocks:
+    /// [type:1][lenType:1=Variable][length:4][content:N]
+    pub fn write_prop_item<F: FnOnce(&mut DocyWriter)>(&mut self, prop_type: u8, f: F) {
+        self.buf.push(prop_type);
+        self.buf.push(PROP_LEN_VARIABLE);
+        let len_pos = self.buf.len();
+        self.write_long(0); // placeholder for variable payload length
+        f(self);
+        let content_len = (self.buf.len() - len_pos - 4) as u32;
+        let bytes = content_len.to_le_bytes();
+        self.buf[len_pos] = bytes[0];
+        self.buf[len_pos + 1] = bytes[1];
+        self.buf[len_pos + 2] = bytes[2];
+        self.buf[len_pos + 3] = bytes[3];
     }
 
     /// Begin a complex item: [type:1][length:4][...content...]
@@ -173,14 +202,14 @@ impl DocyWriter {
 
     // ── Main Table ──────────────────────────────────────────────
 
-    /// Write the main table header. Returns (count_pos, items_start).
-    /// After all tables are written, call `patch_table_count`.
-    pub fn begin_main_table(&mut self) -> MainTableState {
+    /// Write the main table header.
+    /// Pattern: [table_count:u8][type:u8 + offset:u32 × count]
+    pub fn begin_main_table(&mut self, table_count: u8) -> MainTableState {
         let count_pos = self.buf.len();
-        self.write_byte(0); // placeholder for table count
-        // Reserve space for max 128 table items (5 bytes each)
+        self.write_byte(table_count);
         let items_start = self.buf.len();
-        for _ in 0..(MAX_TABLES as usize) * 5 {
+        // Reserve space for table items (5 bytes each)
+        for _ in 0..(table_count as usize) * 5 {
             self.buf.push(0);
         }
         MainTableState {
@@ -203,11 +232,13 @@ impl DocyWriter {
         state.count += 1;
     }
 
-    /// Finalize the main table — patch count and trim unused item slots.
+    /// Finalize the main table — verify count matches.
     pub fn end_main_table(&mut self, state: &MainTableState) {
-        self.buf[state.count_pos] = state.count;
-        // We can't easily trim the reserved space since data follows it.
-        // The reserved unused slots contain zeros which the reader skips.
+        assert_eq!(
+            self.buf[state.count_pos], state.count,
+            "Table count mismatch: expected {}, registered {}",
+            self.buf[state.count_pos], state.count
+        );
     }
 }
 
@@ -249,8 +280,8 @@ mod tests {
     fn write_string_utf16le() {
         let mut w = DocyWriter::new();
         w.write_string("Hi");
-        // 2 chars (UTF-16) + UTF-16LE bytes: H=0x0048, i=0x0069
-        assert_eq!(w.as_bytes(), &[2, 0, 0, 0, 0x48, 0x00, 0x69, 0x00]);
+        // 2 chars (UTF-16) = 4 bytes + UTF-16LE bytes: H=0x0048, i=0x0069
+        assert_eq!(w.as_bytes(), &[4, 0, 0, 0, 0x48, 0x00, 0x69, 0x00]);
     }
 
     #[test]
@@ -274,7 +305,7 @@ mod tests {
     #[test]
     fn main_table_state() {
         let mut w = DocyWriter::new();
-        let mut state = w.begin_main_table();
+        let mut state = w.begin_main_table(2);
         // Write a dummy table
         w.register_table(&mut state, 0); // Signature at current offset
         w.write_byte(42); // table data

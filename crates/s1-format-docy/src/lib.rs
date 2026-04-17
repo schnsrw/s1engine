@@ -28,8 +28,16 @@ use s1_model::DocumentModel;
 pub fn write(model: &DocumentModel) -> String {
     let mut w = writer::DocyWriter::new();
 
+    // Count mandatory tables (Signature, Settings, Style, Document, Other)
+    let mut table_count = 5;
+    if tables::numbering::has_content(model) { table_count += 1; }
+    if tables::headers_footers::has_content(model) { table_count += 1; }
+    if tables::comments::has_content(model) { table_count += 1; }
+    if tables::footnotes::has_content(model) { table_count += 1; }
+    if tables::endnotes::has_content(model) { table_count += 1; }
+
     // Main table
-    let mut mt = w.begin_main_table();
+    let mut mt = w.begin_main_table(table_count);
 
     // Table 1: Signature (required)
     w.register_table(&mut mt, constants::table_type::SIGNATURE);

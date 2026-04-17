@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::writer::DocyWriter;
 use crate::props;
-use s1_model::{DocumentModel, NodeType, NodeId, AttributeKey, AttributeValue};
+use s1_model::{AttributeKey, DocumentModel, NodeType, NodeId};
 use base64::engine::Engine as _;
 
 /// Write a complete paragraph: pPr + content (runs, breaks, images, etc.)
@@ -35,28 +35,28 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel, para_id: NodeId) {
                 NodeType::LineBreak => {
                     w.write_item(par::RUN, |w| {
                         w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::LINEBREAK);
+                            w.write_item(run::LINEBREAK, |_| {});
                         });
                     });
                 }
                 NodeType::PageBreak => {
                     w.write_item(par::RUN, |w| {
                         w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::PAGEBREAK);
+                            w.write_item(run::PAGEBREAK, |_| {});
                         });
                     });
                 }
                 NodeType::ColumnBreak => {
                     w.write_item(par::RUN, |w| {
                         w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::COLUMN_BREAK);
+                            w.write_item(run::COLUMN_BREAK, |_| {});
                         });
                     });
                 }
                 NodeType::Tab => {
                     w.write_item(par::RUN, |w| {
                         w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::TAB);
+                            w.write_item(run::TAB, |_| {});
                         });
                     });
                 }
@@ -64,47 +64,17 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel, para_id: NodeId) {
                     // Image drawing serialization disabled — format doesn't match
                     // sdkjs pptxDrawing structure yet. Skip silently.
                 }
-                NodeType::BookmarkStart => {
-                    w.write_item(par::BOOKMARK_START, |w| {
-                        if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
-                            w.write_prop_string2(0, name); // BookmarkName
-                        }
-                    });
-                }
-                NodeType::BookmarkEnd => {
-                    w.write_item(par::BOOKMARK_END, |w| {
-                        if let Some(name) = child.attributes.get_string(&AttributeKey::BookmarkName) {
-                            w.write_prop_string2(0, name);
-                        }
-                    });
-                }
-                NodeType::CommentStart => {
-                    w.write_item(par::COMMENT_START, |w| {
-                        if let Some(id) = child.attributes.get_string(&AttributeKey::CommentId) {
-                            w.write_prop_string2(0, id);
-                        }
-                    });
-                }
-                NodeType::CommentEnd => {
-                    w.write_item(par::COMMENT_END, |w| {
-                        if let Some(id) = child.attributes.get_string(&AttributeKey::CommentId) {
-                            w.write_prop_string2(0, id);
-                        }
-                    });
-                }
+                NodeType::BookmarkStart => {}
+                NodeType::BookmarkEnd => {}
+                NodeType::CommentStart => {}
+                NodeType::CommentEnd => {}
                 NodeType::FootnoteRef => {
-                    w.write_item(par::RUN, |w| {
-                        w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::FOOTNOTE_REFERENCE);
-                        });
-                    });
+                    // Note references need a stable DOCY note-id mapping. Skip until
+                    // the serializer and note tables share that mapping.
                 }
                 NodeType::EndnoteRef => {
-                    w.write_item(par::RUN, |w| {
-                        w.write_item(run::CONTENT, |w| {
-                            w.write_byte(run::ENDNOTE_REFERENCE);
-                        });
-                    });
+                    // Note references need a stable DOCY note-id mapping. Skip until
+                    // the serializer and note tables share that mapping.
                 }
                 _ => {
                     // Skip unsupported inline elements
@@ -146,6 +116,7 @@ fn write_run_content(w: &mut DocyWriter, model: &DocumentModel, run_id: NodeId) 
 }
 
 /// Write an inline image
+#[allow(dead_code)]
 fn write_image(w: &mut DocyWriter, model: &DocumentModel, img_id: NodeId) {
     let img = match model.node(img_id) {
         Some(n) => n,
@@ -170,8 +141,8 @@ fn write_image(w: &mut DocyWriter, model: &DocumentModel, img_id: NodeId) {
                     if let Some(item) = model.media().get(*mid) {
                         // Write image data inline (base64)
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&item.data);
-                        w.write_prop_string2(0, &b64); // media data
-                        w.write_prop_string2(1, &item.content_type); // content type
+                        w.write_string_item(0, &b64); // media data
+                        w.write_string_item(1, &item.content_type); // content type
                     }
                 }
             });

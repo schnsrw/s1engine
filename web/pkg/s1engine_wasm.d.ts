@@ -1499,6 +1499,15 @@ export class WasmDocument {
      */
     text_to_table(first_para_str: string, last_para_str: string, delimiter: string): string;
     /**
+     * Convert to OnlyOffice DOCY binary format.
+     *
+     * Returns the wrapped DOCY payload string: `DOCY;v5;{size};{base64_data}`.
+     *
+     * This is currently a debug/export surface only. The current DOCY writer
+     * is not yet structurally compatible with OnlyOffice for general open.
+     */
+    to_docy(): string;
+    /**
      * Export the document as EPUB bytes.
      *
      * Generates an EPUB 3 file from the document content.
@@ -2354,6 +2363,7 @@ export interface InitOutput {
     readonly wasmdocument_split_run: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly wasmdocument_supports_password_protection: (a: number) => number;
     readonly wasmdocument_text_to_table: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly wasmdocument_to_docy: (a: number) => [number, number, number, number];
     readonly wasmdocument_to_epub: (a: number) => [number, number, number, number];
     readonly wasmdocument_to_html: (a: number) => [number, number, number, number];
     readonly wasmdocument_to_layout_json: (a: number) => [number, number, number, number];

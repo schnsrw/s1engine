@@ -36,7 +36,7 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel) {
                             // Level text
                             w.write_item(num::LVL_TEXT, |w| {
                                 w.write_item(num::LVL_TEXT_ITEM, |w| {
-                                    w.write_prop_string2(num::LVL_TEXT_ITEM_TEXT, &level.level_text);
+                                    w.write_string_item(num::LVL_TEXT_ITEM_TEXT, &level.level_text);
                                 });
                             });
 
@@ -44,12 +44,15 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel) {
                             if let Some(indent) = level.indent_left {
                                 w.write_item(num::LVL_PARA_PR, |w| {
                                     let twips = crate::constants::pts_to_twips(indent);
-                                    w.write_prop_long_signed(crate::constants::ppr::IND_LEFT, twips);
+                                    w.write_prop_long_signed(
+                                        crate::constants::ppr::IND_LEFT_TWIPS,
+                                        twips,
+                                    );
                                     if let Some(hanging) = level.indent_hanging {
                                         let h_twips = crate::constants::pts_to_twips(hanging);
                                         // Hanging indent as negative first-line
                                         w.write_prop_long_signed(
-                                            crate::constants::ppr::IND_FIRST_LINE,
+                                            crate::constants::ppr::IND_FIRST_LINE_TWIPS,
                                             -h_twips,
                                         );
                                     }

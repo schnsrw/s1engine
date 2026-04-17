@@ -65,7 +65,7 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // Color
     if let Some(AttributeValue::Color(c)) = attrs.get(&AttributeKey::Color) {
-        w.write_item(rpr::COLOR, |w| {
+        w.write_prop_item(rpr::COLOR, |w| {
             w.write_byte(color::RGB);
             w.write_color_rgb(c.r, c.g, c.b);
         });
@@ -73,7 +73,7 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // Highlight
     if let Some(AttributeValue::Color(c)) = attrs.get(&AttributeKey::HighlightColor) {
-        w.write_item(rpr::HIGHLIGHT, |w| {
+        w.write_prop_item(rpr::HIGHLIGHT, |w| {
             w.write_byte(color::RGB);
             w.write_color_rgb(c.r, c.g, c.b);
         });
@@ -101,7 +101,7 @@ pub fn write(w: &mut DocyWriter, attrs: &AttributeMap) {
 
     // Font spacing (points → twips)
     if let Some(sp) = attrs.get_f64(&AttributeKey::FontSpacing) {
-        w.write_prop_long_signed(rpr::SPACING, pts_to_twips(sp));
+        w.write_prop_long_signed(rpr::SPACING_TWIPS, pts_to_twips(sp));
     }
 
     // Language

@@ -31,10 +31,10 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel) {
             w.write_prop_long(ct::ID, comment_id);
 
             if let Some(author) = child.attributes.get_string(&AttributeKey::CommentAuthor) {
-                w.write_prop_string2(ct::USER_NAME, author);
+                w.write_string_item(ct::USER_NAME, author);
             }
             if let Some(date) = child.attributes.get_string(&AttributeKey::CommentDate) {
-                w.write_prop_string2(ct::DATE, date);
+                w.write_string_item(ct::DATE, date);
             }
 
             // Extract text from comment body paragraphs
@@ -57,7 +57,7 @@ pub fn write(w: &mut DocyWriter, model: &DocumentModel) {
                 }
             }
             if !text.is_empty() {
-                w.write_prop_string2(ct::TEXT, &text);
+                w.write_string_item(ct::TEXT, &text);
             }
         });
 

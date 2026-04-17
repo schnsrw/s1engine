@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! DOCY binary format constants.
 //! Mapped from Serialize2.js c_oSer* constants.
 
@@ -72,87 +73,131 @@ pub mod rpr {
     pub const HIGHLIGHT: u8 = 11;
     pub const RSTYLE: u8 = 13;
     pub const SPACING: u8 = 14;
-    pub const DSTRIKEOUT: u8 = 42;
-    pub const BOLD_CS: u8 = 43;
-    pub const FONT_SIZE_CS: u8 = 44;
-    pub const ITALIC_CS: u8 = 45;
-    pub const CAPS: u8 = 49;
-    pub const SMALL_CAPS: u8 = 50;
-    pub const VANISH: u8 = 19;
-    pub const LANG: u8 = 40;
+    pub const DSTRIKEOUT: u8 = 15;
+    pub const CAPS: u8 = 16;
+    pub const SMALL_CAPS: u8 = 17;
+    pub const BOLD_CS: u8 = 20;
+    pub const ITALIC_CS: u8 = 21;
+    pub const FONT_SIZE_CS: u8 = 22;
+    pub const LANG: u8 = 25;
+    pub const VANISH: u8 = 30;
+    pub const SPACING_TWIPS: u8 = 38;
 }
 
 // Paragraph properties (c_oSerProp_pPrType)
 pub mod ppr {
-    pub const CONTEXTUAL_SPACING: u8 = 1;
-    pub const IND_LEFT: u8 = 3;
-    pub const IND_RIGHT: u8 = 4;
+    pub const CONTEXTUAL_SPACING: u8 = 0;
+    pub const IND_LEFT: u8 = 2;
+    pub const IND_RIGHT: u8 = 3;
     pub const JC: u8 = 5;
     pub const KEEP_LINES: u8 = 6;
     pub const KEEP_NEXT: u8 = 7;
     pub const PAGE_BREAK_BEFORE: u8 = 8;
     pub const SPACING: u8 = 9;
     pub const SHD: u8 = 14;
-    pub const WIDOW_CONTROL: u8 = 15;
+    pub const WIDOW_CONTROL: u8 = 25;
     pub const PARA_STYLE: u8 = 21;
     pub const PBDR: u8 = 32;
-    pub const NUM_PR: u8 = 37;
+    pub const NUM_PR: u8 = 22;
+    pub const NUM_PR_LVL: u8 = 23;
+    pub const NUM_PR_ID: u8 = 24;
     pub const TABS: u8 = 38;
-    pub const IND_FIRST_LINE: u8 = 39;
-    pub const OUTLINE_LVL: u8 = 40;
-    pub const BIDI: u8 = 46;
+    pub const IND_FIRST_LINE: u8 = 4;
+    pub const OUTLINE_LVL: u8 = 34;
+    pub const BIDI: u8 = 47;
+    pub const IND_LEFT_TWIPS: u8 = 36;
+    pub const IND_RIGHT_TWIPS: u8 = 37;
+    pub const IND_FIRST_LINE_TWIPS: u8 = 38;
 }
 
 // Spacing sub-properties (c_oSerProp_pPrType spacing sub-types)
 pub mod spacing {
-    pub const LINE: u8 = 0;
-    pub const LINE_RULE: u8 = 1;
-    pub const BEFORE: u8 = 2;
-    pub const AFTER: u8 = 3;
-    pub const BEFORE_AUTO: u8 = 5;
-    pub const AFTER_AUTO: u8 = 6;
+    pub const LINE: u8 = 10;
+    pub const LINE_RULE: u8 = 11;
+    pub const BEFORE: u8 = 12;
+    pub const AFTER: u8 = 13;
+    pub const BEFORE_AUTO: u8 = 28;
+    pub const AFTER_AUTO: u8 = 29;
 }
 
 // Table properties (c_oSerProp_tblPrType)
 pub mod tbl_pr {
-    pub const JC: u8 = 0;
-    pub const TABLE_BORDERS: u8 = 5;
-    pub const TABLE_CELL_MAR: u8 = 6;
-    pub const TABLE_W: u8 = 7;
-    pub const TABLE_LAYOUT: u8 = 8;
-    pub const TABLE_IND: u8 = 15;
-    pub const ROWS: u8 = 1;
+    pub const ROWS: u8 = 0;
+    pub const JC: u8 = 2;
+    pub const TABLE_IND: u8 = 3;
+    pub const TABLE_W: u8 = 4;
+    pub const TABLE_CELL_MAR: u8 = 5;
+    pub const TABLE_BORDERS: u8 = 6;
+    pub const TABLE_LAYOUT: u8 = 12;
+    pub const TABLE_IND_TWIPS: u8 = 19;
 }
 
 // Row properties (c_oSerProp_rowPrType)
 pub mod row_pr {
-    pub const HEIGHT: u8 = 0;
-    pub const TABLE_HEADER: u8 = 5;
+    pub const HEIGHT: u8 = 5;
+    pub const HEIGHT_RULE: u8 = 6;
+    pub const HEIGHT_VALUE_TWIPS: u8 = 19;
+    pub const TABLE_HEADER: u8 = 14;
 }
 
 // Cell properties (c_oSerProp_cellPrType)
 pub mod cell_pr {
     pub const GRID_SPAN: u8 = 0;
-    pub const BORDERS: u8 = 1;
-    pub const SHD: u8 = 2;
+    pub const SHD: u8 = 1;
+    pub const BORDERS: u8 = 2;
     pub const CELL_W: u8 = 3;
-    pub const VMERGE: u8 = 4;
-    pub const VALIGN: u8 = 5;
+    pub const VALIGN: u8 = 4;
+    pub const VMERGE: u8 = 5;
 }
 
 // Section properties (c_oSerProp_secPrType)
 pub mod sec_pr {
-    pub const PG_SZ_W: u8 = 0;
-    pub const PG_SZ_H: u8 = 1;
-    pub const PG_SZ_ORIENT: u8 = 12;
-    pub const PG_MAR_TOP: u8 = 3;
-    pub const PG_MAR_LEFT: u8 = 4;
-    pub const PG_MAR_RIGHT: u8 = 5;
-    pub const PG_MAR_BOTTOM: u8 = 6;
-    pub const PG_MAR_HEADER: u8 = 7;
-    pub const PG_MAR_FOOTER: u8 = 8;
-    pub const COLS: u8 = 10;
-    pub const TITLE_PG: u8 = 13;
+    pub const PG_SZ: u8 = 0;
+    pub const PG_MAR: u8 = 1;
+    pub const SETTINGS: u8 = 2;
+    pub const HEADERS: u8 = 3;
+    pub const FOOTERS: u8 = 4;
+    pub const HDR_FTR_ELEM: u8 = 5;
+    pub const PAGE_NUM_TYPE: u8 = 6;
+    pub const SECT_PR_CHANGE: u8 = 7;
+    pub const COLS: u8 = 8;
+    pub const PG_BORDERS: u8 = 9;
+    pub const FOOTNOTE_PR: u8 = 10;
+    pub const ENDNOTE_PR: u8 = 11;
+    pub const RTL_GUTTER: u8 = 12;
+    pub const LN_NUM_TYPE: u8 = 13;
+}
+
+pub mod sec_pg_sz {
+    pub const W_TWIPS: u8 = 4;
+    pub const H_TWIPS: u8 = 5;
+    pub const ORIENTATION: u8 = 2;
+}
+
+pub mod sec_pg_mar {
+    pub const LEFT_TWIPS: u8 = 5;
+    pub const TOP_TWIPS: u8 = 6;
+    pub const RIGHT_TWIPS: u8 = 7;
+    pub const BOTTOM_TWIPS: u8 = 8;
+    pub const HEADER_TWIPS: u8 = 9;
+    pub const FOOTER_TWIPS: u8 = 10;
+    pub const GUTTER_TWIPS: u8 = 11;
+}
+
+pub mod sec_settings {
+    pub const TITLE_PG: u8 = 0;
+    pub const EVEN_AND_ODD_HEADERS: u8 = 1;
+    pub const SECTION_TYPE: u8 = 2;
+}
+
+pub mod sec_columns {
+    pub const EQUAL_WIDTH: u8 = 0;
+    pub const NUM: u8 = 1;
+    pub const SEP: u8 = 2;
+    pub const SPACE: u8 = 3;
+    pub const COLUMN: u8 = 4;
+    pub const COLUMN_SPACE: u8 = 5;
+    pub const COLUMN_W: u8 = 6;
 }
 
 // Style types (c_oSer_sts)
