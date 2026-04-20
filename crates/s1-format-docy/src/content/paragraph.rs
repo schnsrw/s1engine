@@ -119,8 +119,26 @@ pub fn write_with_section(
                     });
                 }
                 NodeType::Image => {
-                    // Image drawing serialization disabled — format doesn't match
-                    // sdkjs pptxDrawing structure yet. Skip silently.
+                    // Image serialization via pptxDrawing is complex and fragile.
+                    // Images are injected via adapter.js post-load instead.
+                }
+                NodeType::Drawing => {
+                    // Drawing/shape objects not yet supported
+                }
+                NodeType::Field => {
+                    // Write field as page number if applicable
+                    if let Some(AttributeValue::FieldType(ft)) = child.attributes.get(&AttributeKey::FieldType) {
+                        match ft {
+                            s1_model::FieldType::PageNumber => {
+                                w.write_item(par::RUN, |w| {
+                                    w.write_item(run::CONTENT, |w| {
+                                        w.write_item(run::PAGENUM, |_| {});
+                                    });
+                                });
+                            }
+                            _ => {} // Other field types not yet supported
+                        }
+                    }
                 }
                 NodeType::BookmarkStart => {
                     // Bookmark: Read1 format. ID=WriteItem(0, Long), Name=WriteByte(1)+WriteString2

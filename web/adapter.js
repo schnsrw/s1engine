@@ -69,6 +69,61 @@ export async function openDocx(docxBytes, api) {
         } catch(renderErr) {
           console.warn('[adapter] Render error (non-fatal):', renderErr.message);
         }
+        // Inject images after document loads
+        try {
+          var imagesJson = doc.list_images_json();
+          var images = JSON.parse(imagesJson);
+          if (images.length > 0 && logicDoc) {
+            console.log('[adapter] Injecting', images.length, 'images');
+            for (var i = 0; i < images.length; i++) {
+              var img = images[i];
+              try {
+                var para = logicDoc.Content[img.para_index];
+                if (!para) continue;
+                var wMm = img.width * 25.4 / 72;
+                var hMm = img.height * 25.4 / 72;
+
+                // Register image with sdkjs image manager
+                var imageUrl = img.data_url;
+                if (AscCommon.g_oDocumentUrls) {
+                  AscCommon.g_oDocumentUrls.addImageUrl(imageUrl, imageUrl);
+                }
+
+                // Create image object
+                var imageObj = AscFormat.DrawingObjectsController.prototype.createImage(
+                  imageUrl, 0, 0, wMm, hMm
+                );
+                if (!imageObj) continue;
+
+                // Create inline drawing
+                var drawing = new AscCommonWord.ParaDrawing(wMm, hMm, null, logicDoc.DrawingDocument, logicDoc, para);
+                drawing.Set_DrawingType(drawing_Inline);
+                drawing.setExtent(wMm, hMm);
+                drawing.Set_GraphicObject(imageObj);
+                imageObj.setParent(drawing);
+
+                // Add image to the ImageManager so it gets loaded
+                if (logicDoc.DrawingDocument && logicDoc.DrawingDocument.m_oWordControl) {
+                  var imgManager = logicDoc.DrawingDocument.m_oWordControl.m_oApi;
+                  if (imgManager && imgManager.ImageLoader) {
+                    imgManager.ImageLoader.LoadImage(imageUrl, 1);
+                  }
+                }
+
+                // Append to end of paragraph (image nodes were skipped in DOCY)
+                var run = new AscCommonWord.ParaRun(para, false);
+                run.AddToContent(0, drawing, false);
+                para.AddToContent(para.Content.length - 1, run);
+              } catch(imgErr) {
+                console.warn('[adapter] Image inject error:', imgErr.message);
+              }
+            }
+          }
+        } catch(imgListErr) {
+          // Image injection is best-effort
+          if (imgListErr.message) console.warn('[adapter] Image list error:', imgListErr.message);
+        }
+
         // Deferred recalculate after fonts load
         setTimeout(function() {
           try {

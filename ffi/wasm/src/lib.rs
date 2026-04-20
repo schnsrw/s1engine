@@ -4521,6 +4521,40 @@ impl WasmDocument {
         Err(JsError::new("Image media not found"))
     }
 
+    /// Get all images in the document as JSON array.
+    /// Each entry: { id, para_index, width, height, data_url }
+    pub fn list_images_json(&self) -> Result<String, JsError> {
+        let doc = self.doc()?;
+        let model = doc.model();
+        let body_id = model.body_id().ok_or_else(|| JsError::new("No body"))?;
+        let body = model.node(body_id).ok_or_else(|| JsError::new("No body node"))?;
+
+        let mut images = Vec::new();
+        for (para_idx, cid) in body.children.iter().enumerate() {
+            if let Some(para) = model.node(*cid) {
+                for (child_idx, kid) in para.children.iter().enumerate() {
+                    if let Some(img) = model.node(*kid) {
+                        if img.node_type != s1_model::NodeType::Image { continue; }
+                        let w = img.attributes.get_f64(&AttributeKey::ImageWidth).unwrap_or(100.0);
+                        let h = img.attributes.get_f64(&AttributeKey::ImageHeight).unwrap_or(100.0);
+                        let data_url = if let Some(AttributeValue::MediaId(mid)) = img.attributes.get(&AttributeKey::ImageMediaId) {
+                            if let Some(item) = model.media().get(*mid) {
+                                let b64 = base64_encode(&item.data);
+                                format!("data:{};base64,{}", item.content_type, b64)
+                            } else { continue; }
+                        } else { continue; };
+
+                        images.push(format!(
+                            r#"{{"para_index":{},"child_index":{},"width":{},"height":{},"data_url":"{}"}}"#,
+                            para_idx, child_idx, w, h, data_url
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(format!("[{}]", images.join(",")))
+    }
+
     /// Set alt text on an image.
     pub fn set_image_alt_text(&mut self, image_id_str: &str, alt: &str) -> Result<(), JsError> {
         let doc = self.doc_mut()?;

@@ -30,6 +30,10 @@ impl DocyWriter {
         &self.buf
     }
 
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        &mut self.buf
+    }
+
     // ── Primitive writes ────────────────────────────────────────
 
     pub fn write_byte(&mut self, v: u8) {
