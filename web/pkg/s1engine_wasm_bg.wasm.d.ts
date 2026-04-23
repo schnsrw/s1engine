@@ -169,6 +169,7 @@ export const wasmdocument_latex_to_omml: (a: number, b: number, c: number) => [n
 export const wasmdocument_layout_revision: (a: number) => [number, number, number];
 export const wasmdocument_layout_single_page_json: (a: number, b: number) => [number, number, number, number];
 export const wasmdocument_line_boundary: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const wasmdocument_list_images_json: (a: number) => [number, number, number, number];
 export const wasmdocument_merge_cells: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const wasmdocument_merge_paragraphs: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const wasmdocument_metadata_author: (a: number) => [number, number, number, number];

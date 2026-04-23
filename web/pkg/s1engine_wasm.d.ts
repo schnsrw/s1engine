@@ -979,6 +979,11 @@ export class WasmDocument {
      */
     line_boundary(position_json: string, side: string): string;
     /**
+     * Get all images in the document as JSON array.
+     * Each entry: { id, para_index, width, height, data_url }
+     */
+    list_images_json(): string;
+    /**
      * Merge cells in a range by setting ColSpan/RowSpan attributes.
      */
     merge_cells(table_id_str: string, start_row: number, start_col: number, end_row: number, end_col: number): void;
@@ -2283,6 +2288,7 @@ export interface InitOutput {
     readonly wasmdocument_layout_revision: (a: number) => [number, number, number];
     readonly wasmdocument_layout_single_page_json: (a: number, b: number) => [number, number, number, number];
     readonly wasmdocument_line_boundary: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly wasmdocument_list_images_json: (a: number) => [number, number, number, number];
     readonly wasmdocument_merge_cells: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly wasmdocument_merge_paragraphs: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly wasmdocument_metadata_author: (a: number) => [number, number, number, number];

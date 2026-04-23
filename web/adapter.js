@@ -69,10 +69,12 @@ export async function openDocx(docxBytes, api) {
         } catch(renderErr) {
           console.warn('[adapter] Render error (non-fatal):', renderErr.message);
         }
-        // Inject images after document loads
+        // Inject images from s1engine model (skipped in DOCY binary).
+        // Pattern matches sdkjs CreateImageFromBinary (wordcopypaste.js:13771).
+        var images = [];
         try {
           var imagesJson = doc.list_images_json();
-          var images = JSON.parse(imagesJson);
+          images = JSON.parse(imagesJson);
           if (images.length > 0 && logicDoc) {
             console.log('[adapter] Injecting', images.length, 'images');
             for (var i = 0; i < images.length; i++) {
@@ -83,50 +85,39 @@ export async function openDocx(docxBytes, api) {
                 var wMm = img.width * 25.4 / 72;
                 var hMm = img.height * 25.4 / 72;
 
-                // Register image with sdkjs image manager
-                var imageUrl = img.data_url;
-                if (AscCommon.g_oDocumentUrls) {
-                  AscCommon.g_oDocumentUrls.addImageUrl(imageUrl, imageUrl);
-                }
+                // Exactly matches CreateImageFromBinary pattern
+                var para_drawing = new AscCommonWord.ParaDrawing(wMm, hMm, null, logicDoc.DrawingDocument, logicDoc, para);
+                var word_image = AscFormat.DrawingObjectsController.prototype.createImage(img.data_url, 0, 0, wMm, hMm);
+                para_drawing.Set_GraphicObject(word_image);
+                word_image.setParent(para_drawing);
 
-                // Create image object
-                var imageObj = AscFormat.DrawingObjectsController.prototype.createImage(
-                  imageUrl, 0, 0, wMm, hMm
-                );
-                if (!imageObj) continue;
-
-                // Create inline drawing
-                var drawing = new AscCommonWord.ParaDrawing(wMm, hMm, null, logicDoc.DrawingDocument, logicDoc, para);
-                drawing.Set_DrawingType(drawing_Inline);
-                drawing.setExtent(wMm, hMm);
-                drawing.Set_GraphicObject(imageObj);
-                imageObj.setParent(drawing);
-
-                // Add image to the ImageManager so it gets loaded
-                if (logicDoc.DrawingDocument && logicDoc.DrawingDocument.m_oWordControl) {
-                  var imgManager = logicDoc.DrawingDocument.m_oWordControl.m_oApi;
-                  if (imgManager && imgManager.ImageLoader) {
-                    imgManager.ImageLoader.LoadImage(imageUrl, 1);
-                  }
-                }
-
-                // Append to end of paragraph (image nodes were skipped in DOCY)
+                // Add via run wrapper (same as buildParagraph pattern)
                 var run = new AscCommonWord.ParaRun(para, false);
-                run.AddToContent(0, drawing, false);
+                run.AddToContent(0, para_drawing, false);
                 para.AddToContent(para.Content.length - 1, run);
+
+                // Register data URL with sdkjs image system so it gets rendered
+                AscCommon.pptx_content_loader.ImageMapChecker[img.data_url] = true;
               } catch(imgErr) {
                 console.warn('[adapter] Image inject error:', imgErr.message);
               }
             }
           }
         } catch(imgListErr) {
-          // Image injection is best-effort
           if (imgListErr.message) console.warn('[adapter] Image list error:', imgListErr.message);
         }
 
-        // Deferred recalculate after fonts load
+        // Deferred: load image data URLs into sdkjs image cache, then recalculate
         setTimeout(function() {
           try {
+            // Load all injected image data URLs into sdkjs image cache
+            if (images && images.length > 0 && api.ImageLoader) {
+              var imageMap = {};
+              for (var k = 0; k < images.length; k++) {
+                imageMap[k] = images[k].data_url;
+              }
+              api.ImageLoader.LoadDocumentImages(imageMap);
+            }
             if (logicDoc) logicDoc.Recalculate();
             api.WordControl.OnResize(true);
           } catch(e) {}
