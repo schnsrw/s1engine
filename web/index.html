@@ -268,6 +268,55 @@
         return _origAddLoadFonts.call(this, name, need_styles);
       };
 
+      // Patch: sdkjs expects XOR-obfuscated .odttf fonts shipped by its
+      // DocumentServer backend — it un-XORs the first 32 bytes on every font
+      // it receives. We serve plain TTFs, so that XOR corrupts our fonts and
+      // FreeType can't open a face (m_pFaceInfo stays null, text renders as
+      // fallback boxes). Replace the loader with a version that skips the XOR.
+      if (window.AscFonts && AscFonts.CFontFileLoader) {
+        AscFonts.CFontFileLoader.prototype.LoadFontArrayBuffer = function(basePath) {
+          var self = this;
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', basePath + this.Id, true);
+          xhr.responseType = 'arraybuffer';
+          xhr.onload = function() {
+            if (xhr.status !== 200) return xhr.onerror();
+            self.Status = 0;
+            self.LoadFontFromData(new Uint8Array(xhr.response));
+            if (self.callback) self.callback();
+            if (self["externalCallback"]) self["externalCallback"]();
+          };
+          xhr.onerror = function() {
+            self.LoadingCounter++;
+            if (self.LoadingCounter < self.GetMaxLoadingCount()) {
+              self.Status = -1;
+              return;
+            }
+            self.Status = 2;
+            window["Asc"]["editor"].sendEvent("asc_onError",
+              Asc.c_oAscError.ID.LoadingFontError, Asc.c_oAscError.Level.Critical);
+          };
+          xhr.send(null);
+        };
+      }
+
+      // Patch: Prevent FlushWord crash when FontId has no loaded face.
+      // GetFontBySymbol can return {Font: null} when a glyph has no registered
+      // font; sdkjs then buffers text with this.FontId = null and FlushWord
+      // dereferences this.FontId.m_pFaceInfo, crashing the layout pass.
+      // Drop the buffer instead so pagination completes and canvas paints.
+      if (window.AscFonts && window.AscFonts.CTextShaper) {
+        var _origFlushWord = AscFonts.CTextShaper.prototype.FlushWord;
+        AscFonts.CTextShaper.prototype.FlushWord = function() {
+          if (this.Buffer && this.Buffer.length > 0 &&
+              (!this.FontId || !this.FontId.m_pFaceInfo)) {
+            this.ClearBuffer();
+            return;
+          }
+          return _origFlushWord.apply(this, arguments);
+        };
+      }
+
       // Patch: Prevent LoadFont crash for missing g_font_infos entries
       var _origLoadFont = AscFonts.g_fontApplication.LoadFont;
       if (_origLoadFont) {

@@ -193,9 +193,9 @@ async fn main() {
                     axum::http::header::HeaderName::from_static("content-security-policy"),
                     axum::http::header::HeaderValue::from_static(
                         "default-src 'self'; \
-                    script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; \
-                    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; \
-                    font-src 'self' https://cdn.jsdelivr.net; \
+                    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; \
+                    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; \
+                    font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; \
                     img-src 'self' data: blob:; \
                     connect-src 'self' ws: wss: http: https:; \
                     worker-src 'self' blob:",

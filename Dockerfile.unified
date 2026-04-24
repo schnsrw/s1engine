@@ -24,48 +24,23 @@ COPY server/ server/
 RUN cargo build --release -p s1-server \
     && strip /app/target/release/s1-server
 
-# Build WASM
+# Build WASM — output into web/pkg/ so adapter.js can import ./pkg/s1engine_wasm.js
 RUN wasm-pack build ffi/wasm --target web --release --out-dir /app/wasm-out
 
-# ─── Stage 2: Build editor frontend ─────────────────────
-FROM node:20-bookworm-slim AS web-builder
+# ─── Stage 2: Generate OnlyOffice sdkjs develop scripts ─
+# scripts.js is a grunt-generated loader that document.write's every sdkjs source
+# file. Without this, web/index.html gets a 404 on .../develop/sdkjs/word/scripts.js.
+FROM node:20-bookworm-slim AS sdkjs-develop
 
-WORKDIR /app/editor
-COPY editor/package.json editor/package-lock.json* ./
-RUN npm ci --ignore-scripts 2>/dev/null || npm install
+WORKDIR /app
+COPY web/onlyoffice-sdkjs/ ./onlyoffice-sdkjs/
 
-COPY editor/ ./
-RUN rm -rf wasm-pkg && mkdir -p wasm-pkg
-COPY --from=rust-builder /app/wasm-out/ ./wasm-pkg/
-
-# Download essential fonts if not present (for high-fidelity rendering)
-RUN mkdir -p public/fonts && \
-    GF="https://github.com/google/fonts/raw/main" && \
-    for f in "ofl/carlito/Carlito-Regular.ttf" "ofl/carlito/Carlito-Bold.ttf" \
-             "ofl/caladea/Caladea-Regular.ttf" "apache/tinos/Tinos-Regular.ttf" \
-             "apache/tinos/Tinos-Bold.ttf" "ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf" \
-             "ofl/roboto/Roboto%5Bwdth%2Cwght%5D.ttf"; do \
-      name=$(basename "$f" | sed 's/%5B[^%]*%5D//g'); \
-      curl -sL "$GF/$f" -o "public/fonts/$name" 2>/dev/null || true; \
-    done
-
-# Build editor with Vite. If it fails, fall back to serving source files directly.
-RUN npx vite build || echo "WARN: Vite build failed, falling back to source files"
-
-# Ensure dist/ exists — if Vite failed, copy source files as fallback
-RUN if [ ! -d dist ]; then \
-      echo "Creating dist/ from source files..."; \
-      mkdir -p dist/src dist/wasm-pkg dist/public; \
-      cp index.html admin.html dist/ 2>/dev/null || true; \
-      cp -r src/ dist/src/; \
-      cp -r wasm-pkg/ dist/wasm-pkg/; \
-      cp -r public/ dist/public/; \
-    fi
+WORKDIR /app/onlyoffice-sdkjs/build
+RUN npm ci && npx grunt develop
 
 # ─── Stage 3: Minimal runtime ───────────────────────────
 FROM debian:bookworm-slim
 
-# Only install curl (for health check) and ca-certificates
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
@@ -73,9 +48,16 @@ RUN apt-get update \
 # Copy stripped server binary (~15MB)
 COPY --from=rust-builder /app/target/release/s1-server /usr/local/bin/s1-server
 
-# Copy editor static files — Vite build output if available, source fallback otherwise
+# Copy static frontend (plain HTML/JS, no build step) and drop freshly-built WASM into pkg/
 RUN mkdir -p /app/public
-COPY --from=web-builder /app/editor/dist/ /app/public/
+COPY web/ /app/public/
+COPY --from=rust-builder /app/wasm-out/ /app/public/pkg/
+# Layer in the grunt-generated sdkjs develop loader (overlays onlyoffice-sdkjs/develop/)
+COPY --from=sdkjs-develop /app/onlyoffice-sdkjs/develop/ /app/public/onlyoffice-sdkjs/develop/
+# AllFonts.js is a fonts registry sdkjs requires but does not ship — supplied from our vendor overlay
+COPY web/vendor-overlays/sdkjs/common/AllFonts.js /app/public/onlyoffice-sdkjs/common/AllFonts.js
+# Font binaries referenced by AllFonts.js, served at /fonts/ as sdkjs Externals expects
+COPY web/vendor-overlays/fonts/ /app/public/fonts/
 
 RUN mkdir -p /data
 

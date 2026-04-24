@@ -1,0 +1,6 @@
+[submodule "web/onlyoffice-sdkjs"]
+	path = web/onlyoffice-sdkjs
+	url = https://github.com/ONLYOFFICE/sdkjs.git
+[submodule "web/onlyoffice-web-apps"]
+	path = web/onlyoffice-web-apps
+	url = https://github.com/ONLYOFFICE/web-apps.git

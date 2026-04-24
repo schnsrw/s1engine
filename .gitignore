@@ -41,3 +41,4 @@ web/fonts/*.ttf
 web/fonts/*.woff2
 web/fonts/*.ttf
 web/pkg/*.wasm
+web/vendor-overlays/fonts/
